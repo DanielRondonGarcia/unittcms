@@ -1,5 +1,7 @@
-import { Textarea, Button, Tooltip, Avatar } from '@heroui/react';
+import { Textarea, Button, Tooltip, Avatar, Select, SelectItem } from '@heroui/react';
 import { Plus, Trash } from 'lucide-react';
+import { gherkinKeywords } from '@/config/selection';
+import type { GherkinKeyword } from '@/types/base';
 import { CaseMessages, StepType } from '@/types/case';
 
 type Props = {
@@ -9,9 +11,18 @@ type Props = {
   onStepPlus: (newStepNo: number) => void;
   onStepDelete: (stepId: number) => void;
   messages: CaseMessages;
+  isGherkin?: boolean;
 };
 
-export default function StepsEditor({ isDisabled, steps, onStepUpdate, onStepPlus, onStepDelete, messages }: Props) {
+export default function StepsEditor({
+  isDisabled,
+  steps,
+  onStepUpdate,
+  onStepPlus,
+  onStepDelete,
+  messages,
+  isGherkin = false,
+}: Props) {
   // sort steps by junction table's column
   const sortedSteps = steps.slice().sort((a, b) => {
     const stepNoA = a.caseSteps.stepNo;
@@ -28,6 +39,28 @@ export default function StepsEditor({ isDisabled, steps, onStepUpdate, onStepPlu
         <div key={index} className="flex items-center my-1">
           <Avatar className="me-2" size="sm" name={step.caseSteps.stepNo.toString()} />
           <div key={step.id} className="grow flex gap-2">
+            {isGherkin && (
+              <Select
+                className="w-1/4"
+                size="sm"
+                variant="bordered"
+                label={messages.step}
+                selectedKeys={step.caseSteps.keyword ? [step.caseSteps.keyword] : []}
+                onSelectionChange={(newSelection) => {
+                  if (newSelection !== 'all' && newSelection.size !== 0) {
+                    const keyword = String(Array.from(newSelection)[0]) as GherkinKeyword;
+                    onStepUpdate(step.id, {
+                      ...step,
+                      caseSteps: { ...step.caseSteps, keyword },
+                    });
+                  }
+                }}
+              >
+                {gherkinKeywords.map((keyword) => (
+                  <SelectItem key={keyword}>{messages[keyword]}</SelectItem>
+                ))}
+              </Select>
+            )}
             <div className="w-1/2">
               <Textarea
                 size="sm"

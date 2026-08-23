@@ -302,6 +302,12 @@
     "search_or_create_tag": "タグを検索または作成",
     "no_tags_selected": "タグが選択されていません"
   },
+  "Gherkin": {
+    "template": "前提 / もし / ならば",
+    "given": "前提",
+    "when": "もし",
+    "then": "ならば"
+  },
   "Runs": {
     "run_list": "テストラン一覧",
     "run": "テストラン",

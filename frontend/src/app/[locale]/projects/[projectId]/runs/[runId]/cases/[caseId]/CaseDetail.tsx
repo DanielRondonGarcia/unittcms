@@ -1,7 +1,7 @@
 'use client';
 
 import { Textarea, Chip } from '@heroui/react';
-import { templates, testTypes } from '@/config/selection';
+import { gherkinTemplate, templates, testTypes } from '@/config/selection';
 import type { CaseType } from '@/types/case';
 import type { RunDetailMessages } from '@/types/run';
 import type { PriorityMessages } from '@/types/priority';
@@ -98,6 +98,9 @@ export default function CaseDetail({
             testCase.Steps.map((step) => (
               <div key={step.id} className="flex gap-2 my-2">
                 <div className="w-1/2">
+                  {testCase.template === gherkinTemplate && step.caseSteps.keyword && (
+                    <p className="font-semibold mb-1">{messages[step.caseSteps.keyword]}</p>
+                  )}
                   <Textarea isReadOnly size="sm" variant="flat" label={messages.detailsOfTheStep} value={step.step} />
                 </div>
                 <div className="w-1/2">

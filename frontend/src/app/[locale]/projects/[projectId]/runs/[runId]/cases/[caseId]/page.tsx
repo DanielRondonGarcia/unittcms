@@ -11,6 +11,7 @@ export default function Page({
 }) {
   const t = useTranslations('Run');
   const ui = useTranslations('UI');
+  const gherkinT = useTranslations('Gherkin');
   const messages: RunDetailMessages = {
     title: t('title'),
     description: t('description'),
@@ -29,6 +30,9 @@ export default function Page({
     historyUnavailable: ui('history_unavailable'),
     historyNotice: ui('history_notice'),
     options: ui('options'),
+    given: gherkinT('given'),
+    when: gherkinT('when'),
+    then: gherkinT('then'),
   };
 
   const pt = useTranslations('Priority');

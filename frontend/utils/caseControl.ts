@@ -2,7 +2,13 @@ import { getFilenameFromContentDisposition } from '@/utils/request';
 import { logError } from '@/utils/errorHandler';
 import Config from '@/config/config';
 const apiServer = Config.apiServer;
-import { CaseType } from '@/types/case';
+import { CaseType, StepType } from '@/types/case';
+import { gherkinKeywords } from '@/config/selection';
+
+export const hasValidGherkinKeywords = (steps: StepType[] = []) =>
+  steps
+    .filter((step) => step.editState !== 'deleted')
+    .every((step) => Boolean(step.caseSteps.keyword && gherkinKeywords.includes(step.caseSteps.keyword)));
 
 async function fetchCase(jwt: string, caseId: number) {
   const url = `${apiServer}/cases/${caseId}`;
@@ -78,7 +84,7 @@ async function fetchCases(
   }
 }
 
-async function createCase(jwt: string, folderId: string, title: string, description: string) {
+async function createCase(jwt: string, folderId: string, title: string, description: string, template = 0) {
   const newCase = {
     title: title,
     state: 0,
@@ -86,7 +92,7 @@ async function createCase(jwt: string, folderId: string, title: string, descript
     type: 0,
     automationStatus: 0,
     description: description,
-    template: 0,
+    template,
     preConditions: '',
     expectedResults: '',
   };

@@ -15,6 +15,8 @@ export async function generateMetadata({ params: { locale } }: { params: { local
 
 export default function Page({ params }: { params: { projectId: string; folderId: string; locale: string } }) {
   const t = useTranslations('Cases');
+  const caseT = useTranslations('Case');
+  const gherkinT = useTranslations('Gherkin');
   const ui = useTranslations('UI');
   const messages = {
     testCaseList: t('test_case_list'),
@@ -68,6 +70,10 @@ export default function Page({ params }: { params: { projectId: string; folderId
     testCaseActions: ui('test_case_actions'),
     exportOptions: ui('export_options'),
     noTestCase: ui('no_test_case'),
+    template: caseT('template'),
+    text: caseT('text'),
+    step: caseT('step'),
+    gherkin: gherkinT('template'),
   };
 
   const priorityTranslation = useTranslations('Priority');

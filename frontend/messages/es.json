@@ -277,7 +277,7 @@
     "test_detail": "Detalles de la prueba",
     "preconditions": "Precondiciones",
     "expected_result": "Resultado esperado",
-    "step": "Paso",
+    "step": "Pasos",
     "text": "Texto",
     "steps": "Pasos",
     "new_step": "Nuevo paso",
@@ -301,6 +301,12 @@
     "error_updating_test_case": "Error al actualizar el caso de prueba",
     "search_or_create_tag": "Buscar o crear etiqueta",
     "no_tags_selected": "No hay etiquetas seleccionadas"
+  },
+  "Gherkin": {
+    "template": "Dado / Cuando / Entonces",
+    "given": "Dado",
+    "when": "Cuando",
+    "then": "Entonces"
   },
   "Runs": {
     "run_list": "Lista de ejecuciones de prueba",

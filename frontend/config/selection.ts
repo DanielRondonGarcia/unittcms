@@ -1,4 +1,4 @@
-import { AutomationStatusType, GlobalRoleType, MemberRoleType, TemplateType } from '@/types/base';
+import { AutomationStatusType, GlobalRoleType, GherkinKeyword, MemberRoleType, TemplateType } from '@/types/base';
 import { RunStatusType, TestRunCaseStatusType } from '@/types/status';
 import { TestTypeType } from '@/types/testType';
 import { PriorityType } from '@/types/priority';
@@ -76,7 +76,9 @@ const automationStatus: AutomationStatusType[] = [
   { uid: 'obsolete' },
 ];
 
-const templates: TemplateType[] = [{ uid: 'text' }, { uid: 'step' }];
+const templates: TemplateType[] = [{ uid: 'text' }, { uid: 'step' }, { uid: 'gherkin' }];
+const gherkinTemplate = 2;
+const gherkinKeywords: GherkinKeyword[] = ['given', 'when', 'then'];
 
 export {
   roles,
@@ -86,6 +88,8 @@ export {
   testTypes,
   automationStatus,
   templates,
+  gherkinTemplate,
+  gherkinKeywords,
   testRunStatus,
   testRunCaseStatus,
 };

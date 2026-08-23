@@ -34,7 +34,7 @@ describe('Locale message keys consistency', () => {
   if (!legacyBase) throw new Error('Legacy base locale not found');
 
   it('keeps the complete 441-key catalog contract', () => {
-    expect(baseKeys).toHaveLength(441);
+    expect(baseKeys).toHaveLength(445);
   });
 
   it(`should have the same keys as ${base.name} in es`, () => {
@@ -47,4 +47,22 @@ describe('Locale message keys consistency', () => {
       expect(localeKeys).toEqual(getAllKeys(legacyBase.data));
     });
   }
+
+  it('keeps the localized Gherkin template and keyword labels exact', () => {
+    const expected = {
+      de: { template: 'Angenommen / Wenn / Dann', given: 'Angenommen', when: 'Wenn', then: 'Dann' },
+      en: { template: 'Given / When / Then', given: 'Given', when: 'When', then: 'Then' },
+      es: { template: 'Dado / Cuando / Entonces', given: 'Dado', when: 'Cuando', then: 'Entonces' },
+      'pt-BR': { template: 'Dado / Quando / Então', given: 'Dado', when: 'Quando', then: 'Então' },
+      'zh-CN': { template: '假如 / 当 / 那么', given: '假如', when: '当', then: '那么' },
+      ja: { template: '前提 / もし / ならば', given: '前提', when: 'もし', then: 'ならば' },
+    };
+
+    for (const locale of locales) {
+      const catalog = locale.data as unknown as { Gherkin: (typeof expected)['en'] };
+      expect(catalog.Gherkin).toEqual(expected[locale.name as keyof typeof expected]);
+    }
+
+    expect(es.Case.step).toBe('Pasos');
+  });
 });

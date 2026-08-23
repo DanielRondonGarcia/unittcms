@@ -302,6 +302,12 @@
     "search_or_create_tag": "Buscar ou criar tag",
     "no_tags_selected": "Nenhuma tag selecionada"
   },
+  "Gherkin": {
+    "template": "Dado / Quando / Então",
+    "given": "Dado",
+    "when": "Quando",
+    "then": "Então"
+  },
   "Runs": {
     "run_list": "Lista de Execuções de Teste",
     "run": "Execução",

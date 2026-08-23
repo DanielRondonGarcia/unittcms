@@ -302,6 +302,12 @@
     "search_or_create_tag": "Tag suchen oder erstellen",
     "no_tags_selected": "Keine Tags ausgewählt"
   },
+  "Gherkin": {
+    "template": "Angenommen / Wenn / Dann",
+    "given": "Angenommen",
+    "when": "Wenn",
+    "then": "Dann"
+  },
   "Runs": {
     "run_list": "Testlauf-Liste",
     "run": "Testlauf",

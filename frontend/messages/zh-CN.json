@@ -302,6 +302,12 @@
     "search_or_create_tag": "搜索或创建标签",
     "no_tags_selected": "未选择标签"
   },
+  "Gherkin": {
+    "template": "假如 / 当 / 那么",
+    "given": "假如",
+    "when": "当",
+    "then": "那么"
+  },
   "Runs": {
     "run_list": "测试运行列表",
     "run": "运行",

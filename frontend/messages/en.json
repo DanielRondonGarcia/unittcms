@@ -302,6 +302,12 @@
     "search_or_create_tag": "Search or create tag",
     "no_tags_selected": "No tags selected"
   },
+  "Gherkin": {
+    "template": "Given / When / Then",
+    "given": "Given",
+    "when": "When",
+    "then": "Then"
+  },
   "Runs": {
     "run_list": "Test Run List",
     "run": "Run",

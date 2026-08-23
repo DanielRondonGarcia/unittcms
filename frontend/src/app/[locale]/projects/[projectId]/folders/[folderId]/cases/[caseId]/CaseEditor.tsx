@@ -7,8 +7,8 @@ import CaseAttachmentsEditor from './CaseAttachmentsEditor';
 import { updateSteps } from './stepControl';
 import { fetchCreateAttachments, fetchDownloadAttachment, fetchDeleteAttachment } from './attachmentControl';
 import CaseTagsEditor from './CaseTagsEditor';
-import { fetchCase, updateCase } from '@/utils/caseControl';
-import { priorities, testTypes, templates } from '@/config/selection';
+import { fetchCase, hasValidGherkinKeywords, updateCase } from '@/utils/caseControl';
+import { gherkinTemplate, priorities, testTypes, templates } from '@/config/selection';
 import { useRouter } from '@/src/i18n/routing';
 import { TokenContext } from '@/utils/TokenProvider';
 import { useFormGuard } from '@/utils/formGuard';
@@ -63,6 +63,7 @@ export default function CaseEditor({
   const [idCounter, setIdCounter] = useState<number>(0);
   const [isDirty, setIsDirty] = useState(false);
   const [selectedTags, setSelectedTags] = useState<{ id: number; name: string }[]>([]);
+  const isGherkin = testCase.template === gherkinTemplate;
 
   const router = useRouter();
   useFormGuard(isDirty, messages.areYouSureLeave);
@@ -82,6 +83,7 @@ export default function CaseEditor({
       updatedAt: new Date(),
       caseSteps: {
         stepNo: newStepNo,
+        keyword: isGherkin ? 'given' : null,
       },
       uid: `uid${nextId}`,
       editState: 'new',
@@ -201,6 +203,7 @@ export default function CaseEditor({
   };
 
   const onStepUpdate = (stepId: number, changeStep: StepType) => {
+    setIsDirty(true);
     if (changeStep.editState === 'notChanged') {
       changeStep.editState = 'changed';
     }
@@ -273,6 +276,15 @@ export default function CaseEditor({
             color="primary"
             isLoading={isUpdating}
             onPress={async () => {
+              if (isGherkin && !hasValidGherkinKeywords(testCase.Steps)) {
+                addToast({
+                  title: messages.errorTitle,
+                  description: messages.errorUpdatingTestCase,
+                  color: 'danger',
+                });
+                return;
+              }
+
               setIsUpdating(true);
               try {
                 await updateCase(tokenContext.token.access_token, testCase);
@@ -399,6 +411,7 @@ export default function CaseEditor({
                 const selectedUid = Array.from(newSelection)[0];
                 const index = templates.findIndex((template) => template.uid === selectedUid);
                 setTestCase({ ...testCase, template: index });
+                setIsDirty(true);
               }
             }}
             label={messages.template}
@@ -461,6 +474,7 @@ export default function CaseEditor({
                 onStepPlus={onPlusClick}
                 onStepDelete={onDeleteClick}
                 messages={messages}
+                isGherkin={isGherkin}
               />
             )}
           </div>

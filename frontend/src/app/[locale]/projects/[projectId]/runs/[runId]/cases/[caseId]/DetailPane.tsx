@@ -63,7 +63,7 @@ export default function TestCaseDetailPane({
       try {
         const data = await fetchCase(context.token.access_token, Number(caseId));
         if (data.Steps && data.Steps.length > 0) {
-          data.Steps.sort((a: StepType, b: StepType) => a.caseSteps.stepNo - b.caseSteps.stepNo);
+          data.Steps = [...data.Steps].sort((a: StepType, b: StepType) => a.caseSteps.stepNo - b.caseSteps.stepNo);
         }
         setTestCase(data);
 

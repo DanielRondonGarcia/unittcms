@@ -12,11 +12,12 @@ import {
   Switch,
 } from '@heroui/react';
 import { CasesMessages } from '@/types/case';
+import { templates } from '@/config/selection';
 
 type Props = {
   isOpen: boolean;
   onCancel: () => void;
-  onSubmit: (title: string, description: string, createMore: boolean) => void;
+  onSubmit: (title: string, description: string, template: number, createMore: boolean) => void;
   messages: CasesMessages;
 };
 
@@ -34,6 +35,7 @@ export default function CaseDialog({ isOpen, onCancel, onSubmit, messages }: Pro
   });
 
   const [createMore, setCreateMore] = useState(false);
+  const [template, setTemplate] = useState(0);
 
   const clear = () => {
     setCaseName({
@@ -46,6 +48,7 @@ export default function CaseDialog({ isOpen, onCancel, onSubmit, messages }: Pro
       text: '',
       errorMessage: '',
     });
+    setTemplate(0);
   };
 
   const validate = () => {
@@ -59,7 +62,7 @@ export default function CaseDialog({ isOpen, onCancel, onSubmit, messages }: Pro
       return;
     }
 
-    onSubmit(caseTitle.text, caseDescription.text, createMore);
+    onSubmit(caseTitle.text, caseDescription.text, template, createMore);
 
     if (!createMore) {
       clear();
@@ -113,6 +116,24 @@ export default function CaseDialog({ isOpen, onCancel, onSubmit, messages }: Pro
               });
             }}
           />
+          <label className="flex flex-col gap-1 text-small text-foreground-500">
+            {messages.template}
+            <select
+              aria-label={messages.template}
+              className="rounded-medium border border-default-200 bg-default-100 px-3 py-2 text-foreground"
+              value={templates[template].uid}
+              onChange={(event) => {
+                const selectedTemplate = templates.findIndex(({ uid }) => uid === event.target.value);
+                if (selectedTemplate >= 0) setTemplate(selectedTemplate);
+              }}
+            >
+              {templates.map((option) => (
+                <option key={option.uid} value={option.uid}>
+                  {messages[option.uid]}
+                </option>
+              ))}
+            </select>
+          </label>
         </ModalBody>
         <ModalFooter>
           <Switch size="sm" isSelected={createMore} onValueChange={setCreateMore}>

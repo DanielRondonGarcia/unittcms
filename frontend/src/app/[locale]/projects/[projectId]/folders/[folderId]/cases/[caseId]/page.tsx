@@ -14,6 +14,7 @@ export default function Page({
   };
 }) {
   const t = useTranslations('Case');
+  const gherkinT = useTranslations('Gherkin');
   const ui = useTranslations('UI');
   const messages = {
     backToCases: t('back_to_cases'),
@@ -55,6 +56,10 @@ export default function Page({
     errorUpdatingTestCase: t('error_updating_test_case'),
     searchOrCreateTag: t('search_or_create_tag'),
     noTagsSelected: t('no_tags_selected'),
+    gherkin: gherkinT('template'),
+    given: gherkinT('given'),
+    when: gherkinT('when'),
+    then: gherkinT('then'),
     successTitle: ui('success'),
     errorTitle: ui('error'),
     warningTitle: ui('warning'),
