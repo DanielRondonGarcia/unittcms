@@ -3,18 +3,35 @@ const router = express.Router();
 import { DataTypes } from 'sequelize';
 import defineStep from '../../models/steps.js';
 import defineCaseStep from '../../models/caseSteps.js';
+import defineCase from '../../models/cases.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
+import { gherkinTemplate, hasValidGherkinKeywords } from '../../config/enums.js';
 
 export default function (sequelize) {
   const Step = defineStep(sequelize, DataTypes);
   const CaseStep = defineCaseStep(sequelize, DataTypes);
+  const Case = defineCase(sequelize, DataTypes);
   const { verifySignedIn } = authMiddleware(sequelize);
   const { verifyProjectDeveloperFromCaseId } = editableMiddleware(sequelize);
 
   router.post('/update', verifySignedIn, verifyProjectDeveloperFromCaseId, async (req, res) => {
     const caseId = req.query.caseId;
     const steps = req.body;
+    const testcase = await Case.findByPk(caseId);
+
+    if (!testcase) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+
+    if (testcase.template === gherkinTemplate && !hasValidGherkinKeywords(steps)) {
+      return res.status(400).json({ error: 'Gherkin steps require given, when, or then keywords' });
+    }
+
+    if (!Array.isArray(steps)) {
+      return res.status(400).json({ error: 'Steps must be an array' });
+    }
+
     const t = await sequelize.transaction();
 
     const createStep = async (step) => {
@@ -30,6 +47,7 @@ export default function (sequelize) {
           caseId: caseId,
           stepId: newStep.id,
           stepNo: step.caseSteps.stepNo,
+          keyword: step.caseSteps.keyword ?? null,
         },
         { transaction: t }
       );
@@ -56,6 +74,7 @@ export default function (sequelize) {
       await CaseStep.update(
         {
           stepNo: step.caseSteps.stepNo,
+          keyword: step.caseSteps.keyword ?? null,
         },
         {
           where: { stepId: step.id },

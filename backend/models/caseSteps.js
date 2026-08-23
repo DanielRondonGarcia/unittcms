@@ -12,6 +12,10 @@ function defineCaseStep(sequelize, DataTypes) {
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    keyword: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   });
 
   CaseStep.associate = (models) => {

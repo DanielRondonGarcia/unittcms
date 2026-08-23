@@ -4,6 +4,7 @@ import { DataTypes } from 'sequelize';
 import defineCase from '../../models/cases.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
+import { gherkinTemplate, hasValidGherkinKeywords } from '../../config/enums.js';
 
 export default function (sequelize) {
   const { verifySignedIn } = authMiddleware(sequelize);
@@ -19,7 +20,15 @@ export default function (sequelize) {
         return res.status(404).send('Case not found');
       }
 
-      if (updateCase.Steps) {
+      if (
+        (updateCase.template ?? testcase.template) === gherkinTemplate &&
+        updateCase.Steps !== undefined &&
+        !hasValidGherkinKeywords(updateCase.Steps)
+      ) {
+        return res.status(400).json({ error: 'Gherkin steps require given, when, or then keywords' });
+      }
+
+      if (updateCase.Steps !== undefined) {
         delete updateCase.Steps;
       }
 

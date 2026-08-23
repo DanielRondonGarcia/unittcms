@@ -1,3 +1,5 @@
+import type { GherkinKeyword } from './base';
+
 type RunType = {
   id: number;
   name: string;
@@ -19,6 +21,11 @@ type RunCaseType = {
   createdAt: string;
   updatedAt: string;
   assigneeUserId: number | null;
+};
+
+type RunCaseStepType = {
+  stepNo: number;
+  keyword?: GherkinKeyword | null;
 };
 
 type RunStatusCountType = {
@@ -134,11 +141,15 @@ type RunDetailMessages = {
   historyUnavailable: string;
   historyNotice: string;
   options: string;
+  given: string;
+  when: string;
+  then: string;
 };
 
 export type {
   RunType,
   RunCaseType,
+  RunCaseStepType,
   RunStatusCountType,
   ProgressSeriesType,
   RunsMessages,

@@ -27,7 +27,7 @@ export default function (sequelize) {
     try {
       const caseRecords = await Case.findAll({
         where: { id: caseIds },
-        include: [{ model: Step, through: { attributes: ['stepNo'] } }],
+        include: [{ model: Step, through: { attributes: ['stepNo', 'keyword'] } }],
       });
 
       if (caseRecords.length !== caseIds.length) {
@@ -58,6 +58,7 @@ export default function (sequelize) {
               caseId: newCase.id,
               stepId: step.id,
               stepNo: clonedSteps[index].caseSteps.stepNo,
+              keyword: clonedSteps[index].caseSteps.keyword ?? null,
             }));
 
             await CaseStep.bulkCreate(newCaseSteps, { transaction: t });

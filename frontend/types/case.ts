@@ -1,3 +1,5 @@
+import type { GherkinKeyword } from './base';
+
 type CaseType = {
   id: number;
   title: string;
@@ -25,6 +27,7 @@ type CaseStepType = {
   CaseId?: number;
   StepId?: number;
   stepNo: number;
+  keyword?: GherkinKeyword | null;
 };
 
 type StepType = {
@@ -117,6 +120,10 @@ type CasesMessages = {
   testCaseActions: string;
   exportOptions: string;
   noTestCase: string;
+  template: string;
+  text: string;
+  step: string;
+  gherkin: string;
 };
 
 type CaseMessages = {
@@ -163,6 +170,10 @@ type CaseMessages = {
   errorTitle: string;
   warningTitle: string;
   errorFetchingTags: string;
+  gherkin: string;
+  given: string;
+  when: string;
+  then: string;
 };
 
-export type { CaseType, StepType, AttachmentType, CasesMessages, CaseMessages };
+export type { CaseType, CaseStepType, StepType, AttachmentType, CasesMessages, CaseMessages };

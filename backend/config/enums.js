@@ -32,5 +32,21 @@ const automationStatus = ['automated', 'automation-not-required', 'cannot-be-aut
 
 // Templates
 const templates = ['text', 'step'];
+const gherkinKeywords = ['given', 'when', 'then'];
+const gherkinTemplate = 2;
 
-export { testRunCaseStatus, testRunStatus, priorities, testTypes, automationStatus, templates };
+const hasValidGherkinKeywords = (steps) =>
+  Array.isArray(steps) &&
+  steps.every((step) => step?.editState === 'deleted' || gherkinKeywords.includes(step?.caseSteps?.keyword));
+
+export {
+  testRunCaseStatus,
+  testRunStatus,
+  priorities,
+  testTypes,
+  automationStatus,
+  templates,
+  gherkinKeywords,
+  gherkinTemplate,
+  hasValidGherkinKeywords,
+};

@@ -2,8 +2,11 @@ import express from 'express';
 const router = express.Router();
 import { DataTypes } from 'sequelize';
 import defineCase from '../../models/cases.js';
+import defineStep from '../../models/steps.js';
+import defineCaseStep from '../../models/caseSteps.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
+import { gherkinKeywords, gherkinTemplate } from '../../config/enums.js';
 
 const requiredFields = ['title', 'state', 'priority', 'type', 'automationStatus', 'template'];
 
@@ -19,6 +22,8 @@ export default function (sequelize) {
   const { verifySignedIn } = authMiddleware(sequelize);
   const { verifyProjectDeveloperFromFolderId } = editableMiddleware(sequelize);
   const Case = defineCase(sequelize, DataTypes);
+  const Step = defineStep(sequelize, DataTypes);
+  const CaseStep = defineCaseStep(sequelize, DataTypes);
 
   router.post('/', verifySignedIn, verifyProjectDeveloperFromFolderId, async (req, res) => {
     const folderId = req.query.folderId;
@@ -37,7 +42,7 @@ export default function (sequelize) {
       const { title, state, priority, type, automationStatus, description, template, preConditions, expectedResults } =
         req.body;
 
-      const newCase = await Case.create({
+      const caseAttributes = {
         title,
         state,
         priority,
@@ -48,7 +53,22 @@ export default function (sequelize) {
         preConditions,
         expectedResults,
         folderId,
-      });
+      };
+
+      const newCase =
+        template === gherkinTemplate
+          ? await sequelize.transaction(async (transaction) => {
+              const createdCase = await Case.create(caseAttributes, { transaction });
+              for (const [index, keyword] of gherkinKeywords.entries()) {
+                const step = await Step.create({ step: '', result: '' }, { transaction });
+                await CaseStep.create(
+                  { caseId: createdCase.id, stepId: step.id, stepNo: index + 1, keyword },
+                  { transaction }
+                );
+              }
+              return createdCase;
+            })
+          : await Case.create(caseAttributes);
 
       res.json(newCase);
     } catch (error) {
