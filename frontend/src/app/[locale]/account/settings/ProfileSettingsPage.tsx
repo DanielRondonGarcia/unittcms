@@ -39,6 +39,10 @@ type ProfileSettingsPageMessages = {
   passwordNotMatch: string;
   usernameEmpty: string;
   invalidLocale: string;
+  successTitle: string;
+  warningTitle: string;
+  errorTitle: string;
+  changeLocaleAria: string;
 };
 
 type Props = {
@@ -66,7 +70,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
   const handleUsernameUpdate = async () => {
     if (!username.trim()) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         color: 'warning',
         description: messages.usernameEmpty,
       });
@@ -86,7 +90,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
         context.storeTokenToLocalStorage(newToken);
 
         addToast({
-          title: 'Success',
+          title: messages.successTitle,
           color: 'success',
           description: messages.usernameUpdated,
         });
@@ -95,7 +99,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
     } catch (error) {
       logError('Error updating username:', error);
       addToast({
-        title: 'Error',
+        title: messages.errorTitle,
         color: 'danger',
         description: messages.updateError,
       });
@@ -107,7 +111,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
   const handlePasswordUpdate = async () => {
     if (!currentPassword || !newPassword) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         color: 'warning',
         description: messages.updateError,
       });
@@ -116,7 +120,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
 
     if (newPassword.length < 8) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         color: 'warning',
         description: messages.invalidPassword,
       });
@@ -125,7 +129,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
 
     if (newPassword !== confirmPassword) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         color: 'warning',
         description: messages.passwordNotMatch,
       });
@@ -136,7 +140,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
     try {
       await updatePassword(context.token.access_token, currentPassword, newPassword);
       addToast({
-        title: 'Success',
+        title: messages.successTitle,
         color: 'success',
         description: messages.passwordUpdated,
       });
@@ -148,13 +152,13 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
       const errorMessage = error instanceof Error ? error.message : messages.updateError;
       if (errorMessage.includes('incorrect')) {
         addToast({
-          title: 'Error',
+          title: messages.errorTitle,
           color: 'danger',
           description: messages.currentPasswordIncorrect,
         });
       } else {
         addToast({
-          title: 'Error',
+          title: messages.errorTitle,
           color: 'danger',
           description: messages.updateError,
         });
@@ -167,7 +171,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
   const handleLocaleUpdate = async () => {
     if (!locales.some((l) => l.code === locale)) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         color: 'warning',
         description: messages.invalidLocale,
       });
@@ -187,7 +191,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
         context.storeTokenToLocalStorage(newToken);
 
         addToast({
-          title: 'Success',
+          title: messages.successTitle,
           color: 'success',
           description: messages.localeUpdated,
         });
@@ -198,7 +202,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
     } catch (error) {
       logError('Error updating locale:', error);
       addToast({
-        title: 'Error',
+        title: messages.errorTitle,
         color: 'danger',
         description: messages.updateError,
       });
@@ -218,7 +222,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
     // Validate file type
     if (!file.type.startsWith('image/')) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         color: 'warning',
         description: messages.onlyImagesAllowed,
       });
@@ -228,7 +232,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
     // Validate file size (5MB)
     if (file.size > 5 * 1024 * 1024) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         color: 'warning',
         description: messages.maxFileSize5mb,
       });
@@ -246,7 +250,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
         context.setToken(newToken);
         context.storeTokenToLocalStorage(newToken);
         addToast({
-          title: 'Success',
+          title: messages.successTitle,
           color: 'success',
           description: messages.avatarUpdated,
         });
@@ -254,7 +258,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
     } catch (error) {
       logError('Error uploading avatar:', error);
       addToast({
-        title: 'Error',
+        title: messages.errorTitle,
         color: 'danger',
         description: messages.updateError,
       });
@@ -279,7 +283,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
         context.setToken(newToken);
         context.storeTokenToLocalStorage(newToken);
         addToast({
-          title: 'Success',
+          title: messages.successTitle,
           color: 'success',
           description: messages.avatarRemoved,
         });
@@ -287,7 +291,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
     } catch (error) {
       logError('Error removing avatar:', error);
       addToast({
-        title: 'Error',
+        title: messages.errorTitle,
         color: 'danger',
         description: messages.updateError,
       });
@@ -405,7 +409,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
             <div className="space-y-4">
               <Select<LocaleType>
                 fullWidth
-                aria-label="change locale"
+                aria-label={messages.changeLocaleAria}
                 selectedKeys={[locale]}
                 disabledKeys={[locale]}
                 onSelectionChange={(value) => {

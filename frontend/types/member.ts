@@ -18,4 +18,7 @@ export type MembersMessages = {
   memberAdded: string;
   roleChanged: string;
   memberDeleted: string;
+  successTitle: string;
+  roleActions: string;
+  usersTable: string;
 };

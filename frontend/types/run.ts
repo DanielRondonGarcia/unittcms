@@ -51,6 +51,8 @@ type RunsMessages = {
   noRunsFound: string;
   areYouSure: string;
   delete: string;
+  actionsAria: string;
+  tableAria: string;
 };
 
 type RunMessages = {
@@ -99,6 +101,19 @@ type RunMessages = {
   filterByAssignee: string;
   selectAssignee: string;
   searchAssignee: string;
+  successTitle: string;
+  errorTitle: string;
+  saveError: string;
+  exportOptions: string;
+  testCaseActions: string;
+  testCaseSelectActions: string;
+  includeExcludeActions: string;
+  testCasesTable: string;
+  statusFilterAria: string;
+  tagFilterAria: string;
+  assigneeFilterAria: string;
+  selectAssigneeAria: string;
+  errorFetchingTags: string;
 };
 
 type RunDetailMessages = {
@@ -115,6 +130,10 @@ type RunDetailMessages = {
   caseDetail: string;
   comments: string;
   history: string;
+  loading: string;
+  historyUnavailable: string;
+  historyNotice: string;
+  options: string;
 };
 
 export type {

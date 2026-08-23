@@ -54,14 +54,14 @@ export default function Comments({ projectId, commentableType, commentableId, me
       setComments(updatedComments);
       setNewComment('');
       addToast({
-        title: 'Success',
+        title: messages.success,
         color: 'success',
         description: messages.commentAdded,
       });
     } catch (error: unknown) {
       logError('Error adding comment', error);
       addToast({
-        title: 'Error',
+        title: messages.error,
         color: 'danger',
         description: messages.failedToAddComment,
       });
@@ -93,14 +93,14 @@ export default function Comments({ projectId, commentableType, commentableId, me
       setEditingId(null);
       setEditContent('');
       addToast({
-        title: 'Success',
+        title: messages.success,
         color: 'success',
         description: messages.commentUpdated,
       });
     } catch (error: unknown) {
       logError('Error updating comment', error);
       addToast({
-        title: 'Error',
+        title: messages.error,
         color: 'danger',
         description: messages.failedToUpdateComment,
       });
@@ -116,14 +116,14 @@ export default function Comments({ projectId, commentableType, commentableId, me
       const updatedComments = comments.filter((c) => c.id !== id);
       setComments(updatedComments);
       addToast({
-        title: 'Success',
+        title: messages.success,
         color: 'success',
         description: messages.commentDeleted,
       });
     } catch (error: unknown) {
       logError('Error deleting comment', error);
       addToast({
-        title: 'Error',
+        title: messages.error,
         color: 'danger',
         description: messages.failedToDeleteComment,
       });
@@ -135,7 +135,11 @@ export default function Comments({ projectId, commentableType, commentableId, me
   if (!commentableType || !commentableId) {
     return (
       <div className="text-default-500 text-sm">
-        {commentableType === 'RunCase' && !commentableId ? <p>{messages.notIncludedInRun}</p> : <p>Unknown state</p>}
+        {commentableType === 'RunCase' && !commentableId ? (
+          <p>{messages.notIncludedInRun}</p>
+        ) : (
+          <p>{messages.unknownState}</p>
+        )}
       </div>
     );
   }

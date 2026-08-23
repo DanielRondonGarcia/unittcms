@@ -75,7 +75,9 @@ export default function CaseImportDialog({ isOpen, folderId, isDisabled, onImpor
               </a>
             </div>
           </div>
-          {importError && <Alert color="danger" className="mt-1" title="error" description={importError} />}
+          {importError && (
+            <Alert color="danger" className="mt-1" title={messages.errorTitle} description={importError} />
+          )}
           <div
             className="flex items-center justify-center w-full mt-3"
             onDrop={(event) => {

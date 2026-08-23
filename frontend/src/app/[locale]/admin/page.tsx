@@ -15,6 +15,8 @@ export async function generateMetadata({ params: { locale } }: { params: { local
 
 export default function Page({ params }: PageType) {
   const t = useTranslations('Admin');
+  const authT = useTranslations('Auth');
+  const ui = useTranslations('UI');
   const messages: AdminMessages = {
     userManagement: t('user_management'),
     avatar: t('avatar'),
@@ -36,6 +38,15 @@ export default function Page({ params }: PageType) {
     reset: t('reset'),
     invalidPassword: t('invalid_password'),
     passwordNotMatch: t('password_not_match'),
+    newPassword: authT('new_password'),
+    confirmNewPassword: authT('confirm_new_password'),
+    passwordUpdated: authT('password_updated'),
+    successTitle: ui('success'),
+    errorTitle: ui('error'),
+    passwordUpdatedTitle: ui('password_updated'),
+    roleActions: ui('role_actions'),
+    resetActions: ui('static_actions'),
+    usersTable: ui('users_table'),
   };
 
   return (

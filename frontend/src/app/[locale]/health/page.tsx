@@ -15,6 +15,7 @@ export async function generateMetadata({ params: { locale } }: { params: { local
 
 export default function Page({ params }: PageType) {
   const t = useTranslations('Health');
+  const ui = useTranslations('UI');
   const messages: HealthMessages = {
     health_check: t('health_check'),
     status: t('status'),
@@ -22,6 +23,9 @@ export default function Page({ params }: PageType) {
     error: t('error'),
     api_server: t('api_server'),
     unittcms_version: t('unittcms_version'),
+    loading: ui('loading'),
+    apiServerStatus: ui('api_server_status'),
+    healthColumn: ui('health_column'),
   };
 
   return (

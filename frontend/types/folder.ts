@@ -24,6 +24,7 @@ export type FoldersMessages = {
   pleaseEnter: string;
   delete: string;
   areYouSure: string;
+  actionsAria: string;
 };
 
 export type TreeNodeData = {

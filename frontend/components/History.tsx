@@ -2,11 +2,17 @@
 
 import { Alert } from '@heroui/react';
 
-export default function History() {
+type HistoryMessages = {
+  history: string;
+  noticeTitle: string;
+  unavailable: string;
+};
+
+export default function History({ messages }: { messages: HistoryMessages }) {
   return (
     <div className="h-full text-default-500">
       <div className="mb-4">
-        <Alert color="secondary" title="Sorry" description={'History function will be implemented'} />
+        <Alert color="secondary" title={messages.noticeTitle} description={messages.unavailable} />
       </div>
     </div>
   );

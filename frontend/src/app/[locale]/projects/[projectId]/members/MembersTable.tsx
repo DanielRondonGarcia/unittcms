@@ -69,7 +69,7 @@ export default function MembersTable({ members, isDisabled, onChangeRole, onDele
                 <span className="w-12">{messages[memberRoles[cellValue as number].uid]}</span>
               </Button>
             </DropdownTrigger>
-            <DropdownMenu aria-label="test case actions">
+            <DropdownMenu aria-label={messages.roleActions}>
               {memberRoles.map((role, index) => (
                 <DropdownItem key={index} onPress={() => onChangeRole(member.User, index)}>
                   {messages[role.uid]}
@@ -122,7 +122,7 @@ export default function MembersTable({ members, isDisabled, onChangeRole, onDele
     <>
       <Table
         isCompact
-        aria-label="Users table"
+        aria-label={messages.usersTable}
         classNames={classNames}
         sortDescriptor={sortDescriptor}
         onSortChange={setSortDescriptor}

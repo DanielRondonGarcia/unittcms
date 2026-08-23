@@ -10,6 +10,7 @@ type Props = {
 
 export default function MainTitle({ locale }: Props) {
   const t = useTranslations('Index');
+  const ui = useTranslations('UI');
 
   return (
     <div className="md:text-left text-center">
@@ -42,7 +43,7 @@ export default function MainTitle({ locale }: Props) {
           as={NextUiLink}
           isExternal
           href="https://kimatata.github.io/unittcms/docs/getstarted/selfhost"
-          aria-label="docs"
+          aria-label={ui('docs')}
           color="primary"
           variant="bordered"
           radius="full"
@@ -56,7 +57,7 @@ export default function MainTitle({ locale }: Props) {
           as={NextUiLink}
           isExternal
           href="https://github.com/kimatata/unittcms"
-          aria-label="Github"
+          aria-label={ui('github')}
           color="primary"
           variant="bordered"
           radius="full"

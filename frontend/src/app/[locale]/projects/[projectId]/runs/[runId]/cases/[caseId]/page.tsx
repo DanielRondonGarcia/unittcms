@@ -10,6 +10,7 @@ export default function Page({
   params: { projectId: string; runId: string; caseId: string; locale: string };
 }) {
   const t = useTranslations('Run');
+  const ui = useTranslations('UI');
   const messages: RunDetailMessages = {
     title: t('title'),
     description: t('description'),
@@ -24,6 +25,10 @@ export default function Page({
     caseDetail: t('case_detail'),
     comments: t('comments'),
     history: t('history'),
+    loading: ui('loading_lowercase'),
+    historyUnavailable: ui('history_unavailable'),
+    historyNotice: ui('history_notice'),
+    options: ui('options'),
   };
 
   const pt = useTranslations('Priority');
@@ -66,6 +71,11 @@ export default function Page({
     failedToUpdateComment: ct('failed_to_update_comment'),
     commentDeleted: ct('comment_deleted'),
     failedToDeleteComment: ct('failed_to_delete_comment'),
+    editComment: ui('edit_comment'),
+    deleteComment: ui('delete_comment'),
+    unknownState: ui('unknown_state'),
+    success: ui('success'),
+    error: ui('error'),
   };
 
   return (

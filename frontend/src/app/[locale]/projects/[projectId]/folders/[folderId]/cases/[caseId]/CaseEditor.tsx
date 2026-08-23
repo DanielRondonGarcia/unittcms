@@ -284,7 +284,7 @@ export default function CaseEditor({
                 await updateCaseTags(tokenContext.token.access_token, Number(caseId), tagIds, projectId);
 
                 addToast({
-                  title: 'Success',
+                  title: messages.successTitle,
                   color: 'success',
                   description: messages.updatedTestCase,
                 });
@@ -292,7 +292,7 @@ export default function CaseEditor({
               } catch (error) {
                 logError('Error updating test case', error);
                 addToast({
-                  title: 'Error',
+                  title: messages.errorTitle,
                   description: messages.errorUpdatingTestCase,
                   color: 'danger',
                 });

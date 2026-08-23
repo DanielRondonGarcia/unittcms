@@ -37,6 +37,7 @@ export type ProjectsMessages = {
   detail: string;
   lastUpdate: string;
   noProjectsFound: string;
+  tableAria: string;
 };
 
 export type ProjectMessages = {

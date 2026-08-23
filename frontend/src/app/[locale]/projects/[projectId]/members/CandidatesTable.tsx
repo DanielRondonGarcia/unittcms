@@ -63,7 +63,7 @@ export default function MembersTable({ candidates, onAddPress, messages }: Props
 
   return (
     <>
-      <Table isCompact aria-label="Users table" classNames={classNames}>
+      <Table isCompact aria-label={messages.usersTable} classNames={classNames}>
         <TableHeader columns={headerColumns}>
           {(column) => (
             <TableColumn

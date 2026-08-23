@@ -91,6 +91,15 @@ export type AdminMessages = {
   reset: string;
   invalidPassword: string;
   passwordNotMatch: string;
+  newPassword: string;
+  confirmNewPassword: string;
+  passwordUpdated: string;
+  successTitle: string;
+  errorTitle: string;
+  passwordUpdatedTitle: string;
+  roleActions: string;
+  resetActions: string;
+  usersTable: string;
 };
 
 export type AccountDropDownMessages = {
@@ -99,6 +108,8 @@ export type AccountDropDownMessages = {
   signUp: string;
   signIn: string;
   signOut: string;
+  accountActionsSignedIn: string;
+  accountActionsSignedOut: string;
 };
 
 export type MemberType = {

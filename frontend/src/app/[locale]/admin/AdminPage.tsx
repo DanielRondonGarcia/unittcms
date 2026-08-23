@@ -85,7 +85,7 @@ export default function AdminPage({ messages, locale }: Props) {
       const data = await updateUserRole(tokenContext.token.access_token, userEdit.id, role);
       if (data.user) {
         addToast({
-          title: 'Success',
+          title: messages.successTitle,
           color: 'success',
           description: messages.roleChanged,
         });
@@ -108,7 +108,7 @@ export default function AdminPage({ messages, locale }: Props) {
 
       if (data && data.user) {
         addToast({
-          title: 'Success',
+          title: messages.successTitle,
           color: 'success',
           description: messages.lostAdminAuth,
         });
@@ -116,7 +116,7 @@ export default function AdminPage({ messages, locale }: Props) {
       } else {
         setIsConfirmDialogOpen(false);
         addToast({
-          title: 'Error',
+          title: messages.errorTitle,
           color: 'danger',
           description: messages.atLeast,
         });
@@ -139,7 +139,7 @@ export default function AdminPage({ messages, locale }: Props) {
 
     try {
       await adminResetPassword(tokenContext.token.access_token, resetTarget.id, newPassword);
-      addToast({ title: 'Success', color: 'success', description: 'Password updated' });
+      addToast({ title: messages.passwordUpdatedTitle, color: 'success', description: messages.passwordUpdated });
       setResetTarget(null);
     } catch (error: unknown) {
       logError('Failed to reset password', error);

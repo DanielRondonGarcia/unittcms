@@ -285,7 +285,7 @@ export default function RunEditor({
       await initTestCases();
 
       addToast({
-        title: 'Success',
+        title: messages.successTitle,
         color: 'success',
         description: messages.updatedTestRun,
       });
@@ -293,9 +293,9 @@ export default function RunEditor({
     } catch (error) {
       logError('Error saving run:', error);
       addToast({
-        title: 'Error',
+        title: messages.errorTitle,
         color: 'danger',
-        description: 'Failed to save run. Please try again.',
+        description: messages.saveError,
       });
     } finally {
       setIsUpdating(false);
@@ -311,7 +311,7 @@ export default function RunEditor({
   const onFilterChange = async (search: string, status: number[], tag: number[], assignee?: string) => {
     if (isDirty) {
       addToast({
-        title: 'Error',
+        title: messages.errorTitle,
         color: 'danger',
         description: messages.pleaseSave,
       });
@@ -394,7 +394,7 @@ export default function RunEditor({
                 {messages.export}
               </Button>
             </DropdownTrigger>
-            <DropdownMenu disallowEmptySelection aria-label="Export options">
+            <DropdownMenu disallowEmptySelection aria-label={messages.exportOptions}>
               <DropdownItem
                 key="xml"
                 startContent={<FileCode size={16} />}
@@ -522,6 +522,7 @@ export default function RunEditor({
                     members={members}
                     isDisabled={false}
                     unassignedLabel={messages.unassigned}
+                    selectLabel={messages.selectAssigneeAria}
                     searchPlaceholder={messages.searchAssignee}
                     triggerLabel={messages.assignSelected}
                     onAssign={(userId) => handleBulkAssignCases(userId)}
@@ -538,7 +539,7 @@ export default function RunEditor({
                       {messages.testCaseSelection}
                     </Button>
                   </DropdownTrigger>
-                  <DropdownMenu aria-label="test case select actions">
+                  <DropdownMenu aria-label={messages.testCaseSelectActions}>
                     <DropdownItem
                       key="include"
                       startContent={<CopyPlus size={16} />}

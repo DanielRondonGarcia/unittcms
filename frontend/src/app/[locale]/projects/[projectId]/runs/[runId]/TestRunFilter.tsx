@@ -62,11 +62,11 @@ export default function TestRunFilter({
         setTags(tagsResponse);
       } catch (error) {
         logError('Error fetching case tags', error);
-        addToast({ title: 'Error', description: 'Error fetching tags', color: 'danger' });
+        addToast({ title: messages.errorTitle, description: messages.errorFetchingTags, color: 'danger' });
       }
     };
     fetchDataEffect();
-  }, [projectId, tokenContext.token.access_token]);
+  }, [messages.errorFetchingTags, messages.errorTitle, projectId, tokenContext.token.access_token]);
 
   useEffect(() => {
     setSearch(activeSearchFilter || '');
@@ -163,7 +163,7 @@ export default function TestRunFilter({
               </Button>
             </DropdownTrigger>
             <DropdownMenu
-              aria-label="Status filter"
+              aria-label={messages.statusFilterAria}
               selectionMode="multiple"
               selectedKeys={selectedStatuses}
               onSelectionChange={handleStatusSelectionChange}
@@ -194,7 +194,7 @@ export default function TestRunFilter({
             </DropdownTrigger>
             <DropdownMenu
               className="max-h-[50vh] overflow-y-auto"
-              aria-label="Tag filter"
+              aria-label={messages.tagFilterAria}
               selectionMode="multiple"
               selectedKeys={selectedTags}
               onSelectionChange={setSelectedTags}
@@ -217,7 +217,7 @@ export default function TestRunFilter({
               </Button>
             </DropdownTrigger>
             <DropdownMenu
-              aria-label="Assignee filter"
+              aria-label={messages.assigneeFilterAria}
               selectionMode="single"
               selectedKeys={selectedAssignee ? new Set([selectedAssignee]) : new Set([])}
               onSelectionChange={(keys) => {

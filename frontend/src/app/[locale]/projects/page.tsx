@@ -6,6 +6,7 @@ import { ProjectDialogMessages, ProjectsMessages } from '@/types/project';
 
 export default function Page({ params }: PageType) {
   const t = useTranslations('Projects');
+  const ui = useTranslations('UI');
   const messages: ProjectsMessages = {
     projectList: t('project_list'),
     newProject: t('new_project'),
@@ -17,6 +18,7 @@ export default function Page({ params }: PageType) {
     detail: t('detail'),
     lastUpdate: t('last_update'),
     noProjectsFound: t('no_projects_found'),
+    tableAria: ui('projects_table'),
   };
 
   const pt = useTranslations('ProjectDialog');

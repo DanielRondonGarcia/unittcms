@@ -15,6 +15,7 @@ export async function generateMetadata({ params: { locale } }: { params: { local
 
 export default function Page({ params }: { params: { projectId: string; folderId: string; locale: string } }) {
   const t = useTranslations('Cases');
+  const ui = useTranslations('UI');
   const messages = {
     testCaseList: t('test_case_list'),
     id: t('id'),
@@ -58,6 +59,15 @@ export default function Page({ params }: { params: { projectId: string; folderId
     maxFileSize: t('max_file_size'),
     casesImported: t('cases_imported'),
     createMore: t('create_more'),
+    successTitle: ui('success'),
+    errorTitle: ui('error'),
+    errorFetchingTags: ui('error_fetching_tags'),
+    priorityFilter: ui('priority_filter'),
+    typeFilter: ui('type_filter'),
+    tagFilter: ui('tag_filter'),
+    testCaseActions: ui('test_case_actions'),
+    exportOptions: ui('export_options'),
+    noTestCase: ui('no_test_case'),
   };
 
   const priorityTranslation = useTranslations('Priority');

@@ -5,4 +5,7 @@ export type HealthMessages = {
   error: string;
   api_server: string;
   unittcms_version: string;
+  loading: string;
+  apiServerStatus: string;
+  healthColumn: string;
 };

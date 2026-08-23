@@ -74,6 +74,13 @@ describe('User Locale Routes', () => {
     expect(response.body.user.locale).toBe(newLocale);
   });
 
+  it('should accept Spanish locale', async () => {
+    const response = await request(app).put('/users/locale').send({ locale: 'es' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.user.locale).toBe('es');
+  });
+
   it('should replace existing locale', async () => {
     mockUsers.set(1, {
       locale: SUPPORTED_LOCALES[0],
@@ -88,5 +95,17 @@ describe('User Locale Routes', () => {
     const response = await request(app).put('/users/locale').send({ locale });
 
     expect(response.status).toBe(400);
+  });
+
+  it.each([
+    ['missing', {}],
+    ['unsupported', { locale: 'fr' }],
+  ])('should not mutate the stored locale for a %s value', async (_description, body) => {
+    mockUsers.get(1).locale = 'en';
+    const previousLocale = mockUsers.get(1).locale;
+    const response = await request(app).put('/users/locale').send(body);
+
+    expect(response.status).toBe(400);
+    expect(mockUsers.get(1).locale).toBe(previousLocale);
   });
 });

@@ -200,7 +200,7 @@ export default function TestCaseSelector({
                 {isIncluded ? <RunCaseStatus uid={testRunCaseStatus[runStatus].uid} /> : '-'}
               </Button>
             </DropdownTrigger>
-            <DropdownMenu disabledKeys={disabledStatusKeys} aria-label="test case actions">
+            <DropdownMenu disabledKeys={disabledStatusKeys} aria-label={messages.testCaseActions}>
               {testRunCaseStatus.map((runCaseStatus, index) => (
                 <DropdownItem
                   key={runCaseStatus.uid}
@@ -227,6 +227,7 @@ export default function TestCaseSelector({
             members={members}
             isDisabled={!isManager}
             unassignedLabel={messages.unassigned}
+            selectLabel={messages.selectAssigneeAria}
             searchPlaceholder={messages.searchAssignee}
             onAssign={(userId) => onAssignCase(runCaseId, userId)}
           />
@@ -258,7 +259,7 @@ export default function TestCaseSelector({
                 <MoreVertical size={16} />
               </Button>
             </DropdownTrigger>
-            <DropdownMenu disabledKeys={disabledIncludeExcludeKeys} aria-label="include or exclude actions">
+            <DropdownMenu disabledKeys={disabledIncludeExcludeKeys} aria-label={messages.includeExcludeActions}>
               <DropdownItem
                 key="include"
                 startContent={<CopyPlus size={16} />}
@@ -319,7 +320,7 @@ export default function TestCaseSelector({
       <Table
         isCompact
         removeWrapper
-        aria-label="Tese cases table"
+        aria-label={messages.testCasesTable}
         classNames={classNames}
         selectedKeys={selectedKeys}
         selectionMode="multiple"

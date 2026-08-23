@@ -58,11 +58,11 @@ export default function TestCaseFilter({
         setTags(tagsResponse);
       } catch (error) {
         logError('Error fetching case tags', error);
-        addToast({ title: 'Error', description: 'Error fetching tags', color: 'danger' });
+        addToast({ title: messages.errorTitle, description: messages.errorFetchingTags, color: 'danger' });
       }
     };
     fetchDataEffect();
-  }, [projectId, tokenContext.token.access_token]);
+  }, [messages.errorFetchingTags, messages.errorTitle, projectId, tokenContext.token.access_token]);
 
   useEffect(() => {
     if (activeTagFilters.length > 0) {
@@ -165,7 +165,7 @@ export default function TestCaseFilter({
               </Button>
             </DropdownTrigger>
             <DropdownMenu
-              aria-label="Priority filter"
+              aria-label={messages.priorityFilter}
               selectionMode="multiple"
               selectedKeys={selectedPriorities}
               onSelectionChange={handlePrioritySelectionChange}
@@ -197,7 +197,7 @@ export default function TestCaseFilter({
             </DropdownTrigger>
             <DropdownMenu
               className="max-h-[50vh] overflow-y-auto"
-              aria-label="Type filter"
+              aria-label={messages.typeFilter}
               selectionMode="multiple"
               selectedKeys={selectedTypes}
               onSelectionChange={handleTypeSelectionChange}
@@ -227,7 +227,7 @@ export default function TestCaseFilter({
           </DropdownTrigger>
           <DropdownMenu
             className="max-h-[50vh] overflow-y-auto"
-            aria-label="Tag filter"
+            aria-label={messages.tagFilter}
             selectionMode="multiple"
             selectedKeys={selectedTags}
             onSelectionChange={setSelectedTags}

@@ -114,10 +114,10 @@ export default function SettingsPage({ projectId, messages, projectDialogMessage
       </div>
 
       <div className="w-full p-3">
-        <Table hideHeader aria-label="Example static collection table">
+        <Table hideHeader aria-label={messages.tableAria}>
           <TableHeader>
-            <TableColumn>dummy</TableColumn>
-            <TableColumn>dummy</TableColumn>
+            <TableColumn>{messages.projectName}</TableColumn>
+            <TableColumn>{messages.projectOwner}</TableColumn>
           </TableHeader>
           <TableBody>
             <TableRow key="project-name">

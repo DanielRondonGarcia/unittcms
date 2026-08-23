@@ -4,6 +4,7 @@ import en from './en.json';
 import ptBR from './pt-BR.json';
 import zhCN from './zh-CN.json';
 import ja from './ja.json';
+import es from './es.json';
 
 function getAllKeys(obj: unknown, prefix = ''): string[] {
   if (typeof obj !== 'object' || obj === null) return [];
@@ -23,16 +24,27 @@ describe('Locale message keys consistency', () => {
     { name: 'pt-BR', data: ptBR },
     { name: 'zh-CN', data: zhCN },
     { name: 'ja', data: ja },
+    { name: 'es', data: es },
   ];
 
   const base = locales.find((locale) => locale.name === 'en');
   if (!base) throw new Error('Base locale not found');
   const baseKeys = getAllKeys(base.data);
+  const legacyBase = locales.find((locale) => locale.name === 'de');
+  if (!legacyBase) throw new Error('Legacy base locale not found');
 
-  for (const locale of locales.slice(1)) {
-    it(`should have the same keys as ${base.name} in ${locale.name}`, () => {
+  it('keeps the complete 441-key catalog contract', () => {
+    expect(baseKeys).toHaveLength(441);
+  });
+
+  it(`should have the same keys as ${base.name} in es`, () => {
+    expect(getAllKeys(es)).toEqual(baseKeys);
+  });
+
+  for (const locale of locales.filter(({ name }) => !['en', 'es'].includes(name))) {
+    it(`should retain the legacy key shape in ${locale.name}`, () => {
       const localeKeys = getAllKeys(locale.data);
-      expect(localeKeys).toEqual(baseKeys);
+      expect(localeKeys).toEqual(getAllKeys(legacyBase.data));
     });
   }
 });

@@ -11,6 +11,7 @@ type Props = {
   members: MemberType[];
   isDisabled: boolean;
   unassignedLabel: string;
+  selectLabel: string;
   searchPlaceholder: string;
   triggerLabel?: string;
   onAssign: (userId: number | null) => void;
@@ -22,6 +23,7 @@ export default function AssigneePicker({
   members,
   isDisabled,
   unassignedLabel,
+  selectLabel,
   searchPlaceholder,
   triggerLabel,
   onAssign,
@@ -84,7 +86,7 @@ export default function AssigneePicker({
         )}
       </DropdownTrigger>
       <DropdownMenu
-        aria-label="Select assignee"
+        aria-label={selectLabel}
         onAction={(key) => onAssign(key === 'null' ? null : Number(key))}
         className="min-w-48"
         topContent={

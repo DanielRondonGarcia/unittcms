@@ -27,6 +27,11 @@ type CommentMessages = {
   failedToUpdateComment: string;
   commentDeleted: string;
   failedToDeleteComment: string;
+  editComment: string;
+  deleteComment: string;
+  unknownState: string;
+  success: string;
+  error: string;
 };
 
 export type { CommentType, CommentMessages };

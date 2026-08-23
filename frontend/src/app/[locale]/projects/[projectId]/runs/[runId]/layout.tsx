@@ -14,6 +14,7 @@ export default function RunLayout({
   params: { projectId: string; runId: string; locale: string };
 }) {
   const t = useTranslations('Run');
+  const ui = useTranslations('UI');
   const messages: RunMessages = {
     backToRuns: t('back_to_runs'),
     updating: t('updating'),
@@ -58,8 +59,21 @@ export default function RunLayout({
     assignedToMe: t('assigned_to_me'),
     assignSelected: t('assign_selected'),
     filterByAssignee: t('filter_by_assignee'),
-    selectAssignee: t('select_assignee'),
+    selectAssignee: ui('select_assignee'),
     searchAssignee: t('search_assignee'),
+    successTitle: ui('success'),
+    errorTitle: ui('error'),
+    saveError: ui('save_run_error'),
+    exportOptions: ui('export_options'),
+    testCaseActions: ui('test_case_actions'),
+    testCaseSelectActions: ui('test_case_select_actions'),
+    includeExcludeActions: ui('include_exclude_actions'),
+    testCasesTable: ui('test_cases_table'),
+    statusFilterAria: ui('status_filter'),
+    tagFilterAria: ui('tag_filter'),
+    assigneeFilterAria: ui('assignee_filter'),
+    selectAssigneeAria: ui('select_assignee'),
+    errorFetchingTags: ui('error_fetching_tags'),
   };
 
   const rst = useTranslations('RunStatus');

@@ -45,7 +45,7 @@ export default function PasswordResetDialog({ isOpen, onCancel, onReset, message
               <Input
                 size="sm"
                 type="password"
-                label="New Password"
+                label={messages.newPassword}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 autoComplete="new-password"
@@ -53,7 +53,7 @@ export default function PasswordResetDialog({ isOpen, onCancel, onReset, message
               <Input
                 size="sm"
                 type="password"
-                label="Confirm New Password"
+                label={messages.confirmNewPassword}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 autoComplete="new-password"

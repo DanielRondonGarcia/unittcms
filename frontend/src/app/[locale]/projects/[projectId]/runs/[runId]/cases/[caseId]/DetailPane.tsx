@@ -85,12 +85,12 @@ export default function TestCaseDetailPane({
   }, [context, caseId, runId]);
 
   if (isFetching || !testCase) {
-    return <div>loading...</div>;
+    return <div>{messages.loading}</div>;
   } else {
     return (
       <div className="flex h-full w-full flex-col p-3">
         <Tabs
-          aria-label="Options"
+          aria-label={messages.options}
           size="sm"
           selectedKey={selectedTab}
           onSelectionChange={(key) => setSelectedTab(String(key))}
@@ -114,7 +114,13 @@ export default function TestCaseDetailPane({
             />
           </Tab>
           <Tab key="history" title={messages.history}>
-            <History />
+            <History
+              messages={{
+                history: messages.history,
+                noticeTitle: messages.historyNotice,
+                unavailable: messages.historyUnavailable,
+              }}
+            />
           </Tab>
         </Tabs>
       </div>

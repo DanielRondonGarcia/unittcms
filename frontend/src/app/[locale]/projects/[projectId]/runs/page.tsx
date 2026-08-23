@@ -13,6 +13,7 @@ export async function generateMetadata({ params: { locale } }: { params: { local
 
 export default function Page({ params }: { params: { projectId: string; locale: string } }) {
   const t = useTranslations('Runs');
+  const ui = useTranslations('UI');
   const messages = {
     runList: t('run_list'),
     run: t('run'),
@@ -33,6 +34,8 @@ export default function Page({ params }: { params: { projectId: string; locale: 
     pleaseEnter: t('please_enter'),
     areYouSure: t('are_you_sure'),
     delete: t('delete'),
+    actionsAria: ui('run_actions'),
+    tableAria: ui('runs_table'),
   };
 
   return (

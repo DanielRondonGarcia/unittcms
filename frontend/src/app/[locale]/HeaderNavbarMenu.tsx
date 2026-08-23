@@ -37,6 +37,13 @@ type NabbarMenuMessages = {
   signOut: string;
   links: string;
   languages: string;
+  accountActionsSignedIn: string;
+  accountActionsSignedOut: string;
+  languageMenu: string;
+  linksAria: string;
+  accountLinksAria: string;
+  languageLinksAria: string;
+  github: string;
 };
 
 type Props = {
@@ -130,13 +137,15 @@ export default function HeaderNavbarMenu({ messages, locale }: Props) {
       </NavbarContent>
 
       <NavbarContent className="basis-1 pl-4" justify="end">
-        <NextUiLink isExternal href="https://github.com/kimatata/unittcms" aria-label="Github">
+        <NextUiLink isExternal href="https://github.com/kimatata/unittcms" aria-label={messages.github}>
           <GithubIcon className="text-default-500" />
         </NextUiLink>
         <ThemeSwitch />
         <div className="hidden md:block">
           <DropdownAccount messages={messages} locale={locale} onItemPress={() => {}} />
-          {!context.isSignedIn() && <DropdownLanguage locale={locale} onChangeLocale={changeLocale} />}
+          {!context.isSignedIn() && (
+            <DropdownLanguage locale={locale} onChangeLocale={changeLocale} languageLabel={messages.languageMenu} />
+          )}
         </div>
         <NavbarMenuToggle className="md:hidden" onChange={() => setIsMenuOpen(!isMenuOpen)} />
       </NavbarContent>
@@ -145,7 +154,7 @@ export default function HeaderNavbarMenu({ messages, locale }: Props) {
         <div className="mx-4 mt-2 flex flex-col gap-2">
           <p className="font-bold">{messages.links}</p>
           <Listbox
-            aria-label="Links"
+            aria-label={messages.linksAria}
             itemClasses={{
               base: 'h-10 text-large',
             }}
@@ -178,7 +187,7 @@ export default function HeaderNavbarMenu({ messages, locale }: Props) {
           <p className="font-bold">{messages.account}</p>
           {context.isSignedIn() ? (
             <Listbox
-              aria-label="Account links"
+              aria-label={messages.accountLinksAria}
               itemClasses={{
                 base: 'h-10 text-large',
               }}
@@ -226,7 +235,7 @@ export default function HeaderNavbarMenu({ messages, locale }: Props) {
           ) : (
             <>
               <Listbox
-                aria-label="Account links"
+                aria-label={messages.accountLinksAria}
                 itemClasses={{
                   base: 'h-10 text-large',
                 }}
@@ -252,7 +261,7 @@ export default function HeaderNavbarMenu({ messages, locale }: Props) {
               </Listbox>
               <p className="font-bold">{messages.languages}</p>
               <Listbox
-                aria-label="Language links"
+                aria-label={messages.languageLinksAria}
                 itemClasses={{
                   base: 'h-10 text-large',
                 }}

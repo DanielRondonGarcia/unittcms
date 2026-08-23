@@ -34,14 +34,14 @@ export default function CaseTagsEditor({ projectId, selectedTags, onChange, mess
       } catch (error: unknown) {
         logError('Error fetching case tags', error);
         addToast({
-          title: 'Error',
-          description: 'Error fetching tags',
+          title: messages.errorTitle,
+          description: messages.errorFetchingTags,
           color: 'danger',
         });
       }
     };
     fetchDataEffect();
-  }, [projectId, tokenContext.token.access_token]);
+  }, [messages.errorFetchingTags, messages.errorTitle, projectId, tokenContext.token.access_token]);
 
   const availableTags = useMemo(() => {
     return tags.filter((t) => !selectedTags.some((s) => s.id === t.id));
@@ -54,7 +54,7 @@ export default function CaseTagsEditor({ projectId, selectedTags, onChange, mess
   const handleTagAdd = (tag: Tag) => {
     if (selectedTags.length >= maxTags) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         description: messages.maxTagsLimit,
         color: 'warning',
       });
@@ -69,7 +69,7 @@ export default function CaseTagsEditor({ projectId, selectedTags, onChange, mess
   const handleCreateTag = async (name: string) => {
     if (selectedTags.length >= maxTags) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         description: messages.maxTagsLimit,
         color: 'warning',
       });
@@ -81,7 +81,7 @@ export default function CaseTagsEditor({ projectId, selectedTags, onChange, mess
       selectedTags.some((tag) => tag.name.toLowerCase() === normalizedName)
     ) {
       addToast({
-        title: 'Warning',
+        title: messages.warningTitle,
         description: messages.tagAlreadyExists,
         color: 'warning',
       });
@@ -95,14 +95,14 @@ export default function CaseTagsEditor({ projectId, selectedTags, onChange, mess
       setInputValue('');
       autocompleteRef.current?.blur();
       addToast({
-        title: 'Success',
+        title: messages.successTitle,
         description: messages.tagCreatedAndAdded,
         color: 'success',
       });
     } catch (error) {
       logError('Error creating tag', error);
       addToast({
-        title: 'Error',
+        title: messages.errorTitle,
         description: messages.errorCreatingTag,
         color: 'danger',
       });

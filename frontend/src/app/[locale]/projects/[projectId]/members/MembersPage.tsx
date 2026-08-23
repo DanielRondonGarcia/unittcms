@@ -46,7 +46,7 @@ export default function MembersPage({ projectId, messages }: Props) {
       updateMembers.push(newMember);
       setMembers(updateMembers);
       addToast({
-        title: 'Success',
+        title: messages.successTitle,
         color: 'success',
         description: messages.memberAdded,
       });
@@ -74,7 +74,7 @@ export default function MembersPage({ projectId, messages }: Props) {
       setMembers(members.filter((member) => member.User.id !== deleteMemberId));
       closeDeleteConfirmDialog();
       addToast({
-        title: 'Success',
+        title: messages.successTitle,
         color: 'success',
         description: messages.memberDeleted,
       });
@@ -85,7 +85,7 @@ export default function MembersPage({ projectId, messages }: Props) {
     if (userEdit.id) {
       await updateMember(context.token.access_token, userEdit.id, Number(projectId), role);
       addToast({
-        title: 'Success',
+        title: messages.successTitle,
         color: 'success',
         description: messages.roleChanged,
       });

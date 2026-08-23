@@ -14,6 +14,7 @@ export default function Page({
   };
 }) {
   const t = useTranslations('Case');
+  const ui = useTranslations('UI');
   const messages = {
     backToCases: t('back_to_cases'),
     updating: t('updating'),
@@ -54,6 +55,10 @@ export default function Page({
     errorUpdatingTestCase: t('error_updating_test_case'),
     searchOrCreateTag: t('search_or_create_tag'),
     noTagsSelected: t('no_tags_selected'),
+    successTitle: ui('success'),
+    errorTitle: ui('error'),
+    warningTitle: ui('warning'),
+    errorFetchingTags: ui('error_fetching_tags'),
   };
 
   const tt = useTranslations('Type');

@@ -26,4 +26,5 @@ export type SettingsMessages = {
   tagErrorCreate: string;
   tagErrorUpdate: string;
   tagErrorDelete: string;
+  tableAria: string;
 };

@@ -100,7 +100,7 @@ export default function ProjectsTable({ projects, messages, locale }: Props) {
     <>
       <Table
         isCompact
-        aria-label="Projects table"
+        aria-label={messages.tableAria}
         classNames={classNames}
         sortDescriptor={sortDescriptor}
         onSortChange={setSortDescriptor}

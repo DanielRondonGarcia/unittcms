@@ -15,6 +15,7 @@ export async function generateMetadata({ params: { locale } }: { params: { local
 
 export default function Page({ params }: { params: { projectId: string; locale: string } }) {
   const t = useTranslations('Settings');
+  const ui = useTranslations('UI');
   const messages: SettingsMessages = {
     projectManagement: t('project_management'),
     projectName: t('project_name'),
@@ -43,6 +44,7 @@ export default function Page({ params }: { params: { projectId: string; locale: 
     tagErrorCreate: t('tag_error_create'),
     tagErrorUpdate: t('tag_error_update'),
     tagErrorDelete: t('tag_error_delete'),
+    tableAria: ui('settings_table'),
   };
 
   const pt = useTranslations('ProjectDialog');

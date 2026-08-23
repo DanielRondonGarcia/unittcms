@@ -41,7 +41,7 @@ export default function CaseDialog({
 
     if (success) {
       addToast({
-        title: 'Success',
+        title: messages.successTitle,
         color: 'success',
         description: messages.casesMoved,
       });
@@ -62,7 +62,7 @@ export default function CaseDialog({
     setIsProcessing(false);
 
     if (success) {
-      addToast({ title: 'Success', color: 'success', description: messages.casesCloned });
+      addToast({ title: messages.successTitle, color: 'success', description: messages.casesCloned });
       onCancel();
     } else {
       console.error('Error cloning cases');

@@ -99,13 +99,13 @@ export default function DropdownAccount({ messages, locale, onItemPress }: Props
         </Button>
       </DropdownTrigger>
       {context.isSignedIn() ? (
-        <DropdownMenu aria-label="account actions when sign in">
+        <DropdownMenu aria-label={messages.accountActionsSignedIn}>
           {signinItems.map((entry) => (
             <DropdownItem key={entry.uid} title={entry.title} startContent={entry.icon} onPress={entry.onPress} />
           ))}
         </DropdownMenu>
       ) : (
-        <DropdownMenu aria-label="account actions when sign out">
+        <DropdownMenu aria-label={messages.accountActionsSignedOut}>
           {signoutItems.map((entry) => (
             <DropdownItem key={entry.uid} title={entry.title} startContent={entry.icon} onPress={entry.onPress} />
           ))}

@@ -84,7 +84,7 @@ export default function UsersTable({ users, myself, onChangeRole, openResetDialo
                 <span className="w-20">{messages[roles[cellValue as number].uid]}</span>
               </Button>
             </DropdownTrigger>
-            <DropdownMenu aria-label="global role actions">
+            <DropdownMenu aria-label={messages.roleActions}>
               {roles.map((role, index) => (
                 <DropdownItem key={index} onPress={() => onChangeRole(user, index)}>
                   {messages[role.uid]}
@@ -103,7 +103,7 @@ export default function UsersTable({ users, myself, onChangeRole, openResetDialo
                   <MoreVertical size={16} />
                 </Button>
               </DropdownTrigger>
-              <DropdownMenu aria-label="Static Actions">
+              <DropdownMenu aria-label={messages.resetActions}>
                 <DropdownItem key="edit" onPress={() => openResetDialog(user)}>
                   {messages.resetPassword}
                 </DropdownItem>
@@ -140,7 +140,7 @@ export default function UsersTable({ users, myself, onChangeRole, openResetDialo
     <>
       <Table
         isCompact
-        aria-label="Users table"
+        aria-label={messages.usersTable}
         classNames={classNames}
         sortDescriptor={sortDescriptor}
         onSortChange={setSortDescriptor}

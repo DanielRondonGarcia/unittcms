@@ -5,6 +5,7 @@ import { LocaleCodeType } from '@/types/locale';
 
 export default function Page({ params }: PageType) {
   const t = useTranslations('Auth');
+  const ui = useTranslations('UI');
   const messages = {
     profileSettings: t('profile_settings'),
     changeUsername: t('change_username'),
@@ -33,6 +34,10 @@ export default function Page({ params }: PageType) {
     passwordNotMatch: t('password_not_match'),
     usernameEmpty: t('username_empty'),
     invalidLocale: t('invalid_locale'),
+    successTitle: ui('success'),
+    warningTitle: ui('warning'),
+    errorTitle: ui('error'),
+    changeLocaleAria: ui('change_locale'),
   };
 
   return <ProfileSettingsPage messages={messages} locale={params.locale as LocaleCodeType} />;

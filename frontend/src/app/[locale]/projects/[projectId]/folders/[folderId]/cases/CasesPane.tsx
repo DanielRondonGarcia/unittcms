@@ -187,7 +187,7 @@ export default function CasesPane({
     refreshCases();
     setIsImportDialogOpen(false);
     addToast({
-      title: 'Success',
+      title: messages.successTitle,
       color: 'success',
       description: messages.casesImported,
     });

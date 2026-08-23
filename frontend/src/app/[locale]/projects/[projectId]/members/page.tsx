@@ -13,6 +13,7 @@ export async function generateMetadata({ params: { locale } }: { params: { local
 
 export default function Page({ params }: { params: { projectId: string; locale: string } }) {
   const t = useTranslations('Members');
+  const ui = useTranslations('UI');
   const messages = {
     memberManagement: t('member_management'),
     avatar: t('avatar'),
@@ -33,6 +34,9 @@ export default function Page({ params }: { params: { projectId: string; locale: 
     memberAdded: t('member_added'),
     roleChanged: t('role_changed'),
     memberDeleted: t('member_deleted'),
+    successTitle: ui('success'),
+    roleActions: ui('role_actions'),
+    usersTable: ui('users_table'),
   };
 
   return (

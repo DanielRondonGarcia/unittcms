@@ -108,6 +108,15 @@ type CasesMessages = {
   maxFileSize: string;
   casesImported: string;
   createMore: string;
+  successTitle: string;
+  errorTitle: string;
+  errorFetchingTags: string;
+  priorityFilter: string;
+  typeFilter: string;
+  tagFilter: string;
+  testCaseActions: string;
+  exportOptions: string;
+  noTestCase: string;
 };
 
 type CaseMessages = {
@@ -150,6 +159,10 @@ type CaseMessages = {
   errorUpdatingTestCase: string;
   searchOrCreateTag: string;
   noTagsSelected: string;
+  successTitle: string;
+  errorTitle: string;
+  warningTitle: string;
+  errorFetchingTags: string;
 };
 
 export type { CaseType, StepType, AttachmentType, CasesMessages, CaseMessages };

@@ -94,7 +94,7 @@ export default function RunsTable({ projectId, isDisabled, runs, onDeleteRun, me
                 <MoreVertical size={16} />
               </Button>
             </DropdownTrigger>
-            <DropdownMenu aria-label="run actions" disabledKeys={disabledKeys}>
+            <DropdownMenu aria-label={messages.actionsAria} disabledKeys={disabledKeys}>
               <DropdownItem className="text-danger" key="delete" onPress={() => onDeleteRun(run.id)}>
                 {messages.deleteRun}
               </DropdownItem>
@@ -129,7 +129,7 @@ export default function RunsTable({ projectId, isDisabled, runs, onDeleteRun, me
     <>
       <Table
         isCompact
-        aria-label="Runs table"
+        aria-label={messages.tableAria}
         classNames={classNames}
         sortDescriptor={sortDescriptor}
         onSortChange={setSortDescriptor}

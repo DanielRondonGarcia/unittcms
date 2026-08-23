@@ -10,6 +10,7 @@ export default function FoldersLayout({
   params: { projectId: string; locale: string };
 }) {
   const t = useTranslations('Folders');
+  const ui = useTranslations('UI');
   const messages = {
     folder: t('folder'),
     newFolder: t('new_folder'),
@@ -23,6 +24,7 @@ export default function FoldersLayout({
     pleaseEnter: t('please_enter'),
     delete: t('delete'),
     areYouSure: t('are_you_sure'),
+    actionsAria: ui('static_actions'),
   };
 
   return (

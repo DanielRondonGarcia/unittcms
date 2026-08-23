@@ -133,7 +133,7 @@ export default function TestCaseTable({
                   <MoreVertical size={16} />
                 </Button>
               </DropdownTrigger>
-              <DropdownMenu aria-label="test case actions">
+              <DropdownMenu aria-label={messages.testCaseActions}>
                 <DropdownItem
                   key="delete-case"
                   className="text-danger"
@@ -345,7 +345,7 @@ export default function TestCaseTable({
                   {messages.export}
                 </Button>
               </DropdownTrigger>
-              <DropdownMenu aria-label="Export options">
+              <DropdownMenu aria-label={messages.exportOptions}>
                 <DropdownItem key="json" startContent={<FileJson size={16} />} onPress={() => onExportCases('json')}>
                   json
                 </DropdownItem>
@@ -433,7 +433,7 @@ export default function TestCaseTable({
 
       {sortedItems.length === 0 && (
         <div className="flex justify-center items-center w-full h-48 text-neutral-500">
-          <div>No test case</div>
+          <div>{messages.noTestCase}</div>
         </div>
       )}
 
@@ -447,7 +447,9 @@ export default function TestCaseTable({
           }}
         >
           <CardBody>
-            <p>{dragCount} cases selected</p>
+            <p>
+              {dragCount} {messages.casesSelected}
+            </p>
           </CardBody>
         </Card>
       )}

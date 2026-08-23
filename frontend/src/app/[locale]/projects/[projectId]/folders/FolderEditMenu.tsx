@@ -29,7 +29,7 @@ export default function FolderEditMenu({ folder, isDisabled, onEditClick, onDele
           <MoreVertical size={16} />
         </Button>
       </DropdownTrigger>
-      <DropdownMenu aria-label="Static Actions" disabledKeys={disabledKeys}>
+      <DropdownMenu aria-label={messages.actionsAria} disabledKeys={disabledKeys}>
         <DropdownItem key="edit" onPress={() => onEditClick(folder)}>
           {messages.editFolder}
         </DropdownItem>

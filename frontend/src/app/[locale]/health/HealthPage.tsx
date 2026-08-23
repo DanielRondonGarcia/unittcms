@@ -54,10 +54,10 @@ export default function HealthPage({ messages, locale }: Props) {
           <h3 className="font-bold">{messages.health_check}</h3>
         </div>
 
-        <Table hideHeader aria-label="API server status">
+        <Table hideHeader aria-label={messages.apiServerStatus}>
           <TableHeader>
-            <TableColumn>dummy</TableColumn>
-            <TableColumn>dummy</TableColumn>
+            <TableColumn>{messages.healthColumn}</TableColumn>
+            <TableColumn>{messages.healthColumn}</TableColumn>
           </TableHeader>
           <TableBody>
             <TableRow key="1">
@@ -72,7 +72,7 @@ export default function HealthPage({ messages, locale }: Props) {
               <TableCell>{messages.status}</TableCell>
               <TableCell>
                 {isFetching ? (
-                  <Chip>Loading...</Chip>
+                  <Chip>{messages.loading}</Chip>
                 ) : (
                   <Chip color={status === 'ok' ? 'success' : 'danger'}>{status}</Chip>
                 )}
