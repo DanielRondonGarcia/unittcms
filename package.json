@@ -10,6 +10,8 @@
     "coverage": "vitest run --coverage",
     "e2e:docker": "playwright test --config playwright.docker.config.ts",
     "e2e:dev": "playwright test --config playwright.dev.config.ts",
+    "e2e:gherkin:fake": "E2E_BASE_URL=http://localhost:8010 playwright test --config playwright.fake.config.ts e2e/gherkin-case-template.spec.ts --grep \"manual Gherkin lifecycle\"",
+    "hercules:compatibility:real": "UNITTCMS_HERCULES_COMPAT_REAL=1 vitest run backend/automation/compatibility/hercules.real.test.ts",
     "report": "playwright show-report",
     "lint": "eslint",
     "lint:fix": "eslint --fix"

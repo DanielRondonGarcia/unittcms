@@ -110,6 +110,27 @@ describe('Gherkin case persistence', () => {
     );
     expect(transaction.commit).toHaveBeenCalledOnce();
   });
+  it('bumps the automation revision after saving gherkin steps', async () => {
+    const update = vi.fn();
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, automationVersion: 4, update });
+    const response = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ]);
+    expect(response.status).toBe(200);
+    expect(update).toHaveBeenCalledWith({ automationVersion: 5 }, { transaction });
+  });
+  it('bumps the automation revision when a gherkin case changes', async () => {
+    const update = vi.fn();
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, automationVersion: 2, update });
+    const response = await request(app).put('/cases/42').send({ title: 'Renamed', template: 2 });
+
+    expect(response.status).toBe(200);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ automationVersion: 3 }));
+  });
   it.each([
     { label: 'missing', keyword: undefined },
     { label: 'unsupported', keyword: 'and' },

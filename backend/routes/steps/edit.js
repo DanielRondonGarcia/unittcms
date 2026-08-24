@@ -98,6 +98,9 @@ export default function (sequelize) {
         })
       );
 
+      if (typeof testcase.update === 'function') {
+        await testcase.update({ automationVersion: Number(testcase.automationVersion || 1) + 1 }, { transaction: t });
+      }
       await t.commit();
       res.json(results.filter((result) => result !== null));
     } catch (error) {

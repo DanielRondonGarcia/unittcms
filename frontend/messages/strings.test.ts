@@ -33,8 +33,8 @@ describe('Locale message keys consistency', () => {
   const legacyBase = locales.find((locale) => locale.name === 'de');
   if (!legacyBase) throw new Error('Legacy base locale not found');
 
-  it('keeps the complete 441-key catalog contract', () => {
-    expect(baseKeys).toHaveLength(445);
+  it('keeps the complete 466-key catalog contract', () => {
+    expect(baseKeys).toHaveLength(466);
   });
 
   it(`should have the same keys as ${base.name} in es`, () => {

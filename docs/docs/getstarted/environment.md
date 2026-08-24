@@ -26,10 +26,14 @@ services:
     // highlight-start
     environment:
       - PORT=8000
-      - SECRET_KEY=your_secret_key_here
+      - SECRET_KEY=${SECRET_KEY:?set outside source}
       - IS_DEMO=false # set to true to seed the database
       - API_PATH=/api
       - DATABASE_PATH=/app/backend/database/database.sqlite
+      - AUTOMATION_EXECUTION_MODE=disabled
+      - AUTOMATION_PHASE0_READY=false
+      - AUTOMATION_REDIS_URL=redis://redis:6379
+      - AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
     // highlight-end
     volumes:
       - db-data:/app/backend/database
@@ -59,3 +63,9 @@ FRONTEND_ORIGIN=http://localhost:8000
 PORT=8001
 SECRET_KEY=your-secret-key
 ```
+
+Automation defaults to `disabled`. Use `fake` only through an injected test or
+development harness; production startup rejects it. Real compatibility runs
+require the pinned image, an approved LiteLLM endpoint, credentials injected by
+CI/secret storage, and an explicit target allowlist. Do not put those values in
+source, `.env.example`, cases, logs, screenshots, or evidence.

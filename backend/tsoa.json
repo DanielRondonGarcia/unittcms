@@ -29,6 +29,7 @@
     "routesDir": ".",
     "middleware": "express",
     "basePath": "/",
-    "esm": true
+    "esm": true,
+    "authenticationModule": "authentication.ts"
   }
 }

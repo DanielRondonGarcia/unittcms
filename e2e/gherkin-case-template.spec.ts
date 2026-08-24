@@ -43,8 +43,126 @@ async function createSpanishCase(page: Page, title: string, template: string) {
   await expect(page.getByRole('link', { name: title, exact: true })).toBeVisible();
 }
 
+async function installFakeAutomationApi(page: Page) {
+  let pollCount = 0;
+  let createCount = 0;
+  const cancelledExecutionId = 'fake-execution-cancelled';
+  const passedExecutionId = 'fake-execution-1';
+  await page.route('**/automation/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    const authorization = request.headers().authorization;
+
+    if (!authorization) {
+      await route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'unauthenticated' }),
+      });
+      return;
+    }
+
+    if (path.endsWith('/projects/999/environments')) {
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'forbidden' }),
+      });
+      return;
+    }
+
+    if (request.method() === 'GET' && /\/projects\/\d+\/environments$/.test(path)) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [{ id: 3, name: 'Entorno de prueba', enabled: true }] }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && path.endsWith('/executions')) {
+      createCount += 1;
+      pollCount = 0;
+      const executionId = createCount === 1 ? cancelledExecutionId : passedExecutionId;
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: executionId, status: 'queued', attempt: 1, environmentId: 3 }),
+      });
+      return;
+    }
+
+    if (request.method() === 'GET' && path.endsWith(`/executions/${cancelledExecutionId}`)) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: cancelledExecutionId, status: 'running', attempt: 1 }),
+      });
+      return;
+    }
+
+    if (request.method() === 'GET' && path.endsWith(`/executions/${passedExecutionId}`)) {
+      pollCount += 1;
+      const running = pollCount < 4;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: passedExecutionId,
+          status: running ? 'running' : 'passed',
+          attempt: 1,
+          summary: running ? undefined : 'Fake execution passed',
+          durationMs: running ? undefined : 1250,
+        }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && path.endsWith(`/executions/${cancelledExecutionId}/cancel`)) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: cancelledExecutionId, status: 'cancelled', durationMs: 100 }),
+      });
+      return;
+    }
+
+    if (request.method() === 'GET' && path.endsWith(`/executions/${passedExecutionId}/artifacts`)) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [{ id: 'artifact-1', kind: 'junit', mimeType: 'application/xml', size: 12 }] }),
+      });
+      return;
+    }
+
+    if (request.method() === 'GET' && /\/executions\/[^/]+\/artifacts$/.test(path)) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [] }),
+      });
+      return;
+    }
+
+    if (request.method() === 'GET' && /\/projects\/\d+\/executions$/.test(path)) {
+      const caseId = Number(url.searchParams.get('caseId') ?? 1);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [{ id: 'fake-execution-1', status: 'passed', caseId, durationMs: 1250 }] }),
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+}
+
 test('manual Gherkin lifecycle stays localized and preserves legacy templates', async ({ page }) => {
   test.setTimeout(180_000);
+  await installFakeAutomationApi(page);
   const suffix = Date.now().toString();
   const username = `gherkin${suffix.slice(-8)}`;
   const email = `${username}@example.com`;
@@ -64,10 +182,10 @@ test('manual Gherkin lifecycle stays localized and preserves legacy templates', 
   await page.getByRole('textbox', { name: 'Password Password' }).fill('password');
   await page.getByRole('textbox', { name: 'Password (confirm)' }).fill('password');
   await page.getByRole('button', { name: 'Sign up', exact: true }).click();
-  await page.waitForURL('**/en/account');
+  await expect(page).toHaveURL(/\/en\/account$/);
 
   await page.getByRole('button', { name: 'Find projects', exact: true }).click();
-  await page.waitForURL('**/en/projects');
+  await expect(page).toHaveURL(/\/en\/projects$/);
   await page.getByRole('button', { name: 'New Project', exact: true }).click();
   await page.getByLabel('Project Name').fill(projectName);
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
@@ -118,6 +236,39 @@ test('manual Gherkin lifecycle stays localized and preserves legacy templates', 
   await page.getByRole('button', { name: 'Actualizar', exact: true }).click();
   expect((await updateCase).ok()).toBeTruthy();
   await expect(page.getByText('Caso de prueba actualizado', { exact: true })).toBeVisible();
+
+  const automationEnvironment = page.getByRole('button', { name: /Selecciona un entorno de ejecución/ });
+  await expect(automationEnvironment).toBeVisible();
+  await automationEnvironment.click();
+  const environmentOption = page.getByRole('listbox').getByRole('option', { name: 'Entorno de prueba', exact: true });
+  await expect(environmentOption).toBeVisible();
+  const environmentBox = await environmentOption.boundingBox();
+  expect(environmentBox).not.toBeNull();
+  if (environmentBox)
+    await page.mouse.click(environmentBox.x + environmentBox.width / 2, environmentBox.y + environmentBox.height / 2);
+  await page.getByRole('button', { name: 'Ejecutar automáticamente', exact: true }).click();
+  await expect(page.getByText('En ejecución', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancelar ejecución', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancelar ejecución', exact: true }).click();
+  await expect(page.getByText('Cancelado', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Ejecutar automáticamente', exact: true }).click();
+  await expect(page.getByText('En ejecución', { exact: true })).toBeVisible();
+  await expect(page.getByText('Aprobado', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Resumen:', { exact: true }).locator('..')).toContainText('Fake execution passed');
+  await expect(page.getByText('Duración:', { exact: true }).locator('..')).toContainText('1.25s');
+  await expect(page.getByText('junit', { exact: true })).toBeVisible();
+  await expect(page.getByText('Historial de ejecuciones', { exact: true })).toBeVisible();
+
+  const unauthenticated = await page.evaluate(
+    async () => (await fetch('/api/automation/projects/999/environments')).status
+  );
+  expect(unauthenticated).toBe(401);
+  const crossProject = await page.evaluate(
+    async () =>
+      (await fetch('/api/automation/projects/999/environments', { headers: { Authorization: 'Bearer fixture' } }))
+        .status
+  );
+  expect(crossProject).toBe(403);
 
   await page.goto(appUrl(`/es/projects/${projectId}/folders/${sourceFolderId}/cases`));
   await page.getByRole('link', { name: caseTitle, exact: true }).click();

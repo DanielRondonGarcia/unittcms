@@ -21,3 +21,10 @@ Following commands are useful for unittcms development.
 | `npm run migrate` | Set up database                    |
 | `npm run drop`    | Drop tables                        |
 | `npm run seed`    | Insert seed data                   |
+
+## Automation verification
+
+| command                               | description                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `npm run e2e:gherkin:fake`            | Run the localized Gherkin flow with intercepted fake/injected automation responses                     |
+| `npm run hercules:compatibility:real` | Opt-in pinned Hercules browser/LLM gate; requires CI-injected LiteLLM credentials and target allowlist |

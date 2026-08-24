@@ -27,6 +27,9 @@ function defineProject(sequelize, DataTypes) {
     Project.belongsTo(models.User, { foreignKey: 'userId', onDelete: 'CASCADE' });
     Project.hasMany(models.Folder, { foreignKey: 'projectId', onDelete: 'CASCADE' });
     Project.hasMany(models.Run, { foreignKey: 'projectId', onDelete: 'CASCADE' });
+    Project.hasMany(models.AutomationDefinition, { foreignKey: 'projectId', onDelete: 'CASCADE' });
+    Project.hasMany(models.AutomationExecution, { foreignKey: 'projectId', onDelete: 'CASCADE' });
+    Project.hasMany(models.TestEnvironment, { foreignKey: 'projectId', onDelete: 'CASCADE' });
   };
 
   return Project;

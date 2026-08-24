@@ -20,19 +20,18 @@ export default function (sequelize) {
         return res.status(404).send('Case not found');
       }
 
-      if (
-        (updateCase.template ?? testcase.template) === gherkinTemplate &&
-        updateCase.Steps !== undefined &&
-        !hasValidGherkinKeywords(updateCase.Steps)
-      ) {
+      const isGherkin = (updateCase.template ?? testcase.template) === gherkinTemplate;
+      if (isGherkin && updateCase.Steps !== undefined && !hasValidGherkinKeywords(updateCase.Steps)) {
         return res.status(400).json({ error: 'Gherkin steps require given, when, or then keywords' });
       }
 
+      const values = { ...updateCase };
       if (updateCase.Steps !== undefined) {
-        delete updateCase.Steps;
+        delete values.Steps;
       }
+      if (isGherkin) values.automationVersion = Number(testcase.automationVersion || 1) + 1;
 
-      await testcase.update(updateCase);
+      await testcase.update(values);
       res.json(testcase);
     } catch (error) {
       console.error(error);

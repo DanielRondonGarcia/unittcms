@@ -1,0 +1,39 @@
+name: Isolated Hercules compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_real_hercules:
+        description: Run the pinned browser/LLM compatibility gate
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  hercules-compatibility:
+    if: inputs.run_real_hercules == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UNITTCMS_HERCULES_COMPAT_REAL: '1'
+      LITELLM_BASE_URL: ${{ secrets.UNITTCMS_LITELLM_BASE_URL }}
+      LITELLM_API_KEY: ${{ secrets.UNITTCMS_LITELLM_API_KEY }}
+      HERCULES_ALLOWED_HOSTS: ${{ vars.UNITTCMS_HERCULES_ALLOWED_HOSTS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install root dependencies
+        run: npm ci
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Verify Docker is available
+        run: docker version
+      - name: Run the opt-in pinned compatibility gate
+        run: npm run hercules:compatibility:real

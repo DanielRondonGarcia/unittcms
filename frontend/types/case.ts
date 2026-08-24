@@ -174,6 +174,27 @@ type CaseMessages = {
   given: string;
   when: string;
   then: string;
+  automation: string;
+  automationEnvironment: string;
+  selectAutomationEnvironment: string;
+  noAutomationEnvironments: string;
+  runAutomatically: string;
+  automationLoading: string;
+  automationQueued: string;
+  automationRunning: string;
+  automationPassed: string;
+  automationFailed: string;
+  automationError: string;
+  automationCancelled: string;
+  automationSummary: string;
+  automationErrorDetail: string;
+  automationDuration: string;
+  automationEvidence: string;
+  automationHistory: string;
+  cancelAutomation: string;
+  downloadAutomationArtifact: string;
+  automationUnavailable: string;
+  automationNoEvidence: string;
 };
 
 export type { CaseType, CaseStepType, StepType, AttachmentType, CasesMessages, CaseMessages };

@@ -7,15 +7,83 @@ services:
         - API_PATH=${API_PATH:-/api}
     ports:
       - '8000:8000'
+    depends_on:
+      redis:
+        condition: service_healthy
     environment:
       - PORT=8000
-      - SECRET_KEY=your_secret_key_here
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY outside source before starting UnitTCMS}
       - IS_DEMO=false # set to true to seed the database
       - API_PATH=${API_PATH:-/api}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:8000}
+      - AUTOMATION_EXECUTION_MODE=${AUTOMATION_EXECUTION_MODE:-disabled}
+      - AUTOMATION_PHASE0_READY=${AUTOMATION_PHASE0_READY:-false}
+      - AUTOMATION_REDIS_URL=${AUTOMATION_REDIS_URL:-redis://redis:6379}
+      - AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
     volumes:
       - db-data:/app/backend/database
       - ./backend/public/uploads:/app/backend/public/uploads
+      - automation-artifacts:/app/backend/private/automation-artifacts
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:8000/api/health/').then((r) => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+
+  redis:
+    image: redis:7.4-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  automation-worker:
+    image: unittcms:latest
+    profiles: ['automation-worker']
+    depends_on:
+      unittcms:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ['node', 'entrypoint.js']
+    environment:
+      - SERVICE_ROLE=worker
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY outside this file}
+      - AUTOMATION_EXECUTION_MODE=${AUTOMATION_EXECUTION_MODE:-disabled}
+      - AUTOMATION_PHASE0_READY=${AUTOMATION_PHASE0_READY:-false}
+      - AUTOMATION_REDIS_URL=${AUTOMATION_REDIS_URL:-redis://redis:6379}
+      - AUTOMATION_WORKER_MODULE=${AUTOMATION_WORKER_MODULE:-}
+      - AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
+    volumes:
+      - automation-artifacts:/app/backend/private/automation-artifacts
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
 
 volumes:
   db-data:
+  redis-data:
+  automation-artifacts:

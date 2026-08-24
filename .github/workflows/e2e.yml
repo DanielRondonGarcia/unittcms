@@ -2,7 +2,7 @@ name: E2E Test
 
 on:
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: ['main', 'develop']
   workflow_dispatch:
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
         run: npx playwright install --with-deps
 
       - name: Start docker containers
-        run: docker-compose up --build -d
+        run: SECRET_KEY=ci-only-placeholder AUTOMATION_EXECUTION_MODE=disabled docker-compose up --build -d
 
       - name: Run E2E tests
         run: npm run e2e:docker

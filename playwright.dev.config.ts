@@ -64,7 +64,8 @@ export default defineConfig({
       timeout: 120000,
     },
     {
-      command: 'cd frontend && npm run build && npm run start',
+      command:
+        'cd frontend && npm run build && mkdir -p .next/standalone/.next && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && PORT=8000 node .next/standalone/server.js',
       env: {
         NEXT_PUBLIC_BACKEND_ORIGIN: 'http://localhost:8001',
       },

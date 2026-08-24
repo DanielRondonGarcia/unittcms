@@ -28,6 +28,7 @@ function defineCase(sequelize, DataTypes) {
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    automationVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
     preConditions: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -60,6 +61,8 @@ function defineCase(sequelize, DataTypes) {
       foreignKey: 'caseId',
       otherKey: 'tagId',
     });
+    Case.hasMany(models.AutomationDefinition, { foreignKey: 'caseId', onDelete: 'CASCADE' });
+    Case.hasMany(models.AutomationExecution, { foreignKey: 'caseId', onDelete: 'CASCADE' });
   };
 
   return Case;

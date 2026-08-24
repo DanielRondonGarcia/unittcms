@@ -58,6 +58,10 @@ ENV PORT=8000
 ENV FRONTEND_ORIGIN=http://localhost:8000
 ENV API_PATH=/api
 ENV DATABASE_PATH=/app/backend/database/database.sqlite
+ENV AUTOMATION_EXECUTION_MODE=disabled
+ENV AUTOMATION_PHASE0_READY=false
+ENV AUTOMATION_REDIS_URL=redis://redis:6379
+ENV AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
 
 # Create a non-root user
 RUN addgroup --system --gid 1001 nodejs
@@ -87,6 +91,12 @@ WORKDIR /app
 
 ## remove .env
 RUN rm -f /app/frontend/.env && rm -f /app/backend/.env
+
+# Keep automated evidence outside the public attachment tree.
+RUN mkdir -p /app/backend/private/automation-artifacts
+
+# The API health endpoint is intentionally separate from automation readiness.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 CMD node -e "fetch('http://127.0.0.1:8000/api/health/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"
 
 # Copy custom entrypoint.js that combines frontend and backend
 COPY entrypoint.js ./

@@ -12,6 +12,24 @@ import expressModule from './backend/node_modules/express/index.js';
 import { API_PATH, IS_PROD } from './backend/config/config.js';
 const express = expressModule.default || expressModule;
 
+function prepareAutomationRuntime() {
+  const mode = process.env.AUTOMATION_EXECUTION_MODE || 'disabled';
+  if (!['disabled', 'fake', 'real'].includes(mode)) {
+    throw new Error('AUTOMATION_EXECUTION_MODE must be disabled, fake, or real');
+  }
+  if (IS_PROD && mode === 'fake') {
+    throw new Error('AUTOMATION_EXECUTION_MODE=fake is not allowed in production');
+  }
+
+  const artifactRoot =
+    process.env.AUTOMATION_ARTIFACT_ROOT || path.join(__dirname, 'backend/private/automation-artifacts');
+  fs.mkdirSync(artifactRoot, { recursive: true });
+  console.log(`Automation execution mode: ${mode}`);
+  if (mode === 'real' && process.env.AUTOMATION_PHASE0_READY !== 'true') {
+    console.warn('Automation remains not ready: Phase-0 compatibility proof is absent');
+  }
+}
+
 async function runMigrations() {
   try {
     console.log('Running database migrations...');
@@ -82,11 +100,38 @@ async function startServer() {
   }
 }
 
-runMigrations()
-  .then(() => {
-    startServer();
-  })
-  .catch((error) => {
-    console.error('Failed to start application:', error);
+async function startWorker() {
+  prepareAutomationRuntime();
+  if (process.env.AUTOMATION_EXECUTION_MODE !== 'real') {
+    throw new Error('The worker profile requires AUTOMATION_EXECUTION_MODE=real');
+  }
+  const workerModuleName = process.env.AUTOMATION_WORKER_MODULE;
+  if (!workerModuleName) {
+    throw new Error('The worker profile requires an injected AUTOMATION_WORKER_MODULE');
+  }
+  const workerModule = await import(workerModuleName);
+  if (typeof workerModule.start !== 'function') {
+    throw new Error('AUTOMATION_WORKER_MODULE must export start(runtimeConfig)');
+  }
+  await workerModule.start({
+    redisUrl: process.env.AUTOMATION_REDIS_URL,
+    artifactRoot: process.env.AUTOMATION_ARTIFACT_ROOT,
+  });
+}
+
+if (process.env.SERVICE_ROLE === 'worker') {
+  startWorker().catch((error) => {
+    console.error('Failed to start automation worker:', error);
     process.exit(1);
   });
+} else {
+  prepareAutomationRuntime();
+  runMigrations()
+    .then(() => {
+      startServer();
+    })
+    .catch((error) => {
+      console.error('Failed to start application:', error);
+      process.exit(1);
+    });
+}
