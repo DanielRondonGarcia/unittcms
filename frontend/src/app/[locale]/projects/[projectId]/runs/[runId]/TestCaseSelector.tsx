@@ -16,6 +16,7 @@ import {
   Chip,
 } from '@heroui/react';
 import { MoreVertical, CopyPlus, CopyMinus, MessageCircle } from 'lucide-react';
+import { isRunCaseIncluded } from '../runsControl';
 import RunCaseStatus from './RunCaseStatus';
 import AssigneePicker from './AssigneePicker';
 import { Link, NextUiLinkClasses } from '@/src/i18n/routing';
@@ -69,6 +70,7 @@ export default function TestCaseSelector({
   const headerColumns = [
     { name: messages.id, uid: 'id', sortable: true },
     { name: messages.title, uid: 'title', sortable: true },
+    { name: messages.runCaseStatus, uid: 'runCaseStatus', sortable: false },
     { name: messages.priority, uid: 'priority', sortable: true },
     { name: messages.tags, uid: 'tags', sortable: false },
     { name: messages.status, uid: 'runStatus', sortable: true },
@@ -134,20 +136,9 @@ export default function TestCaseSelector({
 
   const notIncludedCaseClass = 'text-neutral-200 dark:text-neutral-600';
 
-  const isCaseIncluded = (testCase: CaseType) => {
-    let isIncluded = false;
-    if (testCase.RunCases && testCase.RunCases.length > 0) {
-      if (testCase.RunCases[0].editState !== 'deleted') {
-        // Even if RunCase[0] exists, if 'deleted' it will be as not included.
-        isIncluded = true;
-      }
-    }
-
-    return isIncluded;
-  };
   const renderCell = (testCase: CaseType, columnKey: string): ReactNode => {
     const cellValue = testCase[columnKey as keyof CaseType];
-    const isIncluded = isCaseIncluded(testCase);
+    const isIncluded = isRunCaseIncluded(testCase);
     const runStatus = testCase.RunCases && testCase.RunCases.length > 0 ? testCase.RunCases[0].status : 0;
     const commentCount = testCase.RunCases && testCase.RunCases.length > 0 ? testCase.RunCases[0].commentCount || 0 : 0;
 
@@ -164,6 +155,16 @@ export default function TestCaseSelector({
               {cellValue as string}
             </Link>
           </div>
+        );
+      case 'runCaseStatus':
+        return isIncluded ? (
+          <Chip size="sm" color="success" variant="flat">
+            {messages.included}
+          </Chip>
+        ) : (
+          <Chip size="sm" color="default" variant="flat">
+            {messages.excluded}
+          </Chip>
         );
       case 'priority':
         return (
@@ -195,6 +196,10 @@ export default function TestCaseSelector({
                 size="sm"
                 variant="light"
                 title={isIncluded ? testRunCaseStatusMessages[testRunCaseStatus[runStatus].uid] : undefined}
+                aria-label={
+                  isIncluded ? testRunCaseStatusMessages[testRunCaseStatus[runStatus].uid] : messages.runCaseStatus
+                }
+                className="focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                 isDisabled={!isIncluded}
               >
                 {isIncluded ? <RunCaseStatus uid={testRunCaseStatus[runStatus].uid} /> : '-'}
@@ -255,7 +260,14 @@ export default function TestCaseSelector({
         return (
           <Dropdown>
             <DropdownTrigger>
-              <Button isIconOnly radius="full" size="sm" variant="light">
+              <Button
+                isIconOnly
+                radius="full"
+                size="sm"
+                variant="light"
+                aria-label={messages.actions}
+                className="focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+              >
                 <MoreVertical size={16} />
               </Button>
             </DropdownTrigger>
@@ -294,7 +306,7 @@ export default function TestCaseSelector({
 
   const classNames = useMemo(
     () => ({
-      wrapper: ['min-w-3xl'],
+      table: ['min-w-[48rem]'],
       th: ['bg-transparent', 'text-default-500', 'border-b', 'border-divider'],
       td: [
         // changing the rows border radius
@@ -316,7 +328,7 @@ export default function TestCaseSelector({
   };
 
   return (
-    <>
+    <div className="min-w-0 max-w-full overflow-x-auto">
       <Table
         isCompact
         removeWrapper
@@ -341,7 +353,7 @@ export default function TestCaseSelector({
         </TableHeader>
         <TableBody emptyContent={messages.noCasesFound}>
           {sortedItems.map((item) => (
-            <TableRow key={item.id} className={isCaseIncluded(item) ? '' : notIncludedCaseClass}>
+            <TableRow key={item.id} className={isRunCaseIncluded(item) ? '' : notIncludedCaseClass}>
               {headerColumns.map((column) => (
                 <TableCell key={column.uid}>{renderCell(item, column.uid)}</TableCell>
               ))}
@@ -349,6 +361,6 @@ export default function TestCaseSelector({
           ))}
         </TableBody>
       </Table>
-    </>
+    </div>
   );
 }

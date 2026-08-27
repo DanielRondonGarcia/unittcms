@@ -41,6 +41,7 @@ describe('secure environment boundary', () => {
       baseUrl: 'https://example.test/app',
       allowedHosts: ['example.test'],
       secretRefs: ['secret://llm'],
+      captureVideo: false,
     });
     expect(JSON.stringify(result)).not.toContain('raw');
   });

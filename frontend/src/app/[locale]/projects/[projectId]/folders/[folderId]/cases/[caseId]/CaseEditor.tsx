@@ -1,35 +1,28 @@
 'use client';
 import { useState, useEffect, useContext, ChangeEvent, DragEvent } from 'react';
 import { Input, Textarea, Select, SelectItem, Button, Divider, Tooltip, addToast, Badge } from '@heroui/react';
-import { Save, Plus, ArrowLeft, Circle, Play, X, Download } from 'lucide-react';
+import { Save, Plus, ArrowLeft, Circle } from 'lucide-react';
 import CaseStepsEditor from './CaseStepsEditor';
+import ScenarioExamplesEditor from './ScenarioExamplesEditor';
 import CaseAttachmentsEditor from './CaseAttachmentsEditor';
 import { updateSteps } from './stepControl';
 import { fetchCreateAttachments, fetchDownloadAttachment, fetchDeleteAttachment } from './attachmentControl';
 import CaseTagsEditor from './CaseTagsEditor';
-import { fetchCase, hasValidGherkinKeywords, updateCase } from '@/utils/caseControl';
+import {
+  fetchCase,
+  insertGherkinCaseStep,
+  deleteGherkinCaseStep,
+  normalizeGherkinCaseSteps,
+  validateGherkinCase,
+  updateCase,
+} from '@/utils/caseControl';
 import { gherkinTemplate, priorities, testTypes, templates } from '@/config/selection';
 import { useRouter } from '@/src/i18n/routing';
 import { TokenContext } from '@/utils/TokenProvider';
 import { useFormGuard } from '@/utils/formGuard';
 import { CaseType, AttachmentType, CaseMessages, StepType } from '@/types/case';
-import type {
-  AutomationArtifact,
-  AutomationEnvironment,
-  AutomationExecution,
-  AutomationStatus,
-} from '@/types/automation';
-import {
-  cancelAutomationExecution,
-  createAutomationExecution,
-  downloadAutomationArtifact,
-  fetchAutomationArtifacts,
-  fetchAutomationEnvironments,
-  fetchAutomationExecution,
-  fetchAutomationHistory,
-  formatAutomationDuration,
-  isAutomationActive,
-} from '@/utils/automationControl';
+import type { GherkinSection } from '@/types/base';
+import type { GherkinValidationIssue } from '@/utils/caseControl';
 import { PriorityMessages } from '@/types/priority';
 import { TestTypeMessages } from '@/types/testType';
 import { logError } from '@/utils/errorHandler';
@@ -46,6 +39,7 @@ const defaultTestCase = {
   template: 0,
   preConditions: '',
   expectedResults: '',
+  gherkinExamples: null,
   folderId: 0,
   Steps: [],
   Attachments: [],
@@ -53,6 +47,41 @@ const defaultTestCase = {
   runStatus: 0,
   Tags: [],
 };
+
+function describeGherkinIssue(issue: GherkinValidationIssue, messages: CaseMessages): string {
+  const isExampleIssue = issue.code.startsWith('example');
+  const location =
+    issue.stepIndex !== undefined
+      ? `${messages.step} ${issue.stepIndex + 1}`
+      : issue.rowIndex !== undefined
+        ? `${messages.examples} ${issue.rowIndex + 1}`
+        : isExampleIssue
+          ? messages.examples
+          : messages.steps;
+  const reason =
+    issue.code === 'steps_required'
+      ? messages.gherkinValidationStepsRequired
+      : issue.code === 'step_order'
+        ? messages.gherkinValidationStepOrder
+        : issue.code === 'keyword'
+          ? messages.gherkinValidationKeyword
+          : issue.code === 'section'
+            ? messages.gherkinValidationSection
+            : issue.code === 'step_text'
+              ? messages.gherkinValidationStepText
+              : issue.code === 'duplicate_step'
+                ? messages.gherkinValidationDuplicateStep
+                : issue.code === 'first_connector'
+                  ? messages.gherkinValidationFirstConnector
+                  : issue.code === 'required_keywords'
+                    ? messages.gherkinValidationRequiredKeywords
+                    : issue.code === 'example_placeholder'
+                      ? messages.gherkinValidationPlaceholder
+                      : issue.code === 'details_keyword'
+                        ? messages.gherkinValidationDetailsKeyword
+                        : messages.gherkinValidationExamples;
+  return `${location}: ${reason}`;
+}
 
 type Props = {
   projectId: string;
@@ -80,179 +109,21 @@ export default function CaseEditor({
   const [idCounter, setIdCounter] = useState<number>(0);
   const [isDirty, setIsDirty] = useState(false);
   const [selectedTags, setSelectedTags] = useState<{ id: number; name: string }[]>([]);
-  const [automationEnvironments, setAutomationEnvironments] = useState<AutomationEnvironment[]>([]);
-  const [selectedAutomationEnvironment, setSelectedAutomationEnvironment] = useState('');
-  const [automationExecution, setAutomationExecution] = useState<AutomationExecution | null>(null);
-  const [automationHistory, setAutomationHistory] = useState<AutomationExecution[]>([]);
-  const [automationArtifacts, setAutomationArtifacts] = useState<AutomationArtifact[]>([]);
-  const [automationEnvironmentLoading, setAutomationEnvironmentLoading] = useState(false);
-  const [automationActionLoading, setAutomationActionLoading] = useState(false);
-  const [automationError, setAutomationError] = useState<string | null>(null);
   const isGherkin = testCase.template === gherkinTemplate;
-  const accessToken = tokenContext.token.access_token;
-  const isSignedIn = tokenContext.isSignedIn();
-  const isAutomationAuthorized = tokenContext.isProjectDeveloper(Number(projectId));
-  const automationUnavailableMessage = messages.automationUnavailable;
+  const gherkinValidation = isGherkin
+    ? validateGherkinCase(testCase.Steps, testCase.gherkinExamples, {
+        given: messages.given,
+        when: messages.when,
+        then: messages.then,
+        and: messages.and,
+        but: messages.but,
+      })
+    : { valid: true, issues: [] };
 
   const router = useRouter();
   useFormGuard(isDirty, messages.areYouSureLeave);
 
-  const statusLabel = (status: AutomationStatus) =>
-    ({
-      queued: messages.automationQueued,
-      running: messages.automationRunning,
-      passed: messages.automationPassed,
-      failed: messages.automationFailed,
-      error: messages.automationError,
-      cancelled: messages.automationCancelled,
-    })[status];
-
-  useEffect(() => {
-    if (!isGherkin || !isSignedIn || !accessToken) {
-      setAutomationEnvironments([]);
-      setSelectedAutomationEnvironment('');
-      setAutomationError(null);
-      return;
-    }
-
-    let disposed = false;
-    setAutomationEnvironmentLoading(true);
-    setAutomationError(null);
-    fetchAutomationEnvironments(accessToken, Number(projectId))
-      .then((items) => {
-        if (!disposed) setAutomationEnvironments(items);
-      })
-      .catch(() => {
-        if (!disposed) {
-          setAutomationEnvironments([]);
-          setAutomationError(automationUnavailableMessage);
-        }
-      })
-      .finally(() => {
-        if (!disposed) setAutomationEnvironmentLoading(false);
-      });
-
-    return () => {
-      disposed = true;
-    };
-  }, [accessToken, automationUnavailableMessage, isGherkin, isSignedIn, projectId]);
-
-  useEffect(() => {
-    const executionId = automationExecution?.id;
-    if (!executionId || !accessToken || !isAutomationActive(automationExecution.status)) return;
-
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      try {
-        const next = await fetchAutomationExecution(accessToken, executionId);
-        if (disposed) return;
-        setAutomationExecution(next);
-        if (isAutomationActive(next.status)) {
-          timer = setTimeout(poll, 750);
-        }
-      } catch {
-        if (!disposed) setAutomationError(automationUnavailableMessage);
-      }
-    };
-
-    void poll();
-    return () => {
-      disposed = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [
-    accessToken,
-    automationExecution?.id,
-    automationExecution?.status,
-    automationUnavailableMessage,
-    caseId,
-    projectId,
-  ]);
-
-  useEffect(() => {
-    const executionId = automationExecution?.id;
-    const status = automationExecution?.status;
-    if (!executionId || !accessToken || !status || isAutomationActive(status)) return;
-
-    let disposed = false;
-    Promise.all([
-      fetchAutomationArtifacts(accessToken, executionId),
-      fetchAutomationHistory(accessToken, Number(projectId), Number(caseId)),
-    ])
-      .then(([artifacts, history]) => {
-        if (disposed) return;
-        setAutomationArtifacts(artifacts);
-        setAutomationHistory(history.filter((item) => Number(item.caseId) === Number(caseId) || !item.caseId));
-      })
-      .catch(() => {
-        if (!disposed) setAutomationError(automationUnavailableMessage);
-      });
-
-    return () => {
-      disposed = true;
-    };
-  }, [
-    accessToken,
-    automationExecution?.id,
-    automationExecution?.status,
-    automationUnavailableMessage,
-    caseId,
-    projectId,
-  ]);
-
-  const handleAutomationRun = async () => {
-    if (!isGherkin || !isAutomationAuthorized || !selectedAutomationEnvironment || !accessToken) return;
-    setAutomationActionLoading(true);
-    setAutomationError(null);
-    setAutomationArtifacts([]);
-    setAutomationHistory([]);
-    try {
-      const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const execution = await createAutomationExecution(accessToken, {
-        projectId: Number(projectId),
-        caseId: Number(caseId),
-        environmentId: Number(selectedAutomationEnvironment),
-        idempotencyKey: `case-${caseId}-${random}`,
-      });
-      setAutomationExecution(execution);
-    } catch {
-      setAutomationError(automationUnavailableMessage);
-    } finally {
-      setAutomationActionLoading(false);
-    }
-  };
-
-  const handleAutomationCancel = async () => {
-    if (!automationExecution || !accessToken || !isAutomationActive(automationExecution.status)) return;
-    setAutomationActionLoading(true);
-    try {
-      setAutomationExecution(await cancelAutomationExecution(accessToken, automationExecution.id));
-    } catch {
-      setAutomationError(automationUnavailableMessage);
-    } finally {
-      setAutomationActionLoading(false);
-    }
-  };
-
-  const handleArtifactDownload = async (artifact: AutomationArtifact) => {
-    if (!accessToken) return;
-    try {
-      const result = await downloadAutomationArtifact(accessToken, artifact.id);
-      if (!result.content || result.encoding !== 'base64') return;
-      const bytes = Uint8Array.from(atob(result.content), (character) => character.charCodeAt(0));
-      const objectUrl = URL.createObjectURL(new Blob([bytes], { type: result.mimeType ?? 'application/octet-stream' }));
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = artifact.filename ?? `${artifact.kind}.evidence`;
-      link.click();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      setAutomationError(automationUnavailableMessage);
-    }
-  };
-
-  const onPlusClick = async (newStepNo: number) => {
+  const onPlusClick = (newStepNo: number, section?: GherkinSection) => {
     if (!testCase.Steps) {
       return;
     }
@@ -267,11 +138,21 @@ export default function CaseEditor({
       updatedAt: new Date(),
       caseSteps: {
         stepNo: newStepNo,
-        keyword: isGherkin ? 'given' : null,
+        keyword: isGherkin ? 'and' : null,
+        ...(isGherkin ? { section: section ?? 'scenario' } : {}),
       },
       uid: `uid${nextId}`,
       editState: 'new',
     };
+
+    if (isGherkin) {
+      setTestCase({
+        ...testCase,
+        Steps: insertGherkinCaseStep(testCase.Steps, newStep, newStepNo),
+      });
+      setIdCounter(nextId);
+      return;
+    }
 
     const updatedSteps = testCase.Steps.map((step) => {
       if (step.caseSteps.stepNo >= newStepNo) {
@@ -307,6 +188,15 @@ export default function CaseEditor({
     if (!deletedStep) {
       return;
     }
+
+    if (isGherkin) {
+      setTestCase({
+        ...testCase,
+        Steps: deleteGherkinCaseStep(testCase.Steps, stepId),
+      });
+      return;
+    }
+
     const deletedStepNo = deletedStep.caseSteps.stepNo;
     deletedStep.editState = 'deleted';
 
@@ -388,9 +278,8 @@ export default function CaseEditor({
 
   const onStepUpdate = (stepId: number, changeStep: StepType) => {
     setIsDirty(true);
-    if (changeStep.editState === 'notChanged') {
-      changeStep.editState = 'changed';
-    }
+    const nextStep =
+      changeStep.editState === 'notChanged' ? { ...changeStep, editState: 'changed' as const } : changeStep;
 
     if (!testCase.Steps) {
       return;
@@ -400,7 +289,7 @@ export default function CaseEditor({
       ...testCase,
       Steps: testCase.Steps.map((step) => {
         if (step.id === stepId) {
-          return changeStep;
+          return nextStep;
         } else {
           return step;
         }
@@ -413,15 +302,19 @@ export default function CaseEditor({
       if (!tokenContext.isSignedIn()) return;
       try {
         const data = await fetchCase(tokenContext.token.access_token, Number(caseId));
-        data.Steps.forEach((step: StepType) => {
-          step.editState = 'notChanged';
-        });
+        const steps = (Array.isArray(data.Steps) ? data.Steps : []).map((step: StepType) => ({
+          ...step,
+          editState: 'notChanged' as const,
+        }));
+        const normalized =
+          data.template === gherkinTemplate ? normalizeGherkinCaseSteps(steps) : { steps, migrated: false };
 
         // set idCounter to the max step id to avoid id conflict for new steps
         // id is not reflected on database
-        const maxStepId = data.Steps.reduce((maxId: number, step: StepType) => Math.max(maxId, step.id), 0);
+        const maxStepId = steps.reduce((maxId: number, step: StepType) => Math.max(maxId, step.id), 0);
         setIdCounter(maxStepId);
-        setTestCase(data);
+        setTestCase({ ...data, Steps: normalized.steps });
+        setIsDirty(normalized.migrated);
         if (data.Tags) {
           setSelectedTags(Array.isArray(data.Tags) ? data.Tags : []);
         }
@@ -434,21 +327,22 @@ export default function CaseEditor({
 
   return (
     <>
-      <div className="border-b-1 dark:border-neutral-700 w-full p-3 flex items-center justify-between">
-        <div className="flex items-center">
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 border-b-1 p-3 dark:border-neutral-700">
+        <div className="flex min-w-0 items-center">
           <Tooltip content={messages.backToCases} placement="left">
             <Button
               isIconOnly
+              aria-label={messages.backToCases}
               size="sm"
               className="rounded-full bg-neutral-50 dark:bg-neutral-600"
               onPress={() => router.push(`/projects/${projectId}/folders/${folderId}/cases`, { locale: locale })}
             >
-              <ArrowLeft size={16} />
+              <ArrowLeft size={16} aria-hidden="true" />
             </Button>
           </Tooltip>
-          <h3 className="font-bold ms-2">{testCase.title}</h3>
+          <h3 className="ms-2 break-words font-bold">{testCase.title}</h3>
         </div>
-        <div className="flex items-center">
+        <div className="flex flex-wrap items-center justify-end">
           <Button
             startContent={
               <Badge isInvisible={!isDirty} color="danger" size="sm" content="" shape="circle">
@@ -460,10 +354,13 @@ export default function CaseEditor({
             color="primary"
             isLoading={isUpdating}
             onPress={async () => {
-              if (isGherkin && !hasValidGherkinKeywords(testCase.Steps)) {
+              if (isGherkin && !gherkinValidation.valid) {
+                const description = gherkinValidation.issues
+                  .map((item) => describeGherkinIssue(item, messages))
+                  .join(' ');
                 addToast({
                   title: messages.errorTitle,
-                  description: messages.errorUpdatingTestCase,
+                  description,
                   color: 'danger',
                 });
                 return;
@@ -502,7 +399,7 @@ export default function CaseEditor({
         </div>
       </div>
 
-      <div className="p-5">
+      <div className="min-w-0 p-5">
         <h6 className="font-bold">{messages.basic}</h6>
         <Input
           size="sm"
@@ -611,7 +508,7 @@ export default function CaseEditor({
         {templates[testCase.template].uid === 'text' ? (
           <div>
             <h6 className="font-bold">{messages.testDetail}</h6>
-            <div className="flex">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <Textarea
                 size="sm"
                 variant="bordered"
@@ -620,7 +517,7 @@ export default function CaseEditor({
                 onValueChange={(changeValue) => {
                   setTestCase({ ...testCase, preConditions: changeValue });
                 }}
-                className="mt-3 pe-1"
+                className="mt-3 min-w-0 flex-1 pe-1"
               />
 
               <Textarea
@@ -631,159 +528,72 @@ export default function CaseEditor({
                 onValueChange={(changeValue) => {
                   setTestCase({ ...testCase, expectedResults: changeValue });
                 }}
-                className="mt-3 ps-1"
+                className="mt-3 min-w-0 flex-1 ps-1"
               />
             </div>
           </div>
         ) : (
           <div>
-            <div className="flex items-center mb-3">
-              <h6 className="font-bold">{messages.steps}</h6>
-              <Button
-                startContent={<Plus size={16} />}
-                size="sm"
-                isDisabled={!tokenContext.isProjectDeveloper(Number(projectId))}
-                color="primary"
-                className="ms-3"
-                onPress={() => onPlusClick(1)}
-              >
-                {messages.newStep}
-              </Button>
-            </div>
-            {testCase.Steps && (
-              <CaseStepsEditor
-                isDisabled={!tokenContext.isProjectDeveloper(Number(projectId))}
-                steps={testCase.Steps}
-                onStepUpdate={onStepUpdate}
-                onStepPlus={onPlusClick}
-                onStepDelete={onDeleteClick}
-                messages={messages}
-                isGherkin={isGherkin}
-              />
-            )}
-          </div>
-        )}
-
-        {isGherkin && (
-          <div className="mt-6 rounded-md border p-4" aria-labelledby="automation-heading">
-            <div className="flex items-center justify-between gap-3">
-              <h6 id="automation-heading" className="font-bold">
-                {messages.automation}
-              </h6>
-              {automationExecution && (
-                <span role="status" aria-live="polite">
-                  {statusLabel(automationExecution.status)}
-                </span>
-              )}
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-end gap-3">
-              <Select
-                size="sm"
-                variant="bordered"
-                label={messages.automationEnvironment}
-                placeholder={messages.selectAutomationEnvironment}
-                selectedKeys={selectedAutomationEnvironment ? [selectedAutomationEnvironment] : []}
-                onSelectionChange={(selection) => {
-                  if (selection !== 'all' && selection.size > 0)
-                    setSelectedAutomationEnvironment(String(Array.from(selection)[0]));
-                }}
-                isDisabled={
-                  !isAutomationAuthorized || automationEnvironmentLoading || automationEnvironments.length === 0
-                }
-                className="min-w-64"
-              >
-                {automationEnvironments.map((environment) => (
-                  <SelectItem key={String(environment.id)}>{environment.name}</SelectItem>
-                ))}
-              </Select>
-              <Button
-                color="primary"
-                size="sm"
-                startContent={<Play size={15} />}
-                isDisabled={!isAutomationAuthorized || !selectedAutomationEnvironment || automationActionLoading}
-                isLoading={automationActionLoading && !automationExecution}
-                onPress={handleAutomationRun}
-              >
-                {messages.runAutomatically}
-              </Button>
-            </div>
-
-            {automationEnvironmentLoading && <p className="mt-2 text-sm">{messages.automationLoading}</p>}
-            {!automationEnvironmentLoading && automationEnvironments.length === 0 && !automationError && (
-              <p className="mt-2 text-sm">{messages.noAutomationEnvironments}</p>
-            )}
-            {automationError && (
-              <p className="mt-2 text-sm text-danger" role="alert">
-                {automationError}
-              </p>
-            )}
-
-            {automationExecution && (
-              <div className="mt-4 space-y-2 text-sm">
-                {isAutomationActive(automationExecution.status) && (
-                  <Button
-                    color="warning"
-                    variant="flat"
-                    size="sm"
-                    startContent={<X size={15} />}
-                    isLoading={automationActionLoading}
-                    onPress={handleAutomationCancel}
+            {isGherkin ? (
+              <>
+                <CaseStepsEditor
+                  isDisabled={!tokenContext.isProjectDeveloper(Number(projectId))}
+                  steps={testCase.Steps ?? []}
+                  onStepUpdate={onStepUpdate}
+                  onStepPlus={(stepNo, section) => onPlusClick(stepNo, section)}
+                  onStepDelete={onDeleteClick}
+                  messages={messages}
+                  scenarioTitle={testCase.title}
+                  isGherkin
+                />
+                {!gherkinValidation.valid && (
+                  <div
+                    className="mt-4 rounded-md border border-danger-200 bg-danger-50 p-3 text-sm text-danger"
+                    role="alert"
                   >
-                    {messages.cancelAutomation}
-                  </Button>
-                )}
-                {automationExecution.summary && (
-                  <p>
-                    <strong>{messages.automationSummary}:</strong> {automationExecution.summary}
-                  </p>
-                )}
-                {automationExecution.error && (
-                  <p role="alert">
-                    <strong>{messages.automationErrorDetail}:</strong> {automationExecution.error}
-                  </p>
-                )}
-                {(automationExecution.finishedAt || automationExecution.durationMs !== undefined) && (
-                  <p>
-                    <strong>{messages.automationDuration}:</strong>{' '}
-                    {formatAutomationDuration(automationExecution.durationMs)}
-                  </p>
-                )}
-                <div>
-                  <strong>{messages.automationEvidence}</strong>
-                  {automationArtifacts.length === 0 ? (
-                    <p>{messages.automationNoEvidence}</p>
-                  ) : (
-                    <ul className="mt-1 space-y-1">
-                      {automationArtifacts.map((artifact) => (
-                        <li key={String(artifact.id)} className="flex items-center gap-2">
-                          <span>{artifact.filename ?? artifact.kind}</span>
-                          <Button
-                            size="sm"
-                            variant="light"
-                            startContent={<Download size={14} />}
-                            onPress={() => handleArtifactDownload(artifact)}
-                          >
-                            {messages.downloadAutomationArtifact}
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                {automationHistory.length > 0 && (
-                  <div>
-                    <strong>{messages.automationHistory}</strong>
-                    <ul className="mt-1 space-y-1">
-                      {automationHistory.map((historyItem) => (
-                        <li key={String(historyItem.id)}>
-                          {statusLabel(historyItem.status)} — {formatAutomationDuration(historyItem.durationMs)}
-                        </li>
+                    <p className="font-semibold">{messages.errorTitle}</p>
+                    <ul className="mt-1 list-disc space-y-1 ps-5">
+                      {gherkinValidation.issues.map((item, index) => (
+                        <li key={`${item.field}-${item.code}-${index}`}>{describeGherkinIssue(item, messages)}</li>
                       ))}
                     </ul>
                   </div>
                 )}
-              </div>
+                <ScenarioExamplesEditor
+                  value={testCase.gherkinExamples}
+                  isDisabled={!tokenContext.isProjectDeveloper(Number(projectId))}
+                  messages={messages}
+                  onChange={(gherkinExamples) => {
+                    setTestCase({ ...testCase, gherkinExamples });
+                    setIsDirty(true);
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <div className="mb-3 flex items-center">
+                  <h6 className="font-bold">{messages.steps}</h6>
+                  <Button
+                    startContent={<Plus size={16} aria-hidden="true" />}
+                    aria-label={messages.newStep}
+                    size="sm"
+                    isDisabled={!tokenContext.isProjectDeveloper(Number(projectId))}
+                    color="primary"
+                    className="ms-3"
+                    onPress={() => onPlusClick(1)}
+                  >
+                    {messages.newStep}
+                  </Button>
+                </div>
+                <CaseStepsEditor
+                  isDisabled={!tokenContext.isProjectDeveloper(Number(projectId))}
+                  steps={testCase.Steps ?? []}
+                  onStepUpdate={onStepUpdate}
+                  onStepPlus={onPlusClick}
+                  onStepDelete={onDeleteClick}
+                  messages={messages}
+                />
+              </>
             )}
           </div>
         )}

@@ -7,6 +7,7 @@ import defineStep from '../../models/steps.js';
 import defineCaseStep from '../../models/caseSteps.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
+import { gherkinTemplate, normalizeGherkinSection } from '../../config/enums.js';
 
 export default function (sequelize) {
   const { verifySignedIn } = authMiddleware(sequelize);
@@ -46,12 +47,15 @@ export default function (sequelize) {
   async function _cloneCasesAndSteps(folderId, targetFolderId, transaction) {
     const folderCases = await Case.findAll({
       where: { folderId },
-      include: [{ model: Step, through: { attributes: ['stepNo'] } }],
+      include: [{ model: Step, through: { attributes: ['stepNo', 'keyword', 'section'] } }],
     });
 
     if (folderCases.length === 0) return;
 
     const cases = folderCases.map((c) => c.get({ plain: true }));
+    if (cases.some((c) => (c.Steps ?? []).some((step) => normalizeGherkinSection(step.caseSteps?.section) === null))) {
+      throw new Error('invalid_case_step_section');
+    }
 
     const clonedCases = cases.map((c) => {
       // eslint-disable-next-line no-unused-vars
@@ -74,6 +78,11 @@ export default function (sequelize) {
           caseId: newCase.id,
           stepId: step.id,
           stepNo: clonedSteps[index].caseSteps.stepNo,
+          keyword: clonedSteps[index].caseSteps.keyword ?? null,
+          section:
+            c.template === gherkinTemplate
+              ? 'scenario'
+              : normalizeGherkinSection(clonedSteps[index].caseSteps?.section),
         }));
 
         await CaseStep.bulkCreate(caseSteps, { transaction });
@@ -99,6 +108,9 @@ export default function (sequelize) {
 
       res.status(201).send({ message: 'Folder cloned successfully' });
     } catch (err) {
+      if (err instanceof Error && err.message === 'invalid_case_step_section') {
+        return res.status(400).json({ error: 'Invalid Gherkin step section' });
+      }
       console.error(err);
       res.status(500).send('Internal Server Error');
     }

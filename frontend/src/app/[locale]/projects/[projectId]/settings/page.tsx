@@ -45,6 +45,15 @@ export default function Page({ params }: { params: { projectId: string; locale: 
     tagErrorUpdate: t('tag_error_update'),
     tagErrorDelete: t('tag_error_delete'),
     tableAria: ui('settings_table'),
+    automationEnvironment: t('automation_environment'),
+    automationEnvironmentDescription: t('automation_environment_description'),
+    automationBaseUrl: t('automation_base_url'),
+    automationEnabled: t('automation_enabled'),
+    automationCaptureVideo: t('automation_capture_video'),
+    automationSave: t('automation_save'),
+    automationLoading: t('automation_loading'),
+    automationSaved: t('automation_saved'),
+    automationError: t('automation_error'),
   };
 
   const pt = useTranslations('ProjectDialog');

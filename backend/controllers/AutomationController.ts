@@ -107,9 +107,12 @@ export class AutomationController extends Controller {
     @Query() page = 1,
     @Query() limit = 20,
     @Query() status?: string,
-    @Query() caseId?: number
+    @Query() caseId?: number,
+    @Query() runCaseId?: number
   ): Promise<AutomationResponse> {
-    return this.handle(request, (userId) => this.service.history({ userId, projectId, page, limit, status, caseId }));
+    return this.handle(request, (userId) =>
+      this.service.history({ userId, projectId, page, limit, status, caseId, runCaseId })
+    );
   }
 
   @Get('projects/{projectId}/environments')

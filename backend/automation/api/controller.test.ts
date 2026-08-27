@@ -87,7 +87,7 @@ describe('automation controller contract', () => {
 
     const response = await new AutomationController(app).getEnvironments(request, 10);
 
-    expect(response).toEqual({ items: [{ id: 3, name: 'QA', enabled: true }] });
+    expect(response).toEqual({ items: [{ id: 3, name: 'QA', enabled: true, isDefault: false }] });
   });
 
   it('keeps API readiness false for a registered executor without queue, worker heartbeat, or phase proof', async () => {

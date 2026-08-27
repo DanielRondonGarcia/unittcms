@@ -39,7 +39,7 @@ export default function (sequelize) {
         include: [
           {
             model: Step,
-            through: { attributes: ['stepNo', 'keyword'] },
+            through: { attributes: ['stepNo', 'keyword', 'section'] },
           },
           {
             model: Attachment,

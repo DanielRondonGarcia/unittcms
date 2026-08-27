@@ -30,6 +30,33 @@ function prepareAutomationRuntime() {
   }
 }
 
+function readWorkerSecret() {
+  const secretFile = process.env.AUTOMATION_WORKER_SECRET_FILE?.trim();
+  if (secretFile) {
+    try {
+      const secret = fs.readFileSync(secretFile, 'utf8').trim();
+      if (!secret) throw new Error('automation_worker_secret_required');
+      return secret;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'automation_worker_secret_required') throw error;
+      throw new Error('automation_worker_secret_file_unreadable');
+    }
+  }
+
+  const secret = process.env.AUTOMATION_WORKER_SECRET?.trim();
+  if (!secret) throw new Error('automation_worker_secret_required');
+  return secret;
+}
+
+function workerAllowedHosts() {
+  const value = process.env.HERCULES_ALLOWED_HOSTS?.trim();
+  if (!value) return undefined;
+  return value
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean);
+}
+
 async function runMigrations() {
   try {
     console.log('Running database migrations...');
@@ -105,6 +132,9 @@ async function startWorker() {
   if (process.env.AUTOMATION_EXECUTION_MODE !== 'real') {
     throw new Error('The worker profile requires AUTOMATION_EXECUTION_MODE=real');
   }
+  if (process.env.AUTOMATION_PHASE0_READY !== 'true') {
+    throw new Error('automation_phase0_not_ready');
+  }
   const workerModuleName = process.env.AUTOMATION_WORKER_MODULE;
   if (!workerModuleName) {
     throw new Error('The worker profile requires an injected AUTOMATION_WORKER_MODULE');
@@ -116,6 +146,12 @@ async function startWorker() {
   await workerModule.start({
     redisUrl: process.env.AUTOMATION_REDIS_URL,
     artifactRoot: process.env.AUTOMATION_ARTIFACT_ROOT,
+    workdir: process.env.AUTOMATION_HERCULES_WORKDIR,
+    image: process.env.AUTOMATION_HERCULES_IMAGE,
+    workVolume: process.env.AUTOMATION_HERCULES_VOLUME,
+    allowedHosts: workerAllowedHosts(),
+    phase0Ready: process.env.AUTOMATION_PHASE0_READY === 'true',
+    workerSecret: readWorkerSecret(),
   });
 }
 

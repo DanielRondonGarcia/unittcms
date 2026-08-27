@@ -1,0 +1,489 @@
+import { transitionExecution } from '../domain/index.js';
+import type { CaseSource } from '../domain/index.js';
+import type { AutomationStore, RunCaseSource, StoredExecution } from '../ports/index.js';
+
+type PlainRecord = Record<string, unknown>;
+type ModelInstance = PlainRecord & {
+  get?: (options?: { plain?: boolean }) => unknown;
+  toJSON?: () => unknown;
+  update?: (values: PlainRecord) => Promise<unknown>;
+};
+type ModelLike = {
+  findByPk(id: unknown, options?: PlainRecord): Promise<unknown>;
+  findOne(options: PlainRecord): Promise<unknown>;
+  findAll(options?: PlainRecord): Promise<unknown[]>;
+  count(options?: PlainRecord): Promise<number>;
+  create(values: PlainRecord): Promise<unknown>;
+  update(values: PlainRecord, options?: PlainRecord): Promise<unknown>;
+};
+
+export type AutomationModels = {
+  Case: ModelLike;
+  Step: ModelLike;
+  CaseStep: ModelLike;
+  Folder: ModelLike;
+  Project: ModelLike;
+  Member: ModelLike;
+  Run: ModelLike;
+  RunCase: ModelLike;
+  AutomationDefinition: ModelLike;
+  AutomationExecution: ModelLike;
+  TestEnvironment: ModelLike;
+  ExecutionArtifact: ModelLike;
+};
+
+const EXECUTION_FIELDS = [
+  'id',
+  'definitionId',
+  'projectId',
+  'caseId',
+  'runCaseId',
+  'environmentId',
+  'captureVideo',
+  'status',
+  'attempt',
+  'engine',
+  'model',
+  'queuedAt',
+  'startedAt',
+  'finishedAt',
+  'durationMs',
+  'summary',
+  'error',
+  'errorKind',
+  'attemptHistory',
+  'lastWorkerEvent',
+  'lastAttemptStatus',
+  'idempotencyKey',
+  'correlationId',
+  'createdAt',
+  'updatedAt',
+] as const;
+
+const EXECUTION_UPDATE_FIELDS = [
+  'status',
+  'attempt',
+  'queuedAt',
+  'startedAt',
+  'finishedAt',
+  'durationMs',
+  'summary',
+  'error',
+  'errorKind',
+  'attemptHistory',
+  'lastWorkerEvent',
+  'lastAttemptStatus',
+] as const;
+
+const EXECUTION_STATES = new Set(['queued', 'running', 'passed', 'failed', 'error', 'cancelled']);
+
+function plain(value: unknown): PlainRecord | null {
+  if (!value || typeof value !== 'object') return null;
+  const instance = value as ModelInstance;
+  const result = typeof instance.get === 'function' ? instance.get({ plain: true }) : (instance.toJSON?.() ?? instance);
+  return result && typeof result === 'object' ? (result as PlainRecord) : null;
+}
+
+function positiveId(value: unknown): number {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('automation_id_invalid');
+  return id;
+}
+
+function parseArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function stringArray(value: unknown): string[] {
+  return [
+    ...new Set(
+      parseArray(value)
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+    ),
+  ].filter(Boolean);
+}
+
+function secretReferences(value: unknown): string[] {
+  return stringArray(value).filter((item) => /^(?:secret|vault|env):\/\//i.test(item));
+}
+
+function attemptHistory(value: unknown): unknown[] {
+  return parseArray(value);
+}
+
+function safeEnvironment(value: PlainRecord | null): Record<string, unknown> | null {
+  if (!value) return null;
+  const id = Number(value.id);
+  const projectId = Number(value.projectId);
+  if (![id, projectId].every((item) => Number.isInteger(item) && item > 0)) return null;
+  return {
+    id,
+    projectId,
+    name: typeof value.name === 'string' ? value.name : '',
+    baseUrl: typeof value.baseUrl === 'string' ? value.baseUrl : '',
+    allowedHosts: stringArray(value.allowedHosts),
+    secretRefs: secretReferences(value.secretRefs),
+    enabled: value.enabled !== false,
+    isDefault: value.isDefault === true,
+    captureVideo: value.captureVideo === true,
+  };
+}
+
+function safeExecution(value: unknown): StoredExecution | null {
+  const source = plain(value);
+  if (!source) return null;
+  const id = String(source.id ?? '');
+  const projectId = Number(source.projectId);
+  const caseId = Number(source.caseId);
+  const attempt = Number(source.attempt);
+  const status = String(source.status ?? '');
+  if (
+    !id ||
+    !Number.isInteger(projectId) ||
+    !Number.isInteger(caseId) ||
+    !Number.isInteger(attempt) ||
+    !EXECUTION_STATES.has(status)
+  )
+    throw new Error('automation_execution_invalid');
+  const result: StoredExecution = Object.fromEntries(
+    EXECUTION_FIELDS.filter((field) => field in source).map((field) => [field, source[field]])
+  ) as StoredExecution;
+  result.id = id;
+  result.projectId = projectId;
+  result.caseId = caseId;
+  result.attempt = attempt;
+  result.status = status as StoredExecution['status'];
+  result.attemptHistory = attemptHistory(source.attemptHistory);
+  const definition = plain(source.AutomationDefinition ?? source.definition);
+  if (definition?.snapshot !== undefined) {
+    try {
+      result.snapshot = JSON.parse(String(definition.snapshot));
+    } catch {
+      result.snapshot = { feature: String(definition.snapshot) };
+    }
+  }
+  if (definition?.snapshotHash !== undefined) result.snapshotHash = String(definition.snapshotHash);
+  return result;
+}
+
+function safeCase(value: unknown): CaseSource | null {
+  const source = plain(value);
+  if (!source) return null;
+  const folder = plain(source.Folder);
+  const project = plain(folder?.Project);
+  const sourceSteps = source.Steps ?? source.steps;
+  const steps = Array.isArray(sourceSteps)
+    ? sourceSteps.map((step) => {
+        const item = plain(step) ?? {};
+        const through = plain(item.caseSteps) ?? plain(item.CaseStep) ?? {};
+        return {
+          step: item.step,
+          caseSteps: {
+            stepNo: through.stepNo,
+            keyword: through.keyword,
+            section: through.section,
+          },
+        };
+      })
+    : [];
+  return {
+    id: source.id,
+    projectId: source.projectId ?? project?.id,
+    title: source.title,
+    template: source.template,
+    automationVersion: source.automationVersion,
+    gherkinExamples: source.gherkinExamples,
+    Steps: steps,
+    Folder: project ? { Project: { id: project.id } } : undefined,
+  } as CaseSource;
+}
+
+function isUniqueConstraint(error: unknown): boolean {
+  const value = error as { name?: unknown; message?: unknown };
+  return (
+    String(value?.name ?? '').includes('UniqueConstraint') || /unique constraint/i.test(String(value?.message ?? ''))
+  );
+}
+
+function boundedText(value: unknown, max = 10_000): string | null {
+  if (value === undefined || value === null) return null;
+  return String(value).slice(0, max);
+}
+
+function createValues(value: PlainRecord): PlainRecord {
+  const result: PlainRecord = {};
+  for (const field of [
+    'definitionId',
+    'projectId',
+    'caseId',
+    'runCaseId',
+    'environmentId',
+    'captureVideo',
+    'status',
+    'attempt',
+    'engine',
+    'model',
+    'queuedAt',
+    'startedAt',
+    'finishedAt',
+    'durationMs',
+    'idempotencyKey',
+    'correlationId',
+  ]) {
+    if (field in value && value[field] !== undefined) result[field] = value[field];
+  }
+  result.summary = boundedText(value.summary);
+  result.error = boundedText(value.error);
+  result.errorKind = boundedText(value.errorKind, 64);
+  result.attemptHistory = JSON.stringify(attemptHistory(value.attemptHistory));
+  return result;
+}
+
+function updateValues(value: PlainRecord): PlainRecord {
+  const result: PlainRecord = {};
+  for (const field of EXECUTION_UPDATE_FIELDS) {
+    if (field === 'attemptHistory') continue;
+    if (field in value && value[field] !== undefined)
+      result[field] = field === 'summary' || field === 'error' ? boundedText(value[field]) : value[field];
+  }
+  if ('attemptHistory' in value) result.attemptHistory = JSON.stringify(attemptHistory(value.attemptHistory));
+  if (value.status === 'queued') {
+    if (!('startedAt' in value) || value.startedAt === undefined) result.startedAt = null;
+    if (!('finishedAt' in value) || value.finishedAt === undefined) result.finishedAt = null;
+    if (!('durationMs' in value) || value.durationMs === undefined) result.durationMs = null;
+  }
+  return result;
+}
+
+export class SequelizeAutomationStore implements AutomationStore {
+  private readonly models: AutomationModels;
+
+  constructor(models: AutomationModels) {
+    this.models = models;
+  }
+
+  async findCase(caseId: number): Promise<CaseSource | null> {
+    const id = positiveId(caseId);
+    let value: unknown;
+    try {
+      value = await this.models.Case.findByPk(id, {
+        include: [
+          {
+            model: this.models.Folder,
+            attributes: ['id', 'projectId'],
+            include: [{ model: this.models.Project, attributes: ['id'] }],
+          },
+          {
+            model: this.models.Step,
+            attributes: ['id', 'step'],
+            through: { attributes: ['stepNo', 'keyword', 'section'] },
+          },
+        ],
+      });
+    } catch {
+      value = await this.models.Case.findByPk(id);
+      const source = plain(value);
+      if (source) {
+        const steps = await this.models.CaseStep.findAll({
+          where: { caseId: id },
+          include: [{ model: this.models.Step, attributes: ['step'] }],
+        });
+        source.Steps = steps.map((step) => {
+          const link = plain(step) ?? {};
+          const stepRecord = plain(link.Step) ?? {};
+          return { step: stepRecord.step, caseSteps: link };
+        });
+        value = source;
+      }
+    }
+    return safeCase(value);
+  }
+
+  async canAccessProject(userId: number, projectId: number): Promise<boolean> {
+    const user = positiveId(userId);
+    const project = positiveId(projectId);
+    const record = plain(await this.models.Project.findByPk(project));
+    if (!record) return false;
+    if (record.isPublic === true || Number(record.userId) === user) return true;
+    return Boolean(await this.models.Member.findOne({ where: { userId: user, projectId: project } }));
+  }
+
+  async findExecutionByIdempotencyKey(input: {
+    projectId: number;
+    idempotencyKey: string;
+  }): Promise<StoredExecution | null> {
+    const record = await this.models.AutomationExecution.findOne({
+      where: { projectId: positiveId(input.projectId), idempotencyKey: String(input.idempotencyKey).trim() },
+    });
+    return safeExecution(record);
+  }
+
+  async createDefinition(value: PlainRecord): Promise<PlainRecord> {
+    const data = {
+      projectId: positiveId(value.projectId),
+      caseId: positiveId(value.caseId),
+      version: Number(value.version),
+      snapshot: String(value.snapshot ?? ''),
+      snapshotHash: String(value.snapshotHash ?? ''),
+    };
+    try {
+      return plain(await this.models.AutomationDefinition.create(data)) ?? data;
+    } catch (error) {
+      if (!isUniqueConstraint(error)) throw error;
+      const existing = await this.models.AutomationDefinition.findOne({
+        where: { projectId: data.projectId, caseId: data.caseId, version: data.version },
+      });
+      return plain(existing) ?? data;
+    }
+  }
+
+  async createExecution(value: PlainRecord): Promise<StoredExecution> {
+    const data = createValues(value);
+    data.queuedAt ??= new Date();
+    try {
+      const record = await this.models.AutomationExecution.create(data);
+      const result = safeExecution(record);
+      if (!result) throw new Error('automation_execution_invalid');
+      return result;
+    } catch (error) {
+      if (!isUniqueConstraint(error)) throw error;
+      const existing = await this.findExecutionByIdempotencyKey({
+        projectId: Number(data.projectId),
+        idempotencyKey: String(data.idempotencyKey),
+      });
+      if (!existing) throw error;
+      return existing;
+    }
+  }
+
+  async findExecution(executionId: string): Promise<StoredExecution | null> {
+    return safeExecution(
+      await this.models.AutomationExecution.findByPk(String(executionId), {
+        include: [{ model: this.models.AutomationDefinition, attributes: ['version', 'snapshot', 'snapshotHash'] }],
+      })
+    );
+  }
+
+  async updateExecution(executionId: string, value: PlainRecord): Promise<StoredExecution> {
+    const record = (await this.models.AutomationExecution.findByPk(String(executionId))) as ModelInstance | null;
+    if (!record || typeof record.update !== 'function') throw new Error('execution_not_found');
+    await record.update(updateValues(value));
+    const result = safeExecution(record);
+    if (!result) throw new Error('automation_execution_invalid');
+    return result;
+  }
+
+  async cancelExecution(executionId: string): Promise<StoredExecution> {
+    const current = await this.findExecution(executionId);
+    if (!current) throw new Error('execution_not_found');
+    if (['passed', 'failed', 'error', 'cancelled'].includes(current.status)) return current;
+    const transitioned = transitionExecution(current, 'cancelled');
+    await this.models.AutomationExecution.update(updateValues(transitioned), {
+      where: { id: String(executionId), status: current.status },
+    });
+    return (await this.findExecution(executionId)) ?? current;
+  }
+
+  async listExecutions(query: PlainRecord): Promise<{ items: StoredExecution[]; total: number }> {
+    const where: PlainRecord = { projectId: positiveId(query.projectId) };
+    if (query.status !== undefined) where.status = String(query.status);
+    if (query.caseId !== undefined) where.caseId = positiveId(query.caseId);
+    if (query.runCaseId !== undefined) where.runCaseId = positiveId(query.runCaseId);
+    const offset = Math.max(0, Math.floor(Number(query.offset ?? 0)));
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(query.limit ?? 20))));
+    const [items, total] = await Promise.all([
+      this.models.AutomationExecution.findAll({
+        where,
+        order: [
+          ['queuedAt', 'DESC'],
+          ['id', 'DESC'],
+        ],
+        offset,
+        limit,
+      }),
+      this.models.AutomationExecution.count({ where }),
+    ]);
+    return {
+      items: items.map((item) => safeExecution(item)).filter((item): item is StoredExecution => Boolean(item)),
+      total,
+    };
+  }
+
+  async listEnvironments(projectId: number): Promise<Array<Record<string, unknown>>> {
+    const items = await this.models.TestEnvironment.findAll({
+      where: { projectId: positiveId(projectId) },
+      order: [['id', 'ASC']],
+    });
+    return items
+      .map((item) => safeEnvironment(plain(item)))
+      .filter((item): item is Record<string, unknown> => Boolean(item));
+  }
+
+  async findEnvironment(environmentId: number): Promise<Record<string, unknown> | null> {
+    return safeEnvironment(plain(await this.models.TestEnvironment.findByPk(positiveId(environmentId))));
+  }
+
+  async findRunCase(runCaseId: number): Promise<RunCaseSource | null> {
+    const record = plain(await this.models.RunCase.findByPk(positiveId(runCaseId)));
+    if (!record) return null;
+    const run = plain(await this.models.Run.findByPk(record.runId));
+    if (!run) return null;
+    const id = Number(record.id);
+    const caseId = Number(record.caseId);
+    const runId = Number(record.runId);
+    const projectId = Number(run.projectId);
+    if (![id, caseId, runId, projectId].every((value) => Number.isInteger(value) && value > 0)) return null;
+    return {
+      id,
+      caseId,
+      runId,
+      projectId,
+    };
+  }
+
+  async updateRunCaseStatus(input: { runCaseId: number; projectId: number; status: number }): Promise<void> {
+    if (![1, 2].includes(input.status)) throw new Error('run_case_status_invalid');
+    const runCase = await this.findRunCase(input.runCaseId);
+    if (!runCase || runCase.projectId !== positiveId(input.projectId)) throw new Error('run_case_not_found');
+    await this.models.RunCase.update({ status: input.status }, { where: { id: runCase.id } });
+  }
+
+  async listArtifacts(executionId: string): Promise<unknown[]> {
+    const execution = await this.findExecution(executionId);
+    if (!execution) return [];
+    const items = await this.models.ExecutionArtifact.findAll({ where: { executionId: String(executionId) } });
+    return items.map((item) => this.safeArtifact(item, execution.projectId));
+  }
+
+  async findArtifact(artifactId: string): Promise<Record<string, unknown> | null> {
+    const item = await this.models.ExecutionArtifact.findByPk(String(artifactId));
+    const record = plain(item);
+    if (!record) return null;
+    const execution = await this.findExecution(String(record.executionId));
+    return execution ? this.safeArtifact(record, execution.projectId) : null;
+  }
+
+  private safeArtifact(value: unknown, projectId: number): Record<string, unknown> {
+    const source = plain(value) ?? {};
+    return {
+      id: String(source.id),
+      executionId: String(source.executionId),
+      projectId,
+      attempt: Number(source.attempt),
+      kind: source.kind,
+      storageKey: source.storageKey,
+      mimeType: source.mimeType,
+      size: Number(source.size),
+      sha256: source.sha256,
+      expiresAt: source.expiresAt,
+    };
+  }
+}

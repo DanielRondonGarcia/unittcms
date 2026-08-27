@@ -43,6 +43,8 @@ import {
   fetchProjectCases,
   includeExcludeTestCases,
   changeStatus,
+  mergeRunCaseChanges,
+  hasUnsavedRunCaseChanges,
   exportRun,
   assignRunCases,
   fetchProjectMembersForRun,
@@ -50,6 +52,7 @@ import {
 import { fetchFolders } from '../../folders/foldersControl';
 import RunProgressChart from './RunPregressDonutChart';
 import TestCaseSelector from './TestCaseSelector';
+import AutomationBatchPanel from './AutomationBatchPanel';
 import AssigneePicker from './AssigneePicker';
 import TestRunFilter from './TestRunFilter';
 import { useRouter } from '@/src/i18n/routing';
@@ -107,6 +110,7 @@ export default function RunEditor({
   const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set([]));
   const [selectedFolder, setSelectedFolder] = useState<TreeNodeData | null>(null);
   const [testCases, setTestCases] = useState<CaseType[]>([]);
+  const [allTestCases, setAllTestCases] = useState<CaseType[]>([]);
   const [filteredTestCases, setFilteredTestCases] = useState<CaseType[]>([]);
   const [isNameInvalid] = useState<boolean>(false);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
@@ -145,6 +149,12 @@ export default function RunEditor({
       }
     });
     setTestCases(casesData);
+    if (!search && !status?.length && !tag?.length && !assignee) setAllTestCases(casesData);
+  };
+
+  const mergeCaseChanges = (nextCases: CaseType[]) => {
+    setTestCases(nextCases);
+    setAllTestCases((current) => mergeRunCaseChanges(current, nextCases));
   };
 
   const isSignedIn = tokenContext.isSignedIn();
@@ -192,14 +202,14 @@ export default function RunEditor({
   const handleChangeStatus = async (changeCaseId: number, newStatus: number) => {
     setIsDirty(true);
     const newTestCases = changeStatus(changeCaseId, newStatus, testCases);
-    setTestCases(newTestCases);
+    mergeCaseChanges(newTestCases);
   };
 
   const handleIncludeExcludeCase = async (isInclude: boolean, clickedTestCaseId: number) => {
     setIsDirty(true);
     const keys = [clickedTestCaseId];
     const newTestCases = includeExcludeTestCases(isInclude, keys, Number(runId), testCases);
-    setTestCases(newTestCases);
+    mergeCaseChanges(newTestCases);
   };
 
   const handleBulkIncludeExcludeCases = async (isInclude: boolean) => {
@@ -212,8 +222,7 @@ export default function RunEditor({
     }
 
     const newTestCases = includeExcludeTestCases(isInclude, keys, Number(runId), testCases);
-    setTestCases(newTestCases);
-    setSelectedKeys(new Set([]));
+    mergeCaseChanges(newTestCases);
   };
 
   const handleAssignCase = (runCaseId: number, userId: number | null) => {
@@ -302,6 +311,9 @@ export default function RunEditor({
     }
   };
 
+  const casesForAutomation = allTestCases.length > 0 ? allTestCases : testCases;
+  const hasPendingRunCaseChanges = pendingAssignees.size > 0 || hasUnsavedRunCaseChanges(casesForAutomation);
+
   // **************************************************************************
   // Filter
   // **************************************************************************
@@ -330,21 +342,22 @@ export default function RunEditor({
 
   return (
     <>
-      <div className="border-b-1 dark:border-neutral-700 w-full p-3 flex items-center justify-between">
-        <div className="flex items-center">
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 border-b-1 p-3 dark:border-neutral-700">
+        <div className="flex min-w-0 items-center">
           <Tooltip content={messages.backToRuns}>
             <Button
               isIconOnly
               size="sm"
-              className="rounded-full bg-neutral-50 dark:bg-neutral-600"
+              className="rounded-full bg-neutral-50 dark:bg-neutral-600 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+              aria-label={messages.backToRuns}
               onPress={() => router.push(`/projects/${projectId}/runs`, { locale: locale })}
             >
               <ArrowLeft size={16} />
             </Button>
           </Tooltip>
-          <h3 className="font-bold ms-2">{testRun.name}</h3>
+          <h3 className="ms-2 break-words font-bold">{testRun.name}</h3>
         </div>
-        <div className="flex items-center">
+        <div className="flex flex-wrap items-center justify-end">
           <Popover placement="bottom" isOpen={showFilter} onOpenChange={(open) => setShowFilter(open)}>
             <Badge
               color="danger"
@@ -435,17 +448,18 @@ export default function RunEditor({
         </div>
       </div>
 
-      <div className="container mx-auto max-w-5xl pt-6 px-6 flex-grow">
-        <div className="flex">
+      <div className="container mx-auto min-w-0 max-w-5xl flex-grow px-6 pt-6">
+        <div className="flex flex-col gap-4 md:flex-row">
           <div>
-            <div className="w-96 h-72">
+            <div className="h-72 w-full max-w-96 md:w-96">
               <div className="flex items-center">
                 <h4 className="font-bold">{messages.progress}</h4>
                 <Tooltip content={messages.refresh}>
                   <Button
                     isIconOnly
                     size="sm"
-                    className="rounded-full bg-transparent ms-1"
+                    className="rounded-full bg-transparent ms-1 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                    aria-label={messages.refresh}
                     onPress={fetchRunAndStatusCount}
                   >
                     <RotateCw size={16} />
@@ -460,7 +474,7 @@ export default function RunEditor({
               />
             </div>
           </div>
-          <div className="flex-grow">
+          <div className="min-w-0 flex-grow">
             <Input
               size="sm"
               type="text"
@@ -508,6 +522,15 @@ export default function RunEditor({
             </div>
           </div>
         </div>
+
+        <AutomationBatchPanel
+          projectId={projectId}
+          runId={runId}
+          cases={casesForAutomation}
+          messages={messages}
+          isAuthorized={tokenContext.isProjectDeveloper(Number(projectId))}
+          hasPendingRunCaseChanges={hasPendingRunCaseChanges}
+        />
 
         <Divider className="my-6" />
         <div className="flex items-center justify-between">
@@ -561,8 +584,8 @@ export default function RunEditor({
           </div>
         </div>
 
-        <div className="mt-3 flex rounded-small border-2 dark:border-neutral-700 mb-12">
-          <div className="w-3/12 border-r-1 dark:border-neutral-700">
+        <div className="mt-3 mb-12 flex min-w-0 flex-col rounded-small border-2 dark:border-neutral-700 md:flex-row">
+          <div className="w-full shrink-0 border-b-1 dark:border-neutral-700 md:w-3/12 md:border-b-0 md:border-r-1">
             <Tree
               data={treeData}
               className="w-full"
@@ -589,8 +612,9 @@ export default function RunEditor({
                     node.data.children && node.data.children.length > 0 ? (
                       <Button
                         size="sm"
-                        className="bg-transparent rounded-full h-6 w-6 min-w-4"
                         isIconOnly
+                        aria-label={node.isOpen ? messages.collapseFolder : messages.expandFolder}
+                        className="bg-transparent rounded-full h-6 w-6 min-w-4 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                         onPress={() => node.toggle()}
                       >
                         {node.isOpen ? (
@@ -607,7 +631,7 @@ export default function RunEditor({
               )}
             </Tree>
           </div>
-          <div className="w-9/12 overflow-x-auto">
+          <div className="min-w-0 w-full md:w-9/12">
             <TestCaseSelector
               projectId={projectId}
               runId={runId}

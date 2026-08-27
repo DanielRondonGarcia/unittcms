@@ -3,8 +3,9 @@ import { useEffect, useState, useContext } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Tabs, Tab } from '@heroui/react';
 import CaseDetail from './CaseDetail';
+import AutomationExecutionPanel from './AutomationExecutionPanel';
+import AutomationHistory from './AutomationHistory';
 import Comments from '@/components/Comments';
-import History from '@/components/History';
 import { TokenContext } from '@/utils/TokenProvider';
 import { fetchCase } from '@/utils/caseControl';
 import { logError } from '@/utils/errorHandler';
@@ -13,6 +14,7 @@ import type { RunCaseType, RunDetailMessages } from '@/types/run';
 import type { PriorityMessages } from '@/types/priority';
 import type { TestTypeMessages } from '@/types/testType';
 import type { CommentMessages } from '@/types/comment';
+import { gherkinTemplate } from '@/config/selection';
 
 type Props = {
   projectId: string;
@@ -69,10 +71,16 @@ export default function TestCaseDetailPane({
 
         // Find the runCase for this case in this run
         if (data.RunCases && data.RunCases.length > 0) {
-          const runCase = data.RunCases.find((rc: RunCaseType) => rc.runId === Number(runId));
-          if (runCase) {
-            setRunCaseId(runCase.id);
-          }
+          const runCase = data.RunCases.find(
+            (rc: RunCaseType) =>
+              Number(rc.runId) === Number(runId) &&
+              Number(rc.caseId) === Number(caseId) &&
+              Number.isInteger(Number(rc.id)) &&
+              Number(rc.id) > 0
+          );
+          setRunCaseId(runCase ? Number(runCase.id) : undefined);
+        } else {
+          setRunCaseId(undefined);
         }
       } catch (error: unknown) {
         logError('Error fetching case data', error);
@@ -88,10 +96,11 @@ export default function TestCaseDetailPane({
     return <div>{messages.loading}</div>;
   } else {
     return (
-      <div className="flex h-full w-full flex-col p-3">
+      <div className="flex h-full min-w-0 w-full flex-col p-3">
         <Tabs
           aria-label={messages.options}
           size="sm"
+          className="min-w-0 max-w-full"
           selectedKey={selectedTab}
           onSelectionChange={(key) => setSelectedTab(String(key))}
         >
@@ -104,6 +113,16 @@ export default function TestCaseDetailPane({
               testTypeMessages={testTypeMessages}
               priorityMessages={priorityMessages}
             />
+            {testCase.template === gherkinTemplate && runCaseId !== undefined && (
+              <AutomationExecutionPanel
+                projectId={projectId}
+                runId={runId}
+                caseId={caseId}
+                runCaseId={runCaseId}
+                locale={locale}
+                messages={messages}
+              />
+            )}
           </Tab>
           <Tab key="comments" title={messages.comments}>
             <Comments
@@ -114,12 +133,13 @@ export default function TestCaseDetailPane({
             />
           </Tab>
           <Tab key="history" title={messages.history}>
-            <History
-              messages={{
-                history: messages.history,
-                noticeTitle: messages.historyNotice,
-                unavailable: messages.historyUnavailable,
-              }}
+            <AutomationHistory
+              projectId={projectId}
+              runId={runId}
+              caseId={caseId}
+              runCaseId={runCaseId}
+              locale={locale}
+              messages={messages}
             />
           </Tab>
         </Tabs>

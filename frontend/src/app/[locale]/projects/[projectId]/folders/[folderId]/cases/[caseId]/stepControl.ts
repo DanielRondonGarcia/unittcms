@@ -4,13 +4,24 @@ import { logError } from '@/utils/errorHandler';
 const apiServer = Config.apiServer;
 
 async function updateSteps(jwt: string, caseId: number, steps: StepType[]) {
+  const persistedSteps = steps.map(({ id, step, result, caseSteps, editState }) => ({
+    id,
+    step,
+    result,
+    editState,
+    caseSteps: {
+      stepNo: caseSteps.stepNo,
+      keyword: caseSteps.keyword ?? null,
+      section: caseSteps.section ?? null,
+    },
+  }));
   const fetchOptions = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${jwt}`,
     },
-    body: JSON.stringify(steps),
+    body: JSON.stringify(persistedSteps),
   };
 
   const url = `${apiServer}/steps/update?caseId=${caseId}`;

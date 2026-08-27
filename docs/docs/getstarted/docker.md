@@ -22,6 +22,17 @@ docker compose up --build
 ```
 
 Automation is fail-closed by default (`AUTOMATION_EXECUTION_MODE=disabled`).
+The API Compose service honors an explicit
+`AUTOMATION_EXECUTION_MODE=real` in the ignored `.env` file so it can load the
+Redis-backed store/resolver and expose project environments. This does not
+start the worker or prove real readiness. To execute after independent Phase 0
+approval, keep `AUTOMATION_PHASE0_READY=true` and start the separate opt-in
+profile:
+
+```bash
+docker compose --env-file .env --profile automation-worker up -d --build
+```
+
 The `fake` mode is for injected tests/dev only and is rejected by the
 production entrypoint. MinIO/S3 is optional; configure an `ArtifactStorage`
 implementation before using external object storage.

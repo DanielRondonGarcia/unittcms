@@ -1,16 +1,18 @@
 import { Textarea, Button, Tooltip, Avatar, Select, SelectItem } from '@heroui/react';
 import { Plus, Trash } from 'lucide-react';
-import { gherkinKeywords } from '@/config/selection';
-import type { GherkinKeyword } from '@/types/base';
+import { gherkinKeywordStyles, gherkinKeywords } from '@/config/selection';
+import type { GherkinKeyword, GherkinSection } from '@/types/base';
 import { CaseMessages, StepType } from '@/types/case';
+import { normalizeGherkinCaseSteps } from '@/utils/caseControl';
 
 type Props = {
   isDisabled: boolean;
   steps: StepType[];
   onStepUpdate: (stepId: number, step: StepType) => void;
-  onStepPlus: (newStepNo: number) => void;
+  onStepPlus: (newStepNo: number, section?: GherkinSection) => void;
   onStepDelete: (stepId: number) => void;
   messages: CaseMessages;
+  scenarioTitle?: string;
   isGherkin?: boolean;
 };
 
@@ -21,95 +23,162 @@ export default function StepsEditor({
   onStepPlus,
   onStepDelete,
   messages,
+  scenarioTitle,
   isGherkin = false,
 }: Props) {
-  // sort steps by junction table's column
-  const sortedSteps = steps.slice().sort((a, b) => {
-    const stepNoA = a.caseSteps.stepNo;
-    const stepNoB = b.caseSteps.stepNo;
-    return stepNoA - stepNoB;
-  });
+  const displaySteps = isGherkin ? normalizeGherkinCaseSteps(steps).steps : steps;
+  const sortedSteps = displaySteps.slice().sort((a, b) => a.caseSteps.stepNo - b.caseSteps.stepNo);
+  const activeSteps = sortedSteps.filter((entry) => entry.editState !== 'deleted');
+  const backgroundSteps = activeSteps.filter((step) => step.caseSteps.section === 'background');
+  const scenarioSteps = activeSteps.filter((step) => step.caseSteps.section !== 'background');
 
-  // filter steps
-  const filteredSteps = sortedSteps.filter((entry) => entry.editState !== 'deleted');
+  const renderStep = (step: StepType, section?: GherkinSection) => {
+    const keyword = step.caseSteps.keyword;
+    const keywordLabel = keyword ? messages[keyword] : messages.step;
 
-  return (
-    <>
-      {filteredSteps.map((step, index) => (
-        <div key={index} className="flex items-center my-1">
-          <Avatar className="me-2" size="sm" name={step.caseSteps.stepNo.toString()} />
-          <div key={step.id} className="grow flex gap-2">
-            {isGherkin && (
+    return (
+      <div
+        key={step.id}
+        className="my-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg border p-2"
+      >
+        <Avatar className="mt-2" size="sm" name={step.caseSteps.stepNo.toString()} />
+        <div className="flex min-w-0 flex-col gap-2 md:flex-row">
+          {isGherkin && (
+            <div className="flex min-w-32 flex-col gap-1 md:w-36">
+              <span
+                className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                  keyword ? gherkinKeywordStyles[keyword] : 'border-default-300 text-default-500'
+                }`}
+              >
+                {keywordLabel}
+              </span>
               <Select
-                className="w-1/4"
                 size="sm"
                 variant="bordered"
-                label={messages.step}
-                selectedKeys={step.caseSteps.keyword ? [step.caseSteps.keyword] : []}
+                aria-label={messages.step}
+                selectedKeys={keyword ? [keyword] : []}
+                isDisabled={isDisabled}
                 onSelectionChange={(newSelection) => {
                   if (newSelection !== 'all' && newSelection.size !== 0) {
-                    const keyword = String(Array.from(newSelection)[0]) as GherkinKeyword;
+                    const selectedKeyword = String(Array.from(newSelection)[0]) as GherkinKeyword;
                     onStepUpdate(step.id, {
                       ...step,
-                      caseSteps: { ...step.caseSteps, keyword },
+                      caseSteps: { ...step.caseSteps, keyword: selectedKeyword },
                     });
                   }
                 }}
               >
-                {gherkinKeywords.map((keyword) => (
-                  <SelectItem key={keyword}>{messages[keyword]}</SelectItem>
+                {gherkinKeywords.map((item) => (
+                  <SelectItem key={item}>{messages[item]}</SelectItem>
                 ))}
               </Select>
-            )}
-            <div className="w-1/2">
-              <Textarea
-                size="sm"
-                variant="bordered"
-                label={messages.detailsOfTheStep}
-                value={step.step}
-                onValueChange={(changeValue) => {
-                  onStepUpdate(step.id, { ...step, step: changeValue });
-                }}
-              />
             </div>
-            <div className="w-1/2">
+          )}
+          <div className={isGherkin ? 'min-w-0 flex-1' : 'w-full md:w-1/2'}>
+            <Textarea
+              size="sm"
+              variant="bordered"
+              label={messages.detailsOfTheStep}
+              value={step.step}
+              isDisabled={isDisabled}
+              onValueChange={(changeValue) => {
+                onStepUpdate(step.id, { ...step, step: changeValue });
+              }}
+            />
+          </div>
+          {!isGherkin && (
+            <div className="w-full md:w-1/2">
               <Textarea
                 size="sm"
                 variant="bordered"
                 label={messages.expectedResult}
                 value={step.result}
+                isDisabled={isDisabled}
                 onValueChange={(changeValue) => {
                   onStepUpdate(step.id, { ...step, result: changeValue });
                 }}
               />
             </div>
-          </div>
-          <div className="flex flex-col">
-            <Tooltip content={messages.deleteThisStep} placement="left">
-              <Button
-                isIconOnly
-                size="sm"
-                isDisabled={isDisabled}
-                className="bg-transparent rounded-full"
-                onPress={() => onStepDelete(step.id)}
-              >
-                <Trash size={16} />
-              </Button>
-            </Tooltip>
-            <Tooltip content={messages.insertStep} placement="left">
-              <Button
-                isIconOnly
-                isDisabled={isDisabled}
-                size="sm"
-                className="bg-transparent rounded-full"
-                onPress={() => onStepPlus(step.caseSteps.stepNo + 1)}
-              >
-                <Plus size={16} />
-              </Button>
-            </Tooltip>
-          </div>
+          )}
         </div>
-      ))}
-    </>
+        <div className="flex flex-col">
+          <Tooltip content={messages.deleteThisStep} placement="left">
+            <Button
+              isIconOnly
+              aria-label={messages.deleteThisStep}
+              size="sm"
+              isDisabled={isDisabled}
+              className="rounded-full bg-transparent focus-visible:ring-2 focus-visible:ring-primary"
+              onPress={() => onStepDelete(step.id)}
+            >
+              <Trash size={16} aria-hidden="true" />
+            </Button>
+          </Tooltip>
+          <Tooltip content={messages.insertStep} placement="left">
+            <Button
+              isIconOnly
+              aria-label={messages.insertStep}
+              isDisabled={isDisabled}
+              size="sm"
+              className="rounded-full bg-transparent focus-visible:ring-2 focus-visible:ring-primary"
+              onPress={() => onStepPlus(step.caseSteps.stepNo + 1, section ?? (isGherkin ? 'scenario' : undefined))}
+            >
+              <Plus size={16} aria-hidden="true" />
+            </Button>
+          </Tooltip>
+        </div>
+      </div>
+    );
+  };
+
+  if (!isGherkin) return <>{activeSteps.map((step) => renderStep(step))}</>;
+
+  const newStepNo = activeSteps.length + 1;
+  const newBackgroundStepNo =
+    backgroundSteps.length > 0 ? Math.max(...backgroundSteps.map((step) => step.caseSteps.stepNo)) + 1 : 1;
+
+  return (
+    <div className="space-y-4">
+      <section aria-labelledby="background-steps-heading">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h6 id="background-steps-heading" className="font-bold">
+            {messages.background}
+          </h6>
+          <Button
+            startContent={<Plus size={16} aria-hidden="true" />}
+            aria-label={`${messages.newStep}: ${messages.background}`}
+            size="sm"
+            isDisabled={isDisabled}
+            color="primary"
+            onPress={() => onStepPlus(newBackgroundStepNo, 'background')}
+          >
+            {messages.newStep}
+          </Button>
+        </div>
+        {backgroundSteps.map((step) => renderStep(step, 'background'))}
+      </section>
+      <section aria-labelledby="scenario-steps-heading">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h6 id="scenario-steps-heading" className="font-bold">
+            {messages.scenario}: {scenarioTitle}
+          </h6>
+          <Button
+            startContent={<Plus size={16} aria-hidden="true" />}
+            aria-label={messages.newStep}
+            size="sm"
+            isDisabled={isDisabled}
+            color="primary"
+            onPress={() => onStepPlus(newStepNo, 'scenario')}
+          >
+            {messages.newStep}
+          </Button>
+        </div>
+        {scenarioSteps.length === 0 ? (
+          <p className="rounded-md border border-dashed p-4 text-sm text-default-500">{messages.noScenarioSteps}</p>
+        ) : (
+          scenarioSteps.map((step) => renderStep(step, 'scenario'))
+        )}
+      </section>
+    </div>
   );
 }

@@ -30,7 +30,7 @@ function defineFolder(sequelize, DataTypes) {
 
   Folder.associate = (models) => {
     Folder.belongsTo(models.Project, { foreignKey: 'projectId', onDelete: 'CASCADE' });
-    Folder.belongsTo(models.folder, { foreignKey: 'parentFolderId', onDelete: 'CASCADE' });
+    Folder.belongsTo(models.Folder, { foreignKey: 'parentFolderId', onDelete: 'CASCADE' });
     Folder.hasMany(models.Case, { foreignKey: 'folderId' });
   };
 

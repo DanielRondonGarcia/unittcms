@@ -33,8 +33,8 @@ describe('Locale message keys consistency', () => {
   const legacyBase = locales.find((locale) => locale.name === 'de');
   if (!legacyBase) throw new Error('Legacy base locale not found');
 
-  it('keeps the complete 466-key catalog contract', () => {
-    expect(baseKeys).toHaveLength(466);
+  it('keeps the complete 531-key catalog contract', () => {
+    expect(baseKeys).toHaveLength(531);
   });
 
   it(`should have the same keys as ${base.name} in es`, () => {
@@ -50,12 +50,72 @@ describe('Locale message keys consistency', () => {
 
   it('keeps the localized Gherkin template and keyword labels exact', () => {
     const expected = {
-      de: { template: 'Angenommen / Wenn / Dann', given: 'Angenommen', when: 'Wenn', then: 'Dann' },
-      en: { template: 'Given / When / Then', given: 'Given', when: 'When', then: 'Then' },
-      es: { template: 'Dado / Cuando / Entonces', given: 'Dado', when: 'Cuando', then: 'Entonces' },
-      'pt-BR': { template: 'Dado / Quando / Então', given: 'Dado', when: 'Quando', then: 'Então' },
-      'zh-CN': { template: '假如 / 当 / 那么', given: '假如', when: '当', then: '那么' },
-      ja: { template: '前提 / もし / ならば', given: '前提', when: 'もし', then: 'ならば' },
+      de: {
+        template: 'Angenommen / Wenn / Dann',
+        given: 'Angenommen',
+        when: 'Wenn',
+        then: 'Dann',
+        and: 'Und',
+        but: 'Aber',
+        background: 'Hintergrund',
+        scenario: 'Szenario',
+        examples: 'Beispiele',
+      },
+      en: {
+        template: 'Given / When / Then',
+        given: 'Given',
+        when: 'When',
+        then: 'Then',
+        and: 'And',
+        but: 'But',
+        background: 'Background',
+        scenario: 'Scenario',
+        examples: 'Examples',
+      },
+      es: {
+        template: 'Dado / Cuando / Entonces',
+        given: 'Dado',
+        when: 'Cuando',
+        then: 'Entonces',
+        and: 'Y',
+        but: 'Pero',
+        background: 'Antecedentes',
+        scenario: 'Escenario',
+        examples: 'Ejemplos',
+      },
+      'pt-BR': {
+        template: 'Dado / Quando / Então',
+        given: 'Dado',
+        when: 'Quando',
+        then: 'Então',
+        and: 'E',
+        but: 'Mas',
+        background: 'Antecedentes',
+        scenario: 'Cenário',
+        examples: 'Exemplos',
+      },
+      'zh-CN': {
+        template: '假如 / 当 / 那么',
+        given: '假如',
+        when: '当',
+        then: '那么',
+        and: '并且',
+        but: '但是',
+        background: '背景',
+        scenario: '场景',
+        examples: '示例',
+      },
+      ja: {
+        template: '前提 / もし / ならば',
+        given: '前提',
+        when: 'もし',
+        then: 'ならば',
+        and: 'かつ',
+        but: 'しかし',
+        background: '背景',
+        scenario: 'シナリオ',
+        examples: '例',
+      },
     };
 
     for (const locale of locales) {

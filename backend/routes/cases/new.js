@@ -6,7 +6,7 @@ import defineStep from '../../models/steps.js';
 import defineCaseStep from '../../models/caseSteps.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
-import { gherkinKeywords, gherkinTemplate } from '../../config/enums.js';
+import { gherkinKeywords, gherkinTemplate, hasValidGherkinExamples } from '../../config/enums.js';
 
 const requiredFields = ['title', 'state', 'priority', 'type', 'automationStatus', 'template'];
 
@@ -39,8 +39,22 @@ export default function (sequelize) {
         });
       }
 
-      const { title, state, priority, type, automationStatus, description, template, preConditions, expectedResults } =
-        req.body;
+      const {
+        title,
+        state,
+        priority,
+        type,
+        automationStatus,
+        description,
+        template,
+        preConditions,
+        expectedResults,
+        gherkinExamples,
+      } = req.body;
+
+      if (template === gherkinTemplate && !hasValidGherkinExamples(gherkinExamples)) {
+        return res.status(400).json({ error: 'Gherkin examples must contain unique headers and matching data rows' });
+      }
 
       const caseAttributes = {
         title,
@@ -52,6 +66,7 @@ export default function (sequelize) {
         template,
         preConditions,
         expectedResults,
+        ...(template === gherkinTemplate ? { gherkinExamples: gherkinExamples ?? null } : {}),
         folderId,
       };
 
@@ -59,10 +74,16 @@ export default function (sequelize) {
         template === gherkinTemplate
           ? await sequelize.transaction(async (transaction) => {
               const createdCase = await Case.create(caseAttributes, { transaction });
-              for (const [index, keyword] of gherkinKeywords.entries()) {
+              for (const [index, keyword] of gherkinKeywords.slice(0, 3).entries()) {
                 const step = await Step.create({ step: '', result: '' }, { transaction });
                 await CaseStep.create(
-                  { caseId: createdCase.id, stepId: step.id, stepNo: index + 1, keyword },
+                  {
+                    caseId: createdCase.id,
+                    stepId: step.id,
+                    stepNo: index + 1,
+                    keyword,
+                    section: 'scenario',
+                  },
                   { transaction }
                 );
               }

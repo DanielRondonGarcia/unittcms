@@ -5,6 +5,7 @@ function defineAutomationExecution(sequelize, DataTypes) {
     caseId: { type: DataTypes.INTEGER, allowNull: false },
     runCaseId: { type: DataTypes.INTEGER, allowNull: true },
     environmentId: { type: DataTypes.INTEGER, allowNull: true },
+    captureVideo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'queued' },
     attempt: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
     engine: { type: DataTypes.STRING, allowNull: true },
@@ -15,6 +16,10 @@ function defineAutomationExecution(sequelize, DataTypes) {
     durationMs: { type: DataTypes.INTEGER, allowNull: true },
     summary: { type: DataTypes.TEXT, allowNull: true },
     error: { type: DataTypes.TEXT, allowNull: true },
+    errorKind: { type: DataTypes.STRING, allowNull: true },
+    attemptHistory: { type: DataTypes.TEXT, allowNull: false, defaultValue: '[]' },
+    lastWorkerEvent: { type: DataTypes.STRING, allowNull: true },
+    lastAttemptStatus: { type: DataTypes.STRING, allowNull: true },
     idempotencyKey: { type: DataTypes.STRING, allowNull: false },
     correlationId: { type: DataTypes.STRING, allowNull: false },
   });

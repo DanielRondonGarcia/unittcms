@@ -148,10 +148,13 @@ async function installFakeAutomationApi(page: Page) {
 
     if (request.method() === 'GET' && /\/projects\/\d+\/executions$/.test(path)) {
       const caseId = Number(url.searchParams.get('caseId') ?? 1);
+      const runCaseId = Number(url.searchParams.get('runCaseId') ?? 1);
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ items: [{ id: 'fake-execution-1', status: 'passed', caseId, durationMs: 1250 }] }),
+        body: JSON.stringify({
+          items: [{ id: 'fake-execution-1', status: 'passed', caseId, runCaseId, durationMs: 1250 }],
+        }),
       });
       return;
     }
@@ -225,7 +228,7 @@ test('manual Gherkin lifecycle stays localized and preserves legacy templates', 
   await stepDetails.nth(0).fill('Repeated then condition');
   await stepDetails.nth(1).fill('Given condition');
   await stepDetails.nth(2).fill('Repeated then outcome');
-  await page.getByRole('button', { name: 'Nuevo paso', exact: true }).click();
+  await page.getByRole('button', { name: 'Nuevo paso', exact: true }).last().click();
   await expect(stepDetails).toHaveCount(4);
   await selectKeyword(page, 'Cuando', 0);
   await stepDetails.nth(0).fill('When condition');
@@ -236,28 +239,7 @@ test('manual Gherkin lifecycle stays localized and preserves legacy templates', 
   await page.getByRole('button', { name: 'Actualizar', exact: true }).click();
   expect((await updateCase).ok()).toBeTruthy();
   await expect(page.getByText('Caso de prueba actualizado', { exact: true })).toBeVisible();
-
-  const automationEnvironment = page.getByRole('button', { name: /Selecciona un entorno de ejecución/ });
-  await expect(automationEnvironment).toBeVisible();
-  await automationEnvironment.click();
-  const environmentOption = page.getByRole('listbox').getByRole('option', { name: 'Entorno de prueba', exact: true });
-  await expect(environmentOption).toBeVisible();
-  const environmentBox = await environmentOption.boundingBox();
-  expect(environmentBox).not.toBeNull();
-  if (environmentBox)
-    await page.mouse.click(environmentBox.x + environmentBox.width / 2, environmentBox.y + environmentBox.height / 2);
-  await page.getByRole('button', { name: 'Ejecutar automáticamente', exact: true }).click();
-  await expect(page.getByText('En ejecución', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Cancelar ejecución', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancelar ejecución', exact: true }).click();
-  await expect(page.getByText('Cancelado', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Ejecutar automáticamente', exact: true }).click();
-  await expect(page.getByText('En ejecución', { exact: true })).toBeVisible();
-  await expect(page.getByText('Aprobado', { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('Resumen:', { exact: true }).locator('..')).toContainText('Fake execution passed');
-  await expect(page.getByText('Duración:', { exact: true }).locator('..')).toContainText('1.25s');
-  await expect(page.getByText('junit', { exact: true })).toBeVisible();
-  await expect(page.getByText('Historial de ejecuciones', { exact: true })).toBeVisible();
+  await expect(page.getByText('Automatización', { exact: true })).toHaveCount(0);
 
   const unauthenticated = await page.evaluate(
     async () => (await fetch('/api/automation/projects/999/environments')).status
@@ -334,6 +316,27 @@ test('manual Gherkin lifecycle stays localized and preserves legacy templates', 
 
   await runCaseRow.getByRole('link', { name: caseTitle, exact: true }).click();
   await expect(page).toHaveURL(/\/es\/projects\/\d+\/runs\/\d+\/cases\/\d+$/);
+  const automationEnvironment = page.getByRole('button', { name: /Selecciona un entorno de ejecución/ });
+  await expect(automationEnvironment).toBeVisible();
+  await automationEnvironment.click();
+  const environmentOption = page.getByRole('listbox').getByRole('option', { name: 'Entorno de prueba', exact: true });
+  await expect(environmentOption).toBeVisible();
+  const environmentBox = await environmentOption.boundingBox();
+  expect(environmentBox).not.toBeNull();
+  if (environmentBox)
+    await page.mouse.click(environmentBox.x + environmentBox.width / 2, environmentBox.y + environmentBox.height / 2);
+  await page.getByRole('button', { name: 'Ejecutar automáticamente', exact: true }).click();
+  await expect(page.getByText('En ejecución', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancelar ejecución', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancelar ejecución', exact: true }).click();
+  await expect(page.getByText('Cancelado', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Ejecutar automáticamente', exact: true }).click();
+  await expect(page.getByText('En ejecución', { exact: true })).toBeVisible();
+  await expect(page.getByText('Aprobado', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Resumen:', { exact: true }).locator('..')).toContainText('Fake execution passed');
+  await expect(page.getByText('Duración:', { exact: true }).locator('..')).toContainText('1.25s');
+  await expect(page.getByText('junit', { exact: true })).toBeVisible();
+  await expect(page.getByText('Historial de ejecuciones', { exact: true })).toBeVisible();
   await expect(page.getByText('Dado', { exact: true })).toBeVisible();
   await expect(page.getByText('Cuando', { exact: true })).toBeVisible();
   await expect(page.getByText('Entonces', { exact: true })).toHaveCount(2);

@@ -48,6 +48,11 @@ describe('Hercules compatibility contract', () => {
     expect(hercules.validateCanonicalFeature(hercules.CANONICAL_FEATURE).valid).toBe(true);
     expect(
       hercules.validateCanonicalFeature(
+        'Feature: Outline\n  Scenario Outline: Login\n    Given a user\n    When they sign in\n    Then they see the dashboard'
+      ).valid
+    ).toBe(true);
+    expect(
+      hercules.validateCanonicalFeature(
         'Feature: Localized\n  Scenario: Caso\n    Dado algo\n    Cuando algo\n    Entonces algo'
       ).valid
     ).toBe(false);
@@ -57,6 +62,91 @@ describe('Hercules compatibility contract', () => {
       `type=bind,src=${root},dst=/testzeus-hercules/opt`,
       hercules.HERCULES_CONTRACT.image,
     ]);
+    expect(invocation.argv).toEqual(
+      expect.arrayContaining([
+        '--env',
+        'LLM_MODEL_NAME',
+        '--env',
+        'LLM_MODEL_API_KEY',
+        '--env',
+        'LLM_MODEL_BASE_URL',
+        '--env',
+        'LLM_MODEL_CLIENT_HOST',
+        '--env',
+        'LLM_MODEL_API_TYPE',
+        '--env',
+        'HERCULES_BASE_URL',
+        '--env',
+        'HERCULES_ALLOWED_HOSTS',
+      ])
+    );
+    expect(invocation.argv).not.toContain('HERCULES_LLM_PROVIDER');
+    expect(invocation.argv).not.toContain('HERCULES_LLM_MODEL');
+    expect(invocation.argv).not.toContain('LITELLM_BASE_URL');
+    expect(invocation.argv).not.toContain('LITELLM_API_KEY');
+    expect(hercules.buildHerculesInvocation(root, '').argv).toContain(hercules.HERCULES_CONTRACT.image);
+    const localImage = 'testzeus/hercules:0.1.2-amd64';
+    expect(hercules.buildHerculesInvocation(root, localImage).argv).toEqual(expect.arrayContaining([localImage]));
+  });
+  it('uses the supplied named volume instead of a host bind mount', () => {
+    const root = makeRoot();
+    const volume = 'unittcms_hercules-work';
+    const invocation = hercules.buildHerculesInvocation(root, undefined, volume);
+
+    expect(invocation.argv).toEqual([
+      ...hercules.HERCULES_CONTRACT.argv,
+      '--mount',
+      `type=volume,src=${volume},dst=/testzeus-hercules/opt`,
+      hercules.HERCULES_CONTRACT.image,
+    ]);
+    expect(invocation.argv.join(' ')).not.toContain(`src=${root}`);
+  });
+  it('omits the inherited API key marker for local Ollama but keeps it for Cloud', async () => {
+    const localRoot = makeRoot();
+    let localInvocation;
+    await hercules.runCompatibilityGate({
+      workdir: localRoot,
+      evidenceRoot: localRoot,
+      feature: hercules.CANONICAL_FEATURE,
+      allowedHosts: ['example.com'],
+      runtimeEnv: {
+        LLM_MODEL_NAME: 'local-model',
+        LLM_MODEL_BASE_URL: 'http://host.docker.internal:11434',
+        LLM_MODEL_CLIENT_HOST: 'http://host.docker.internal:11434',
+        LLM_MODEL_API_TYPE: 'ollama',
+      },
+      runner: async (invocation) => {
+        localInvocation = invocation;
+        writeEvidence(localRoot);
+        return { exitCode: 0 };
+      },
+    });
+
+    const cloudRoot = makeRoot();
+    let cloudInvocation;
+    const cloudKey = 'fixture-cloud-key';
+    await hercules.runCompatibilityGate({
+      workdir: cloudRoot,
+      evidenceRoot: cloudRoot,
+      feature: hercules.CANONICAL_FEATURE,
+      allowedHosts: ['example.com'],
+      runtimeEnv: {
+        LLM_MODEL_NAME: 'cloud-model',
+        LLM_MODEL_BASE_URL: 'https://ollama.com/api',
+        LLM_MODEL_CLIENT_HOST: 'https://ollama.com/api',
+        LLM_MODEL_API_TYPE: 'ollama',
+        LLM_MODEL_API_KEY: cloudKey,
+      },
+      runner: async (invocation) => {
+        cloudInvocation = invocation;
+        writeEvidence(cloudRoot);
+        return { exitCode: 0 };
+      },
+    });
+
+    expect(localInvocation.argv).not.toContain('LLM_MODEL_API_KEY');
+    expect(cloudInvocation.argv).toContain('LLM_MODEL_API_KEY');
+    expect(cloudInvocation.argv.join(' ')).not.toContain(cloudKey);
   });
   it('collects required evidence and fails closed for missing proof or secrets', () => {
     const root = makeRoot();
@@ -111,14 +201,31 @@ describe('Hercules compatibility contract', () => {
       workdir: root,
       evidenceRoot: root,
       feature: hercules.CANONICAL_FEATURE,
-      allowedHosts: ['example.test'],
-      runner: async () => {
+      allowedHosts: ['example.com'],
+      image: 'testzeus/hercules:0.1.2-amd64',
+      workVolume: 'unittcms_hercules-work',
+      runner: async (invocation) => {
         writeEvidence(root);
+        expect(invocation.argv).toContain('type=volume,src=unittcms_hercules-work,dst=/testzeus-hercules/opt');
         return { exitCode: 0, result: 'passed' };
       },
     });
     expect(result.ready).toBe(false);
+    expect(result.errors).toContain('pass/fail exit semantics proof is required');
+    expect(result.invocation.argv).toContain('testzeus/hercules:0.1.2-amd64');
   });
+  it.each(['', 'has space', 'has/slash', 'has\\slash', 'has\u0000control', '.hidden', '-leading', 'a'.repeat(256)])(
+    'rejects unsafe Hercules volume overrides: %s',
+    (volume) => {
+      expect(() => hercules.buildHerculesInvocation(makeRoot(), undefined, volume)).toThrow('hercules_volume_invalid');
+    }
+  );
+  it.each(['local image:latest', 'local/hercules;touch', '--privileged'])(
+    'rejects unsafe image overrides: %s',
+    (image) => {
+      expect(() => hercules.buildHerculesInvocation(makeRoot(), image)).toThrow('hercules_image_invalid');
+    }
+  );
   it('scans binary evidence bytes and requires a binary secret proof', () => {
     const root = makeRoot();
     writeEvidence(root);
@@ -188,7 +295,7 @@ describe('Hercules process boundary', () => {
     const invocation = hercules.buildHerculesInvocation(makeRoot());
     const child = childProcess();
     const spawnImpl = vi.fn((_file, _argv, options) => {
-      expect(options.env).toEqual({ PATH: expect.any(String), LITELLM_BASE_URL: 'https://llm.example.test' });
+      expect(options.env).toEqual({ PATH: expect.any(String), LLM_MODEL_BASE_URL: 'https://llm.example.test' });
       queueMicrotask(() => child.emit('close', 0, null));
       return child;
     });
@@ -196,7 +303,7 @@ describe('Hercules process boundary', () => {
     await expect(
       hercules.runHerculesProcess(invocation, {
         spawnImpl,
-        env: { LITELLM_BASE_URL: 'https://llm.example.test' },
+        env: { LLM_MODEL_BASE_URL: 'https://llm.example.test' },
       })
     ).resolves.toMatchObject({ exitCode: 0 });
   });
@@ -212,5 +319,39 @@ describe('Hercules process boundary', () => {
       code: 'ETIMEDOUT',
     });
     expect(killProcessGroup).toHaveBeenCalledWith(-73, 'SIGKILL');
+  });
+  it('uses shell-free taskkill for the default Windows timeout terminator', async () => {
+    const invocation = hercules.buildHerculesInvocation(makeRoot());
+    const child = childProcess(73);
+    const execFileImpl = vi.fn((_file, _args, _options, callback) => callback(new Error('ESRCH')));
+
+    await expect(
+      hercules.runHerculesProcess(invocation, {
+        spawnImpl: vi.fn(() => child),
+        timeoutMs: 5,
+        platform: 'win32',
+        execFileImpl,
+      })
+    ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
+    expect(execFileImpl).toHaveBeenCalledWith(
+      'taskkill',
+      ['/PID', '73', '/T', '/F'],
+      { shell: false, windowsHide: true },
+      expect.any(Function)
+    );
+  });
+  it('rejects with a timeout when termination reports an exited process', async () => {
+    const invocation = hercules.buildHerculesInvocation(makeRoot());
+    const killProcessGroup = vi.fn(() => {
+      throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+    });
+
+    await expect(
+      hercules.runHerculesProcess(invocation, {
+        spawnImpl: vi.fn(() => childProcess(73)),
+        timeoutMs: 5,
+        killProcessGroup,
+      })
+    ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
   });
 });

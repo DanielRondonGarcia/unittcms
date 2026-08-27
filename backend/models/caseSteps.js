@@ -16,6 +16,11 @@ function defineCaseStep(sequelize, DataTypes) {
       type: DataTypes.STRING,
       allowNull: true,
     },
+    section: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'scenario',
+    },
   });
 
   CaseStep.associate = (models) => {

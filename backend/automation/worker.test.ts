@@ -272,6 +272,34 @@ describe('automation queue and worker boundary', () => {
     await worker.shutdown();
   });
 
+  it('does not consume jobs or query executors while Phase 0 is disabled', async () => {
+    const executor = {
+      execute: vi.fn(async () => ({ outcome: 'passed' as const })),
+      cancel: vi.fn(async () => undefined),
+      health: vi.fn(async () => ({ ready: true, status: 'test' })),
+    };
+    const registry = new NeutralExecutorRegistry();
+    registry.register('injected', executor);
+    const data = makeStore();
+    const worker = new ExecutionWorker(registry, new WorkerResultUpdater(data.store, 'server-secret'), {
+      secret: 'server-secret',
+      phase0Ready: false,
+    });
+    const runtime = { consume: vi.fn(async () => undefined), close: vi.fn(async () => undefined) };
+
+    await worker.start(runtime);
+    await expect(worker.health()).resolves.toMatchObject({
+      ready: false,
+      status: 'phase0_not_ready',
+      phase0Ready: false,
+      executors: [],
+    });
+    expect(runtime.consume).not.toHaveBeenCalled();
+    expect(executor.health).not.toHaveBeenCalled();
+    await worker.shutdown();
+    expect(runtime.close).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ['passed', 'passed', 1],
     ['functional_failure', 'failed', 2],

@@ -1,6 +1,12 @@
 import type { CanonicalSnapshot, CaseSource, ExecutionState, ExecutorOutcome } from '../domain/index.js';
 
-export type ResolvedEnvironment = { baseUrl: string; allowedHosts: string[]; secretRefs: string[] };
+export type ResolvedEnvironment = {
+  baseUrl: string;
+  allowedHosts: string[];
+  secretRefs: string[];
+  captureVideo?: boolean;
+};
+export type RunCaseSource = { id: number; caseId: number; runId: number; projectId: number };
 export type ExecutorInput = {
   executionId: string;
   snapshot: string | CanonicalSnapshot;
@@ -15,7 +21,7 @@ export interface AutomationExecutor {
   health(): Promise<ExecutorHealth>;
 }
 
-export type ExecutionJob = ExecutorInput & { attempt: number };
+export type ExecutionJob = ExecutorInput & { attempt: number; executorKey?: string };
 export type QueueHealth = { ready: boolean; status: string };
 export interface ExecutionQueue {
   enqueue(job: ExecutionJob): Promise<string>;
@@ -89,9 +95,11 @@ export interface AutomationStore {
   createExecution(value: Record<string, unknown>): Promise<StoredExecution>;
   findExecution(executionId: string): Promise<StoredExecution | null>;
   updateExecution(executionId: string, value: Record<string, unknown>): Promise<StoredExecution>;
+  cancelExecution?(executionId: string): Promise<StoredExecution>;
   listExecutions(query: Record<string, unknown>): Promise<{ items: StoredExecution[]; total: number }>;
   listEnvironments?(projectId: number): Promise<Array<Record<string, unknown>>>;
   findEnvironment?(environmentId: number): Promise<Record<string, unknown> | null>;
+  findRunCase?(runCaseId: number): Promise<RunCaseSource | null>;
   listArtifacts(executionId: string): Promise<unknown[]>;
   findArtifact(artifactId: string): Promise<Record<string, unknown> | null>;
 }

@@ -8,6 +8,7 @@ import RateLimit from 'express-rate-limit';
 import { Sequelize } from 'sequelize';
 import { RegisterRoutes } from './routes.js';
 import { FRONTEND_ORIGIN } from './config/config.js';
+import { configureAutomationApplication } from './controllers/AutomationController.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,11 +84,13 @@ import projectsShowRoute from './routes/projects/show.js';
 import projectsNewRoute from './routes/projects/new.js';
 import projectsEditRoute from './routes/projects/edit.js';
 import projectsDeleteRoute from './routes/projects/delete.js';
+import projectsAutomationEnvironmentRoute from './routes/projects/automationEnvironment.js';
 app.use('/projects', projectsIndexRoute(sequelize));
 app.use('/projects', projectsShowRoute(sequelize));
 app.use('/projects', projectsNewRoute(sequelize));
 app.use('/projects', projectsEditRoute(sequelize));
 app.use('/projects', projectsDeleteRoute(sequelize));
+app.use('/projects', projectsAutomationEnvironmentRoute(sequelize));
 
 // "/folders"
 import foldersIndexRoute from './routes/folders/index.js';
@@ -199,6 +202,22 @@ app.use('/comments', commentsDeleteRoute(sequelize));
 // "/home"
 import homeIndexRoute from './routes/home/index.js';
 app.use('/home', homeIndexRoute(sequelize));
+
+const automationRedisUrl = process.env.AUTOMATION_REDIS_URL?.trim();
+const configureRealAutomationRuntime = async (): Promise<void> => {
+  if (process.env.AUTOMATION_EXECUTION_MODE !== 'real' || !automationRedisUrl) return;
+  try {
+    const { createRealAutomationRuntime } = await import('./automation/infrastructure/runtime.js');
+    const runtime = await createRealAutomationRuntime({
+      redisUrl: automationRedisUrl,
+      artifactRoot: process.env.AUTOMATION_ARTIFACT_ROOT,
+    });
+    configureAutomationApplication(runtime.application);
+  } catch {
+    // Keep the neutral application when real runtime prerequisites are unavailable.
+  }
+};
+void configureRealAutomationRuntime();
 
 if (!process.env.SECRET_KEY) {
   console.log(

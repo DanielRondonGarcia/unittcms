@@ -47,7 +47,7 @@ export default function (sequelize) {
         include: [
           {
             model: Step,
-            through: { attributes: [] },
+            through: { attributes: ['stepNo', 'keyword', 'section'] },
             order: [['stepNo', 'ASC']],
             attributes: { exclude: ['createdAt', 'updatedAt'] },
           },
@@ -125,6 +125,8 @@ const _formatRawCasesToJson = (cases) => {
       casesObject[c.id].Steps.push({
         step: c['Steps.step'],
         expectedStepResult: c['Steps.result'],
+        keyword: c['Steps.caseSteps.keyword'] ?? c['Steps->caseSteps.keyword'] ?? c.keyword ?? null,
+        section: c['Steps.caseSteps.section'] ?? c['Steps->caseSteps.section'] ?? c.section ?? 'scenario',
       });
     }
   });
@@ -149,5 +151,7 @@ const _formatRawCasesToCsv = (cases) => {
     expectedResults: c.expectedResults,
     step: c['Steps.step'],
     expectedStepResult: c['Steps.result'],
+    keyword: c['Steps.caseSteps.keyword'] ?? c['Steps->caseSteps.keyword'] ?? c.keyword ?? null,
+    section: c['Steps.caseSteps.section'] ?? c['Steps->caseSteps.section'] ?? c.section ?? 'scenario',
   }));
 };

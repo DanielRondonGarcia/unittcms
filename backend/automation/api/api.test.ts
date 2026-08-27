@@ -39,6 +39,7 @@ function store(caseSource = source) {
           }
         : null
     ),
+    findRunCase: vi.fn(async (id: number) => (id === 3 ? { id: 3, caseId: 7, runId: 20, projectId: 10 } : null)),
     listArtifacts: vi.fn(async () => []),
     findArtifact: vi.fn(async () => null),
   };
@@ -133,8 +134,27 @@ describe('automation API application boundary', () => {
     });
 
     expect(data.createExecution).toHaveBeenCalledWith(expect.objectContaining({ runCaseId: 3 }));
+    expect(data.findRunCase).toHaveBeenCalledWith(3);
     expect(created).toMatchObject({ runCaseId: 3, caseId: 7 });
     expect(data.findCase).toHaveBeenCalledWith(7);
+  });
+
+  it('rejects a RunCase that does not belong to the requested case and project', async () => {
+    const data = store();
+    data.findRunCase.mockResolvedValue({ id: 3, caseId: 99, runId: 20, projectId: 10 });
+    const queue = { enqueue: vi.fn(async () => 'job-1'), cancel: vi.fn() };
+
+    await expect(
+      makeApplication(data, queue).create({
+        userId: 1,
+        projectId: 10,
+        caseId: 7,
+        environmentId: 3,
+        runCaseId: 3,
+        idempotencyKey: 'wrong-run-case',
+      })
+    ).rejects.toMatchObject({ status: 404, code: 'run_case_not_found' });
+    expect(queue.enqueue).not.toHaveBeenCalled();
   });
 
   it('does not leak authorization errors and applies pagination and filters', async () => {
@@ -148,6 +168,26 @@ describe('automation API application boundary', () => {
     expect((await app.safeError({ status: 403, code: 'forbidden' }, 'corr-1')).body).toEqual({
       error: 'forbidden',
       correlationId: 'corr-1',
+    });
+    expect(
+      (
+        await app.safeError(
+          {
+            status: 400,
+            code: 'invalid_source',
+            details: [
+              { field: 'Steps[0].step', code: 'required', message: 'step text is required' },
+              { secret: 'must not be returned' },
+              'must not be returned',
+            ],
+          },
+          'corr-2'
+        )
+      ).body
+    ).toEqual({
+      error: 'invalid_source',
+      correlationId: 'corr-2',
+      fields: [{ field: 'Steps[0].step', code: 'required', message: 'step text is required' }],
     });
 
     data.canAccessProject.mockResolvedValue(true);
@@ -180,7 +220,7 @@ describe('automation API application boundary', () => {
     const app = makeApplication(data, queue);
 
     await expect(app.environments({ userId: 1, projectId: 10 })).resolves.toEqual([
-      { id: 3, name: 'QA', enabled: true },
+      { id: 3, name: 'QA', enabled: true, isDefault: false },
     ]);
     await app.create({
       userId: 1,
@@ -192,7 +232,12 @@ describe('automation API application boundary', () => {
     expect(data.createExecution).toHaveBeenCalledWith(expect.objectContaining({ environmentId: 3 }));
     expect(queue.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
-        environment: { baseUrl: 'https://example.test/', allowedHosts: ['example.test'], secretRefs: [] },
+        environment: {
+          baseUrl: 'https://example.test/',
+          allowedHosts: ['example.test'],
+          secretRefs: [],
+          captureVideo: false,
+        },
       })
     );
 

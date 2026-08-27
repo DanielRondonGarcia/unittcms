@@ -8,6 +8,7 @@ import {
   fetchAutomationHistory,
   formatAutomationDuration,
   isAutomationActive,
+  runAutomationBatch,
 } from './automationControl';
 
 const jsonResponse = (body: unknown, ok = true) =>
@@ -78,5 +79,86 @@ describe('automation frontend boundary', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'forbidden' }, false)));
 
     await expect(fetchAutomationEnvironments('jwt', 999)).rejects.toMatchObject({ code: 'forbidden', status: 403 });
+  });
+
+  it('keeps bounded structured validation fields on request failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: 'invalid_source',
+            correlationId: 'corr-1',
+            fields: [
+              { field: 'Steps[0].step', code: 'required', message: 'step text is required' },
+              { field: 'secret', message: 'missing code' },
+              'not a field',
+            ],
+          },
+          false
+        )
+      )
+    );
+
+    await expect(fetchAutomationEnvironments('jwt', 10)).rejects.toMatchObject({
+      code: 'invalid_source',
+      correlationId: 'corr-1',
+      fields: [{ field: 'Steps[0].step', code: 'required', message: 'step text is required' }],
+    });
+  });
+
+  it('runs batch cases sequentially and reports each terminal execution', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'execution-1', status: 'passed' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'execution-2', status: 'failed' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const results = await runAutomationBatch('jwt', {
+      projectId: 10,
+      runId: 4,
+      environmentId: 3,
+      batchId: 'batch-1',
+      cases: [
+        { caseId: 8, runCaseId: 12, title: 'First' },
+        { caseId: 7, runCaseId: 11, title: 'Second' },
+      ],
+    });
+
+    expect(results.map((result) => result.execution?.status)).toEqual(['passed', 'failed']);
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(call[1].body).runCaseId)).toEqual([12, 11]);
+    expect(fetchMock.mock.calls[0][1].headers['Idempotency-Key']).toBe('run-4-case-12-batch-1');
+  });
+
+  it('keeps structured request fields in batch failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: 'invalid_source',
+            fields: [{ field: 'Steps[0].step', code: 'required', message: 'step text is required' }],
+          },
+          false
+        )
+      )
+    );
+
+    await expect(
+      runAutomationBatch('jwt', {
+        projectId: 10,
+        runId: 4,
+        environmentId: 3,
+        batchId: 'batch-2',
+        cases: [{ caseId: 8, runCaseId: 12, title: 'First' }],
+      })
+    ).resolves.toEqual([
+      {
+        caseId: 8,
+        runCaseId: 12,
+        title: 'First',
+        error: 'invalid_source',
+        errorFields: [{ field: 'Steps[0].step', code: 'required', message: 'step text is required' }],
+      },
+    ]);
   });
 });

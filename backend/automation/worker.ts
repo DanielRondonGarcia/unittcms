@@ -21,7 +21,7 @@ type Limits = { attempts?: number; backoffMs?: number; concurrency?: number; dea
 export type WorkerJob = ExecutionJob & { jobId?: string; executorKey?: string };
 export type WorkerLog = Record<string, string | number | undefined>;
 export type WorkerHooks = { log?: (event: WorkerLog) => void; metric?: (name: string, fields: WorkerLog) => void };
-// This is the BullMQ/Redis seam; the runtime package is intentionally injected until the dependency is installed.
+// This remains an injected seam so unit tests do not require a live Redis service.
 /* prettier-ignore */
 export type QueueAdapter = { add(name: string, job: ExecutionJob, options: { jobId: string; attempts: number; backoff: { type: 'exponential'; delay: number }; removeOnComplete: boolean; removeOnFail: boolean }): Promise<{ id?: string }>; remove(executionId: string): Promise<void>; recoverStalled(): Promise<ExecutionJob[]>; isReady(): Promise<boolean>; close(): Promise<void> };
 
@@ -105,7 +105,11 @@ export class WorkerResultUpdater {
 /* prettier-ignore */
 type WorkerOptions = Limits & { secret: string; queue?: BullMqExecutionQueue; phase0Ready?: boolean; hooks?: WorkerHooks };
 /* prettier-ignore */
-type WorkerRuntime = { consume(handler: (job: WorkerJob) => Promise<unknown>, options: { concurrency: number }): Promise<void> | void; close(): Promise<void> };
+export type WorkerRuntime = {
+  consume(handler: (job: WorkerJob) => Promise<unknown>, options: { concurrency: number }): Promise<void> | void;
+  close(): Promise<void>;
+  onCancel?(handler: (executionId: string) => Promise<unknown>): void;
+};
 class DeadlineError extends Error {}
 /* prettier-ignore */
 async function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T> { let timer: ReturnType<typeof setTimeout> | undefined; try { return await Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DeadlineError()), deadlineMs); })]); } finally { if (timer) clearTimeout(timer); } }
@@ -144,10 +148,16 @@ export class ExecutionWorker {
     const active = this.active.get(executionId); if (active) await active.cancel(executionId); const current = await this.updater.find(executionId); if (!current || TERMINAL.has(current.status)) return current ?? undefined;
     return this.updater.record(signWorkerEvent({ phase: 'result', executionId, attempt: current.attempt, correlationId: String(current.correlationId), jobId: jobIdFor({ executionId, attempt: current.attempt }), outcome: 'cancelled', errorCategory: 'cancelled' }, this.config.secret));
   }
-  async start(runtime: WorkerRuntime): Promise<void> { this.runtime = runtime; this.heartbeatAt = new Date().toISOString(); await runtime.consume((job) => this.process(job), { concurrency: this.config.concurrency }); }
+  async start(runtime: WorkerRuntime): Promise<void> {
+    this.runtime = runtime;
+    runtime.onCancel?.((executionId) => this.cancel(executionId));
+    this.heartbeatAt = new Date().toISOString();
+    if (!this.config.phase0Ready) return;
+    await runtime.consume((job) => this.process(job), { concurrency: this.config.concurrency });
+  }
   async reconcile(): Promise<{ ready: boolean; jobs: ExecutionJob[]; errorCategory?: string }> { if (!this.config.queue) return { ready: false, jobs: [], errorCategory: 'queue_not_configured' }; const result = await this.config.queue.reconcile(); if (result.ready) for (const job of result.jobs) await this.process(job); return result; }
-  async health(): Promise<{ ready: boolean; status: string; heartbeatAt: string; phase0Ready: boolean; executors: unknown[] }> { const queue = this.config.queue ? await this.config.queue.health() : { ready: false, status: 'queue_not_configured' }; const executors = await this.registry.list(); const ready = this.accepting && Boolean(this.heartbeatAt) && this.config.phase0Ready && queue.ready && executors.some((item) => item.health.ready); return { ready, status: ready ? 'ready' : 'not_ready', heartbeatAt: this.heartbeatAt ?? '', phase0Ready: this.config.phase0Ready, executors }; }
-  async shutdown(): Promise<void> { this.accepting = false; this.heartbeatAt = undefined; await Promise.allSettled([...this.active.keys()].map((id) => this.cancel(id))); if (this.config.queue) await this.config.queue.shutdown(); if (this.runtime) await this.runtime.close(); }
+  async health(): Promise<{ ready: boolean; status: string; heartbeatAt: string; phase0Ready: boolean; executors: unknown[] }> { if (!this.config.phase0Ready) return { ready: false, status: 'phase0_not_ready', heartbeatAt: this.heartbeatAt ?? '', phase0Ready: false, executors: [] }; const queue = this.config.queue ? await this.config.queue.health() : { ready: false, status: 'queue_not_configured' }; const executors = await this.registry.list(); const ready = this.accepting && Boolean(this.heartbeatAt) && queue.ready && executors.some((item) => item.health.ready); return { ready, status: ready ? 'ready' : 'not_ready', heartbeatAt: this.heartbeatAt ?? '', phase0Ready: this.config.phase0Ready, executors }; }
+  async shutdown(): Promise<void> { this.accepting = false; this.heartbeatAt = undefined; await Promise.allSettled([...this.active.keys()].map((id) => this.cancel(id))); let failure: unknown; try { if (this.config.queue) await this.config.queue.shutdown(); } catch (error) { failure = error; } finally { if (this.runtime) await this.runtime.close().catch((error) => { failure ??= error; }); } if (failure) throw failure; }
 }
 
 /* prettier-ignore */

@@ -78,7 +78,7 @@ beforeEach(() => {
   mockStep.bulkCreate.mockResolvedValue([{ id: 101 }, { id: 102 }]);
 });
 describe('Gherkin case persistence', () => {
-  it('seeds ordered given, when, then rows for template 2', async () => {
+  it('seeds ordered Given, When, Then rows in the Scenario section for template 2', async () => {
     const response = await request(app)
       .post('/cases?folderId=7')
       .send({ title: 'Login', state: 0, priority: 2, type: 0, automationStatus: 0, template: 2 });
@@ -86,29 +86,136 @@ describe('Gherkin case persistence', () => {
     expect(response.status).toBe(200);
     expect(sequelize.transaction).toHaveBeenCalledOnce();
     expect(mockCaseStep.create.mock.calls.map(([attributes]) => attributes)).toEqual([
-      { caseId: 42, stepId: 100, stepNo: 1, keyword: 'given' },
-      { caseId: 42, stepId: 101, stepNo: 2, keyword: 'when' },
-      { caseId: 42, stepId: 102, stepNo: 3, keyword: 'then' },
+      { caseId: 42, stepId: 100, stepNo: 1, keyword: 'given', section: 'scenario' },
+      { caseId: 42, stepId: 101, stepNo: 2, keyword: 'when', section: 'scenario' },
+      { caseId: 42, stepId: 102, stepNo: 3, keyword: 'then', section: 'scenario' },
     ]);
   });
   it('persists reordered and repeated keywords on save', async () => {
     mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
     const steps = [
-      { id: 10, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'then' } },
-      { id: 11, step: 'Given text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'given' } },
-      { id: 12, step: 'Given again', result: '', editState: 'new', caseSteps: { stepNo: 3, keyword: 'given' } },
+      {
+        id: 10,
+        step: 'Then text',
+        result: 'Then result',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        uid: 'ui-10',
+        editState: 'changed',
+        caseSteps: { stepNo: 1, keyword: 'then', section: 'scenario', CaseId: 42, StepId: 10 },
+      },
+      {
+        id: 11,
+        step: 'When text',
+        result: 'When result',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        uid: 'ui-11',
+        editState: 'notChanged',
+        caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario', CaseId: 42, StepId: 11 },
+      },
+      {
+        id: 12,
+        step: 'Given text',
+        result: 'Given result',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        uid: 'ui-12',
+        editState: 'new',
+        caseSteps: { stepNo: 3, keyword: 'given', section: 'scenario', CaseId: 42, StepId: 12 },
+      },
     ];
     const response = await request(app).post('/steps/update?caseId=42').send(steps);
     expect(response.status).toBe(200);
+    expect(mockStep.update).toHaveBeenCalledWith(
+      { step: 'Then text', result: 'Then result' },
+      expect.objectContaining({ where: { id: 10 }, transaction })
+    );
     expect(mockCaseStep.update).toHaveBeenCalledWith(
-      { stepNo: 1, keyword: 'then' },
+      { stepNo: 1, keyword: 'then', section: 'scenario' },
       expect.objectContaining({ where: { stepId: 10 }, transaction })
     );
     expect(mockCaseStep.create).toHaveBeenCalledWith(
-      { caseId: '42', stepId: 100, stepNo: 3, keyword: 'given' },
+      { caseId: '42', stepId: 100, stepNo: 3, keyword: 'given', section: 'scenario' },
       { transaction }
     );
     expect(transaction.commit).toHaveBeenCalledOnce();
+  });
+  it('persists And and But as row keywords without changing their step text', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    const response = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        {
+          id: 10,
+          step: 'Given text',
+          result: 'legacy',
+          editState: 'changed',
+          caseSteps: { stepNo: 1, keyword: 'given' },
+        },
+        {
+          id: 11,
+          step: 'When text',
+          result: 'legacy',
+          editState: 'changed',
+          caseSteps: { stepNo: 2, keyword: 'when' },
+        },
+        { id: 12, step: 'And text', result: 'legacy', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'and' } },
+        { id: 13, step: 'But text', result: 'legacy', editState: 'changed', caseSteps: { stepNo: 4, keyword: 'but' } },
+        {
+          id: 14,
+          step: 'Then text',
+          result: 'legacy',
+          editState: 'changed',
+          caseSteps: { stepNo: 5, keyword: 'then' },
+        },
+      ]);
+
+    expect(response.status).toBe(200);
+    expect(mockCaseStep.update).toHaveBeenCalledWith(
+      { stepNo: 3, keyword: 'and', section: 'scenario' },
+      expect.objectContaining({ where: { stepId: 12 }, transaction })
+    );
+    expect(mockCaseStep.update).toHaveBeenCalledWith(
+      { stepNo: 4, keyword: 'but', section: 'scenario' },
+      expect.objectContaining({ where: { stepId: 13 }, transaction })
+    );
+  });
+  it('preserves background rows without discarding them', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    const response = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        {
+          id: 10,
+          step: 'Given text',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'background' },
+        },
+        {
+          id: 11,
+          step: 'When text',
+          result: '',
+          editState: 'notChanged',
+          caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+        },
+        {
+          id: 12,
+          step: 'Then text',
+          result: '',
+          editState: 'notChanged',
+          caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+        },
+      ]);
+
+    expect(response.status).toBe(200);
+    expect(mockCaseStep.update).toHaveBeenCalledWith(
+      { stepNo: 1, keyword: 'given', section: 'background' },
+      expect.objectContaining({ where: { stepId: 10 }, transaction })
+    );
+    expect(mockCaseStep.update).toHaveBeenCalledTimes(1);
+    expect(mockCaseStep.create).not.toHaveBeenCalled();
   });
   it('bumps the automation revision after saving gherkin steps', async () => {
     const update = vi.fn();
@@ -131,9 +238,26 @@ describe('Gherkin case persistence', () => {
     expect(response.status).toBe(200);
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ automationVersion: 3 }));
   });
+  it('persists Scenario Outline examples and rejects incomplete tables', async () => {
+    const update = vi.fn();
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, update });
+    const examples = { headers: ['user', 'role'], rows: [['Ada', 'admin']] };
+
+    const saved = await request(app).put('/cases/42').send({ template: 2, gherkinExamples: examples });
+    expect(saved.status).toBe(200);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ gherkinExamples: examples, automationVersion: 2 }));
+
+    vi.clearAllMocks();
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, update });
+    const invalid = await request(app)
+      .put('/cases/42')
+      .send({ template: 2, gherkinExamples: { headers: ['user', 'role'], rows: [['Ada']] } });
+    expect(invalid.status).toBe(400);
+    expect(update).not.toHaveBeenCalled();
+  });
   it.each([
     { label: 'missing', keyword: undefined },
-    { label: 'unsupported', keyword: 'and' },
+    { label: 'unsupported', keyword: 'invalid' },
   ])('rejects $label keyword without committing rows', async ({ keyword }) => {
     mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
     const caseSteps = { stepNo: 1 };
@@ -147,6 +271,132 @@ describe('Gherkin case persistence', () => {
     expect(transaction.commit).not.toHaveBeenCalled();
     expect(mockStep.update).not.toHaveBeenCalled();
     expect(mockCaseStep.update).not.toHaveBeenCalled();
+  });
+  it('rejects a malformed frontend-shaped row before opening a transaction', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    const response = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        {
+          id: 10,
+          step: 'text',
+          result: null,
+          uid: 'ui-10',
+          editState: 'changed',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'background' },
+        },
+      ]);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('step and result must be strings');
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+  });
+  it('rejects duplicate or non-positive Gherkin step orders before opening a transaction', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    const duplicate = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        { id: 10, step: 'Given', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'When', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
+        { id: 12, step: 'Then', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
+      ]);
+
+    expect(duplicate.status).toBe(400);
+    expect(duplicate.body.error).toBe('Gherkin step order must be unique, consecutive, and positive');
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+    expect(mockStep.update).not.toHaveBeenCalled();
+    expect(mockCaseStep.update).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    const nonPositive = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        { id: 10, step: 'Given', result: '', editState: 'changed', caseSteps: { stepNo: 0, keyword: 'given' } },
+        { id: 11, step: 'When', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
+        { id: 12, step: 'Then', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
+      ]);
+
+    expect(nonPositive.status).toBe(400);
+    expect(nonPositive.body.error).toContain('stepNo must be a positive integer');
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+  });
+  it('rejects invalid Gherkin order on case update before writing case metadata', async () => {
+    const update = vi.fn();
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, update });
+    const response = await request(app)
+      .put('/cases/42')
+      .send({
+        template: 2,
+        Steps: [
+          { id: 10, step: 'Given', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+          { id: 11, step: 'When', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
+          { id: 12, step: 'Then', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
+        ],
+      });
+
+    expect(response.status).toBe(400);
+    expect(update).not.toHaveBeenCalled();
+  });
+  it('rejects invalid sections and preserves valid background metadata', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    const invalidSection = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        {
+          id: 10,
+          step: 'Given',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'outline' },
+        },
+        {
+          id: 11,
+          step: 'When',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+        },
+        {
+          id: 12,
+          step: 'Then',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+        },
+      ]);
+    expect(invalidSection.status).toBe(400);
+
+    const legacyBackground = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        {
+          id: 10,
+          step: 'Given',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'background' },
+        },
+        {
+          id: 11,
+          step: 'When',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 2, keyword: 'when', section: 'background' },
+        },
+        {
+          id: 12,
+          step: 'Then',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+        },
+      ]);
+    expect(legacyBackground.status).toBe(200);
+    expect(mockCaseStep.update).toHaveBeenCalledWith(
+      { stepNo: 1, keyword: 'given', section: 'background' },
+      expect.objectContaining({ where: { stepId: 10 }, transaction })
+    );
   });
   it('rejects invalid metadata during case edit before updating the case', async () => {
     const update = vi.fn();
@@ -169,7 +419,7 @@ describe('Gherkin case persistence', () => {
       '42',
       expect.objectContaining({
         include: expect.arrayContaining([
-          expect.objectContaining({ model: mockStep, through: { attributes: ['stepNo', 'keyword'] } }),
+          expect.objectContaining({ model: mockStep, through: { attributes: ['stepNo', 'keyword', 'section'] } }),
         ]),
       })
     );
@@ -194,8 +444,8 @@ describe('Gherkin case persistence', () => {
     expect(response.status).toBe(200);
     expect(mockCaseStep.bulkCreate).toHaveBeenCalledWith(
       [
-        { caseId: 99, stepId: 101, stepNo: 1, keyword: 'then' },
-        { caseId: 99, stepId: 102, stepNo: 2, keyword: 'given' },
+        { caseId: 99, stepId: 101, stepNo: 1, keyword: 'then', section: 'scenario' },
+        { caseId: 99, stepId: 102, stepNo: 2, keyword: 'given', section: 'scenario' },
       ],
       { transaction }
     );
@@ -208,6 +458,6 @@ describe('Gherkin case persistence', () => {
       .post('/steps/update?caseId=42')
       .send([{ id: 10, step: 'legacy', result: '', editState: 'new', caseSteps: { stepNo: 1 } }]);
     expect(response.status).toBe(200);
-    expect(mockCaseStep.create.mock.calls[0][0].keyword ?? null).toBeNull();
+    expect(mockCaseStep.create.mock.calls[0][0]).toMatchObject({ keyword: null, section: 'scenario' });
   });
 });

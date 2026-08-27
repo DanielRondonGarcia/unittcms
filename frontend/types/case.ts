@@ -1,4 +1,9 @@
-import type { GherkinKeyword } from './base';
+import type { GherkinKeyword, GherkinSection } from './base';
+
+type GherkinExamples = {
+  headers: string[];
+  rows: string[][];
+};
 
 type CaseType = {
   id: number;
@@ -12,6 +17,7 @@ type CaseType = {
   preConditions: string;
   expectedResults: string;
   folderId: number;
+  gherkinExamples?: GherkinExamples | null;
   Steps?: StepType[];
   RunCases?: RunCaseType[];
   Attachments?: AttachmentType[];
@@ -28,6 +34,7 @@ type CaseStepType = {
   StepId?: number;
   stepNo: number;
   keyword?: GherkinKeyword | null;
+  section?: GherkinSection | null;
 };
 
 type StepType = {
@@ -174,27 +181,32 @@ type CaseMessages = {
   given: string;
   when: string;
   then: string;
-  automation: string;
-  automationEnvironment: string;
-  selectAutomationEnvironment: string;
-  noAutomationEnvironments: string;
-  runAutomatically: string;
-  automationLoading: string;
-  automationQueued: string;
-  automationRunning: string;
-  automationPassed: string;
-  automationFailed: string;
-  automationError: string;
-  automationCancelled: string;
-  automationSummary: string;
-  automationErrorDetail: string;
-  automationDuration: string;
-  automationEvidence: string;
-  automationHistory: string;
-  cancelAutomation: string;
-  downloadAutomationArtifact: string;
-  automationUnavailable: string;
-  automationNoEvidence: string;
+  and: string;
+  but: string;
+  background: string;
+  scenario: string;
+  examples: string;
+  addExamples: string;
+  removeExamples: string;
+  addExampleRow: string;
+  removeExampleRow: string;
+  addExampleColumn: string;
+  removeExampleColumn: string;
+  exampleHeader: string;
+  exampleValue: string;
+  noExamples: string;
+  noScenarioSteps: string;
+  gherkinValidationStepsRequired: string;
+  gherkinValidationStepOrder: string;
+  gherkinValidationKeyword: string;
+  gherkinValidationSection: string;
+  gherkinValidationStepText: string;
+  gherkinValidationDuplicateStep: string;
+  gherkinValidationFirstConnector: string;
+  gherkinValidationRequiredKeywords: string;
+  gherkinValidationExamples: string;
+  gherkinValidationPlaceholder: string;
+  gherkinValidationDetailsKeyword: string;
 };
 
-export type { CaseType, CaseStepType, StepType, AttachmentType, CasesMessages, CaseMessages };
+export type { CaseType, CaseStepType, StepType, AttachmentType, CasesMessages, CaseMessages, GherkinExamples };

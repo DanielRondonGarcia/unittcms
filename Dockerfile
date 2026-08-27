@@ -20,6 +20,12 @@ WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json* ./
 RUN npm ci
 
+# Reuse the dependency install for the production image. Pruning the cached
+# install avoids a second registry download during the final image build.
+FROM deps AS backend-production-deps
+WORKDIR /app/backend
+RUN npm prune --omit=dev
+
 # Build frontend
 FROM base AS frontend-builder
 WORKDIR /app
@@ -48,6 +54,12 @@ WORKDIR /app/backend
 # Update tsoa.json spec.basePath with the API_PATH using jq
 RUN jq --arg path "$API_PATH" '.spec.basePath = $path' tsoa.json > tsoa.tmp && mv tsoa.tmp tsoa.json
 RUN npm run build
+# TypeScript includes only TS sources; preserve dynamically imported JS models.
+RUN mkdir -p dist/models && \
+    for file in models/*.js; do \
+      target="dist/models/$(basename "$file")"; \
+      if [ ! -f "$target" ]; then cp "$file" "$target"; fi; \
+    done
 
 # Final production image
 FROM base AS runner
@@ -83,10 +95,10 @@ COPY --from=frontend-builder /app/frontend/public ./public
 # Copy Next.js module for the server
 COPY --from=deps /app/frontend/node_modules/next ./node_modules/next
 
-# Install backend production dependencies only
+# Copy the pruned backend dependencies instead of reinstalling from the registry.
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json* ./
-RUN npm ci --omit=dev
+COPY --from=backend-production-deps /app/backend/node_modules ./node_modules
 WORKDIR /app
 
 ## remove .env
@@ -106,3 +118,14 @@ EXPOSE 8000
 
 # Run database migrations and start the combined server
 CMD ["node", "entrypoint.js"]
+
+# The optional worker target is the only final image with Docker CLI/socket
+# capability. It also owns the worker-only module default.
+FROM runner AS automation-worker
+RUN apk add --no-cache docker-cli
+RUN test -f /app/backend/automation/worker-bootstrap.js
+ENV AUTOMATION_WORKER_MODULE=./backend/automation/worker-bootstrap.js
+HEALTHCHECK NONE
+
+# Keep an unqualified Docker build API-only and Docker-CLI-free.
+FROM runner AS default

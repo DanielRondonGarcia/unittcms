@@ -30,7 +30,7 @@ services:
       - IS_DEMO=false # set to true to seed the database
       - API_PATH=/api
       - DATABASE_PATH=/app/backend/database/database.sqlite
-      - AUTOMATION_EXECUTION_MODE=disabled
+      - AUTOMATION_EXECUTION_MODE=${AUTOMATION_EXECUTION_MODE:-disabled}
       - AUTOMATION_PHASE0_READY=false
       - AUTOMATION_REDIS_URL=redis://redis:6379
       - AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
@@ -64,8 +64,13 @@ PORT=8001
 SECRET_KEY=your-secret-key
 ```
 
-Automation defaults to `disabled`. Use `fake` only through an injected test or
-development harness; production startup rejects it. Real compatibility runs
-require the pinned image, an approved LiteLLM endpoint, credentials injected by
-CI/secret storage, and an explicit target allowlist. Do not put those values in
-source, `.env.example`, cases, logs, screenshots, or evidence.
+Automation defaults to `disabled`. For an explicit local/operational API wiring
+opt-in, set `AUTOMATION_EXECUTION_MODE=real` in the ignored `.env` file and
+recreate the API stack. This enables Redis/store/resolver access and environment
+listing only; it does not start the worker or bypass its Phase 0 gate. Use `fake`
+only through an injected test or development harness; production startup rejects
+it. Real compatibility runs require the pinned image, an approved HTTP(S)
+endpoint, provider authentication when the selected route requires it (Ollama
+normally does not), the mandatory UnitTCMS worker secret, and an explicit target
+allowlist. Do not put credentials in source, `.env.example`, cases, logs,
+screenshots, or evidence.

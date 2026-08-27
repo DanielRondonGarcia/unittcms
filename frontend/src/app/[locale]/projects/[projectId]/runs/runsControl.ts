@@ -191,24 +191,31 @@ async function fetchRunCases(jwt: string, runId: number) {
 }
 
 function changeStatus(changeCaseId: number, newStatus: number, currentTestCases: CaseType[]): CaseType[] {
-  const updatedTestCases = [...currentTestCases];
-
-  const found = updatedTestCases.find((testCase) => testCase.id === changeCaseId);
-  if (found && found.RunCases && testRunCaseStatus.length > 0) {
-    const runCase = found.RunCases[0];
-    if (runCase.editState === 'notChanged') {
-      runCase.status = newStatus;
-      runCase.editState = 'changed';
-    } else if (runCase.editState === 'changed') {
-      runCase.status = newStatus;
-    } else if (runCase.editState === 'new') {
-      runCase.status = newStatus;
-    } else if (runCase.editState === 'deleted') {
-      // do nothing
+  return currentTestCases.map((testCase) => {
+    const runCases = testCase.RunCases;
+    const runCase = runCases?.[0];
+    if (
+      testCase.id !== changeCaseId ||
+      !runCases ||
+      !runCase ||
+      testRunCaseStatus.length === 0 ||
+      runCase.editState === 'deleted'
+    ) {
+      return testCase;
     }
-  }
 
-  return updatedTestCases;
+    return {
+      ...testCase,
+      RunCases: [
+        {
+          ...runCase,
+          status: newStatus,
+          editState: runCase.editState === 'notChanged' ? 'changed' : runCase.editState,
+        },
+        ...runCases.slice(1),
+      ],
+    };
+  });
 }
 
 function includeExcludeTestCases(
@@ -217,69 +224,67 @@ function includeExcludeTestCases(
   runId: number,
   currentTestCases: CaseType[]
 ): CaseType[] {
-  const updatedTestCases = [...currentTestCases];
+  const keySet = new Set(keys);
 
-  if (isInclude) {
-    keys.forEach((caseId) => {
-      const targetCase = updatedTestCases.find((testCase) => testCase.id === caseId);
-      if (!targetCase) {
-        console.error('failed to find target case');
-        return;
-      }
+  return currentTestCases.map((testCase) => {
+    if (!keySet.has(testCase.id)) return testCase;
 
-      if (targetCase.RunCases && targetCase.RunCases.length > 0) {
-        // already included
-        if (targetCase.RunCases[0].editState === 'notChanged') {
-          // do nothing
-        } else if (targetCase.RunCases[0].editState === 'changed') {
-          // do nothing
-        } else if (targetCase.RunCases[0].editState === 'new') {
-          // do nothing
-        } else if (targetCase.RunCases[0].editState === 'deleted') {
-          if (targetCase.RunCases[0].id > 0) {
-            // when id is valid (already included)
-            targetCase.RunCases[0].editState = 'changed';
-          } else {
-            // when id is invalid (has not included)
-            targetCase.RunCases[0].editState = 'new';
-          }
-        }
-      } else {
-        const newRunCase = {
-          id: -1,
-          runId: runId,
-          status: 0,
-          editState: 'new',
-          assigneeUserId: null,
-        } as RunCaseType;
-        targetCase.RunCases = [newRunCase];
+    const runCases = testCase.RunCases;
+    const runCase = runCases?.[0];
+    if (isInclude) {
+      if (!runCases || !runCase) {
+        return {
+          ...testCase,
+          RunCases: [
+            {
+              id: -1,
+              runId,
+              status: 0,
+              editState: 'new',
+              assigneeUserId: null,
+            } as RunCaseType,
+          ],
+        };
       }
-    });
-  } else {
-    keys.forEach((caseId) => {
-      const targetCase = updatedTestCases.find((testCase) => testCase.id === caseId);
-      if (!targetCase) {
-        console.error('failed to find target case');
-        return;
-      }
+      if (runCase.editState !== 'deleted') return testCase;
 
-      if (!targetCase.RunCases || targetCase.RunCases.length == 0) {
-        // already excluded
-      } else {
-        if (targetCase.RunCases[0].editState === 'notChanged') {
-          targetCase.RunCases[0].editState = 'deleted';
-        } else if (targetCase.RunCases[0].editState === 'changed') {
-          targetCase.RunCases[0].editState = 'deleted';
-        } else if (targetCase.RunCases[0].editState === 'new') {
-          targetCase.RunCases[0].editState = 'deleted';
-        } else if (targetCase.RunCases[0].editState === 'deleted') {
-          // do nothing
-        }
-      }
-    });
-  }
+      return {
+        ...testCase,
+        RunCases: [{ ...runCase, editState: runCase.id > 0 ? 'changed' : 'new' }, ...runCases.slice(1)],
+      };
+    }
 
-  return updatedTestCases;
+    if (!runCase || runCase.editState === 'deleted' || !runCases) return testCase;
+    return {
+      ...testCase,
+      RunCases: [{ ...runCase, editState: 'deleted' }, ...runCases.slice(1)],
+    };
+  });
+}
+
+function isRunCaseIncluded(testCase: CaseType): boolean {
+  return Boolean(testCase.RunCases?.[0] && testCase.RunCases[0].editState !== 'deleted');
+}
+
+function getPersistedRunCase(testCase: CaseType) {
+  const runCase = testCase.RunCases?.[0];
+  return runCase && runCase.id > 0 && runCase.editState !== 'new' && runCase.editState !== 'deleted'
+    ? runCase
+    : undefined;
+}
+
+function mergeRunCaseChanges(currentCases: CaseType[], changedCases: CaseType[]): CaseType[] {
+  const changedById = new Map(changedCases.map((testCase) => [testCase.id, testCase]));
+  const mergedCases = currentCases.map((testCase) => changedById.get(testCase.id) ?? testCase);
+  const currentIds = new Set(currentCases.map((testCase) => testCase.id));
+  return [...mergedCases, ...changedCases.filter((testCase) => !currentIds.has(testCase.id))];
+}
+
+function hasUnsavedRunCaseChanges(testCases: CaseType[]): boolean {
+  return testCases.some((testCase) => {
+    const runCase = testCase.RunCases?.[0];
+    return Boolean(runCase && runCase.editState !== 'notChanged');
+  });
 }
 
 async function updateRunCases(jwt: string, runId: number, testCases: CaseType[]) {
@@ -429,6 +434,10 @@ export {
   fetchRunCases,
   changeStatus,
   includeExcludeTestCases,
+  isRunCaseIncluded,
+  getPersistedRunCase,
+  mergeRunCaseChanges,
+  hasUnsavedRunCaseChanges,
   updateRunCases,
   fetchProjectCases,
   assignRunCases,

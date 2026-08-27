@@ -3,14 +3,22 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import {
   buildHerculesInvocation,
-  CANONICAL_FEATURE,
   collectCompatibilityEvidence,
   HERCULES_CONTRACT,
-  runCompatibilityGate,
+  validateHostAllowlist,
   runHerculesProcess,
   validateCanonicalFeature,
+  resolveHerculesImage,
+  resolveHerculesVolume,
 } from '../compatibility/hercules.js';
-import type { AutomationExecutor, ExecutorHealth, ExecutorInput, ExecutorResult } from '../ports/index.js';
+import type {
+  AutomationExecutor,
+  ExecutorHealth,
+  ExecutorInput,
+  ExecutorResult,
+  ResolvedEnvironment,
+} from '../ports/index.js';
+import { validateWorkerLlmConfig, type WorkerLlmConfig } from './llm-config.js';
 
 export type HerculesInvocation = { file: string; cwd: string; argv: string[] };
 export type HerculesProcessResult = { exitCode: number | null; signal?: string | null; timedOut?: boolean };
@@ -22,42 +30,108 @@ export type HerculesProcessRunner = (
     registerCancellation: (terminate: () => void) => void;
   }
 ) => Promise<HerculesProcessResult>;
-export type HerculesCompatibilityGate = (input: {
-  workdir: string;
-  evidenceRoot: string;
-  feature: string;
-  allowedHosts: string[];
-}) => Promise<{ ready: boolean }>;
 export type HerculesExecutorOptions = {
   workdir: string;
   allowedHosts?: string[];
   timeoutMs?: number;
-  liteLLM?: { baseUrl?: string; apiKey?: string };
+  llmConfig: WorkerLlmConfig;
+  image?: string;
+  workVolume?: string;
   processRunner?: HerculesProcessRunner;
-  compatibilityGate?: HerculesCompatibilityGate;
 };
-
-type CompatibilityInput = Parameters<HerculesCompatibilityGate>[0];
+export type BoundHerculesTarget = Readonly<{ feature: string; baseUrl: string; allowedHosts: string[] }>;
 
 const FIXED_ENV = {
   AUTO_MODE: '1',
   ENABLE_TELEMETRY: '0',
   HEADLESS: String(HERCULES_CONTRACT.resourceLimits.browser.headless),
   BROWSER_TYPE: 'chromium',
-  RECORD_VIDEO: 'true',
   TAKE_SCREENSHOTS: 'true',
   CAPTURE_NETWORK: 'true',
 };
 
-function safeEnvironment(liteLLM: HerculesExecutorOptions['liteLLM']): Record<string, string> {
+function safeEnvironment(llmConfig: WorkerLlmConfig): Record<string, string> {
   const env: Record<string, string> = { PATH: process.env.PATH ?? '/usr/bin:/bin', ...FIXED_ENV };
-  if (liteLLM?.baseUrl) {
-    const url = new URL(liteLLM.baseUrl);
-    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('invalid_litellm_base_url');
-    env.LITELLM_BASE_URL = liteLLM.baseUrl;
-  }
-  if (liteLLM?.apiKey) env.LITELLM_API_KEY = liteLLM.apiKey;
+  const config = validateWorkerLlmConfig(llmConfig);
+  const apiType =
+    config.provider === 'ollama' || config.provider === 'ollama-cloud'
+      ? 'ollama'
+      : config.provider === 'openai-compatible'
+        ? 'openai'
+        : undefined;
+  if (!apiType) throw new Error('hercules_provider_unsupported');
+  env.LLM_MODEL_NAME = config.model;
+  if (config.provider !== 'ollama') env.LLM_MODEL_API_KEY = config.apiKey;
+  env.LLM_MODEL_BASE_URL = config.baseUrl;
+  if (apiType === 'ollama') env.LLM_MODEL_CLIENT_HOST = config.baseUrl;
+  env.LLM_MODEL_API_TYPE = apiType;
   return Object.freeze(env);
+}
+
+const URL_PATTERN = /\b[a-z][a-z\d+.-]*:(?:\/\/)?[^\s"')]+/gi;
+const FEATURE_TARGET_PLACEHOLDER_HOSTS = new Set(['example.com', 'example.test']);
+
+function normalizedHosts(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return [
+    ...new Set(
+      values
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim().toLowerCase().replace(/\.$/, ''))
+    ),
+  ].filter(Boolean);
+}
+
+function bindUrl(baseUrl: URL, sourceUrl: URL): string {
+  const basePath = baseUrl.pathname.replace(/^\/+|\/+$/g, '');
+  const sourcePath = sourceUrl.pathname.replace(/^\/+|\/+$/g, '');
+  const path = [basePath, sourcePath].filter(Boolean).join('/');
+  baseUrl.pathname = path ? `/${path}` : '/';
+  baseUrl.search = sourceUrl.search;
+  baseUrl.hash = sourceUrl.hash;
+  if (!path && !baseUrl.search && !baseUrl.hash) return baseUrl.origin;
+  return baseUrl.toString();
+}
+
+export function bindEnvironmentTarget(feature: string, environment?: ResolvedEnvironment): BoundHerculesTarget {
+  if (!environment || typeof environment.baseUrl !== 'string') throw new Error('environment_required');
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(environment.baseUrl);
+  } catch {
+    throw new Error('environment_url_invalid');
+  }
+  const allowedHosts = normalizedHosts(environment.allowedHosts);
+  if (!allowedHosts.length || !['http:', 'https:'].includes(baseUrl.protocol) || baseUrl.username || baseUrl.password)
+    throw new Error('environment_target_rejected');
+  if (!validateHostAllowlist([baseUrl.toString()], allowedHosts).allowed)
+    throw new Error('environment_target_rejected');
+
+  const urls = [...feature.matchAll(URL_PATTERN)].map(([value]) => value);
+  const unsafeCaseUrls = urls.filter((value) => {
+    try {
+      const source = new URL(value);
+      return (
+        !['http:', 'https:'].includes(source.protocol) ||
+        !FEATURE_TARGET_PLACEHOLDER_HOSTS.has(source.hostname.toLowerCase())
+      );
+    } catch {
+      return true;
+    }
+  });
+  if (unsafeCaseUrls.length > 0) throw new Error('environment_target_rejected');
+
+  return Object.freeze({
+    feature: feature.replace(URL_PATTERN, (value) => {
+      try {
+        return bindUrl(new URL(baseUrl.toString()), new URL(value));
+      } catch {
+        return value;
+      }
+    }),
+    baseUrl: baseUrl.toString(),
+    allowedHosts,
+  });
 }
 
 const executeCompatibilityProcess = runHerculesProcess as unknown as (
@@ -86,9 +160,6 @@ const defaultProcessRunner: HerculesProcessRunner = (invocation, options) =>
     },
   });
 
-const defaultCompatibilityGate: HerculesCompatibilityGate = (input: CompatibilityInput) =>
-  (runCompatibilityGate as unknown as (value: CompatibilityInput) => Promise<{ ready: boolean }>)(input);
-
 function junitFlags(workdir: string): { failures: boolean; errors: boolean; secretFree: boolean } {
   const evidence = collectCompatibilityEvidence(workdir);
   const file = evidence.files.find((value: string) => /^output\/[^/]+\.xml$/i.test(value));
@@ -115,44 +186,70 @@ function mapProcessResult(result: HerculesProcessResult, workdir: string, cancel
 export class HerculesAutomationExecutor implements AutomationExecutor {
   private readonly active = new Map<string, { cancelled: boolean; terminate: () => void }>();
   private readonly workdir: string;
-  private readonly allowedHosts: string[];
   private readonly timeoutMs: number;
+  private readonly image: string;
+  private readonly workVolume: string | undefined;
   private readonly environment: Readonly<Record<string, string>>;
   private readonly processRunner: HerculesProcessRunner;
-  private readonly compatibilityGate: HerculesCompatibilityGate;
 
   constructor(options: HerculesExecutorOptions) {
+    this.image = resolveHerculesImage(options.image);
+    this.workVolume = options.workVolume === undefined ? undefined : resolveHerculesVolume(options.workVolume);
     this.workdir = options.workdir;
     mkdirSync(this.workdir, { recursive: true });
-    this.allowedHosts = [...(options.allowedHosts ?? [])];
     const requested = options.timeoutMs ?? HERCULES_CONTRACT.timeoutMs;
     const maxTimeoutMs = Number(HERCULES_CONTRACT.timeoutMs);
     this.timeoutMs = Math.min(maxTimeoutMs, Math.max(1, Number.isFinite(requested) ? requested : 1));
-    this.environment = safeEnvironment(options.liteLLM);
+    this.environment = safeEnvironment(options.llmConfig);
     this.processRunner = options.processRunner ?? defaultProcessRunner;
-    this.compatibilityGate = options.compatibilityGate ?? defaultCompatibilityGate;
   }
 
   async execute(input: ExecutorInput): Promise<ExecutorResult> {
     const feature = typeof input.snapshot === 'string' ? input.snapshot : input.snapshot.feature;
     if (!validateCanonicalFeature(feature).valid)
       return { outcome: 'technical_error', error: 'invalid_canonical_feature' };
+    let target: BoundHerculesTarget;
+    try {
+      target = bindEnvironmentTarget(feature, input.environment);
+    } catch (error) {
+      const code = (error as { message?: unknown })?.message;
+      return {
+        outcome: 'technical_error',
+        error:
+          typeof code === 'string' &&
+          ['environment_required', 'environment_url_invalid', 'environment_target_rejected'].includes(code)
+            ? code
+            : 'environment_target_rejected',
+      };
+    }
     const run: { cancelled: boolean; terminate: () => void } = { cancelled: false, terminate: () => {} };
     this.active.set(input.executionId, run);
     let workspace = '';
     try {
       workspace = mkdtempSync(join(this.workdir, 'run-'));
       mkdirSync(join(workspace, 'input'), { recursive: true });
-      writeFileSync(join(workspace, 'input', 'test.feature'), feature, 'utf8');
+      writeFileSync(join(workspace, 'input', 'test.feature'), target.feature, 'utf8');
       const registerCancellation = (terminate: () => void) => {
         run.terminate = terminate;
         if (run.cancelled) terminate();
       };
-      const result = await this.processRunner(buildHerculesInvocation(workspace), {
-        env: this.environment,
-        timeoutMs: this.timeoutMs,
-        registerCancellation,
-      });
+      const result = await this.processRunner(
+        buildHerculesInvocation(workspace, this.image, this.workVolume, {
+          includeApiKey:
+            this.environment.LLM_MODEL_API_TYPE !== 'ollama' ||
+            Object.prototype.hasOwnProperty.call(this.environment, 'LLM_MODEL_API_KEY'),
+        }),
+        {
+          env: Object.freeze({
+            ...this.environment,
+            RECORD_VIDEO: input.environment?.captureVideo === true ? 'true' : 'false',
+            HERCULES_BASE_URL: target.baseUrl,
+            HERCULES_ALLOWED_HOSTS: target.allowedHosts.join(','),
+          }),
+          timeoutMs: this.timeoutMs,
+          registerCancellation,
+        }
+      );
       return mapProcessResult(result, workspace, run.cancelled);
     } catch (error) {
       if (run.cancelled) return { outcome: 'cancelled', error: 'hercules_cancelled' };
@@ -176,16 +273,6 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
   }
 
   async health(): Promise<ExecutorHealth> {
-    try {
-      const proof = await this.compatibilityGate({
-        workdir: this.workdir,
-        evidenceRoot: this.workdir,
-        feature: CANONICAL_FEATURE,
-        allowedHosts: this.allowedHosts,
-      });
-      return { key: 'hercules', ready: proof.ready, status: proof.ready ? 'ready' : 'compatibility_not_ready' };
-    } catch {
-      return { key: 'hercules', ready: false, status: 'compatibility_unavailable' };
-    }
+    return { key: 'hercules', ready: true, status: 'ready' };
   }
 }

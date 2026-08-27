@@ -42,12 +42,18 @@ export class EnvironmentResolver implements EnvironmentResolverPort {
   async resolve(environmentId: number): Promise<EnvironmentRecord> {
     const record = await this.load(environmentId);
     if (!record) throw new Error('environment_not_found');
-    const hosts = allowedHosts(record.allowedHosts);
+    const configuredHosts = Array.isArray(record.allowedHosts) ? record.allowedHosts : [];
+    const hosts = allowedHosts(configuredHosts.length > 0 ? configuredHosts : [new URL(record.baseUrl).hostname]);
     const url = safeUrl(record.baseUrl, hosts);
-    const refs = record.secretRefs
+    const refs = (Array.isArray(record.secretRefs) ? record.secretRefs : [])
       .filter((ref) => typeof ref === 'string' && /^(?:secret|vault|env):\/\//i.test(ref.trim()))
       .map((ref) => ref.trim());
-    return Object.freeze({ baseUrl: url.toString(), allowedHosts: [...hosts], secretRefs: [...refs] });
+    return Object.freeze({
+      baseUrl: url.toString(),
+      allowedHosts: [...hosts],
+      secretRefs: [...refs],
+      captureVideo: record.captureVideo === true,
+    });
   }
 
   validateRedirect(sourceUrl: string, targetUrl: string, hosts?: readonly string[]): string {

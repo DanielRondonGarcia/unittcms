@@ -27,4 +27,13 @@ export type SettingsMessages = {
   tagErrorUpdate: string;
   tagErrorDelete: string;
   tableAria: string;
+  automationEnvironment: string;
+  automationEnvironmentDescription: string;
+  automationBaseUrl: string;
+  automationEnabled: string;
+  automationCaptureVideo: string;
+  automationSave: string;
+  automationLoading: string;
+  automationSaved: string;
+  automationError: string;
 };

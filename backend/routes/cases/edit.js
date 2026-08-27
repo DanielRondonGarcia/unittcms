@@ -4,7 +4,12 @@ import { DataTypes } from 'sequelize';
 import defineCase from '../../models/cases.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
-import { gherkinTemplate, hasValidGherkinKeywords } from '../../config/enums.js';
+import {
+  gherkinTemplate,
+  hasValidGherkinExamples,
+  hasValidGherkinKeywords,
+  hasValidGherkinStepOrder,
+} from '../../config/enums.js';
 
 export default function (sequelize) {
   const { verifySignedIn } = authMiddleware(sequelize);
@@ -21,8 +26,18 @@ export default function (sequelize) {
       }
 
       const isGherkin = (updateCase.template ?? testcase.template) === gherkinTemplate;
+      if (isGherkin && updateCase.Steps !== undefined && !hasValidGherkinStepOrder(updateCase.Steps)) {
+        return res.status(400).json({ error: 'Gherkin step order must be unique, consecutive, and positive' });
+      }
       if (isGherkin && updateCase.Steps !== undefined && !hasValidGherkinKeywords(updateCase.Steps)) {
-        return res.status(400).json({ error: 'Gherkin steps require given, when, or then keywords' });
+        return res.status(400).json({ error: 'Gherkin steps require Given, When, Then, and valid step keywords' });
+      }
+      if (
+        isGherkin &&
+        updateCase.gherkinExamples !== undefined &&
+        !hasValidGherkinExamples(updateCase.gherkinExamples)
+      ) {
+        return res.status(400).json({ error: 'Gherkin examples must contain unique headers and matching data rows' });
       }
 
       const values = { ...updateCase };

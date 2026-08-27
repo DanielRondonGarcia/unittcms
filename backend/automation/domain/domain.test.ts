@@ -26,6 +26,10 @@ describe('automation domain', () => {
     if (!result.ok) return;
     expect(result.snapshot.feature).toContain('Given the visitor is signed out');
     expect(result.snapshot.feature.indexOf('Given')).toBeLessThan(result.snapshot.feature.indexOf('When'));
+    expect(result.snapshot.feature).not.toContain('Background:');
+    expect(result.snapshot.steps).toEqual(
+      expect.arrayContaining([expect.objectContaining({ keyword: 'given', section: 'scenario' })])
+    );
     expect(result.snapshot.version).toBe(3);
     expect(result.snapshot.hash).toMatch(/^[a-f0-9]{64}$/);
     expect(Object.isFrozen(result.snapshot)).toBe(true);
@@ -53,7 +57,13 @@ describe('automation domain', () => {
     const result = composeCanonicalSnapshot(source);
     if (!result.ok) throw new Error('expected valid source');
 
-    const translated = presentSnapshot(result.snapshot, { given: 'Dado', when: 'Cuando', then: 'Entonces' });
+    const translated = presentSnapshot(result.snapshot, {
+      given: 'Dado',
+      when: 'Cuando',
+      then: 'Entonces',
+      and: 'Y',
+      but: 'Pero',
+    });
     expect(translated).toContain('Dado the visitor is signed out');
     expect(result.snapshot.feature).toContain('Given the visitor is signed out');
     expect(translated).not.toBe(result.snapshot.feature);
@@ -66,6 +76,106 @@ describe('automation domain', () => {
     if (!first.ok || !second.ok) throw new Error('expected valid sources');
     expect(second.snapshot.version).toBe(4);
     expect(second.snapshot.hash).not.toBe(first.snapshot.hash);
+  });
+
+  it('preserves Background rows and renders them before the Scenario block', () => {
+    const result = composeCanonicalSnapshot({
+      ...source,
+      Steps: [
+        { id: 3, step: 'the dashboard is shown', caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' } },
+        { id: 1, step: 'the visitor is signed out', caseSteps: { stepNo: 1, keyword: 'given', section: 'background' } },
+        { id: 2, step: 'the login form is visible', caseSteps: { stepNo: 2, keyword: 'when' } },
+      ],
+    });
+
+    if (!result.ok) throw new Error('expected valid source');
+    expect(result.snapshot.feature).toContain('  Scenario: Login');
+    expect(result.snapshot.feature).toContain('  Background:\n    Given the visitor is signed out');
+    expect(result.snapshot.feature.indexOf('Background:')).toBeLessThan(result.snapshot.feature.indexOf('Scenario:'));
+    expect(result.snapshot.steps).toEqual(
+      expect.arrayContaining([expect.objectContaining({ keyword: 'given', section: 'background' })])
+    );
+    expect(result.snapshot.steps).toEqual(expect.arrayContaining([expect.objectContaining({ keyword: 'given' })]));
+    expect(
+      presentSnapshot(result.snapshot, {
+        given: 'Dado',
+        when: 'Cuando',
+        then: 'Entonces',
+        and: 'Y',
+        but: 'Pero',
+        background: 'Antecedentes',
+        scenario: 'Escenario',
+      })
+    ).toContain('Antecedentes:');
+  });
+
+  it('renders a valid Scenario Outline and escapes table content', () => {
+    const result = composeCanonicalSnapshot({
+      ...source,
+      gherkinExamples: {
+        headers: ['user|name', 'note'],
+        rows: [['Ada', 'line one\nline two | ok']],
+      },
+      Steps: [
+        { id: 1, step: 'a user exists', caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' } },
+        { id: 2, step: 'the user signs in', caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' } },
+        { id: 3, step: 'the dashboard is shown', caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' } },
+      ],
+    });
+
+    if (!result.ok) throw new Error('expected valid source');
+    expect(result.snapshot.feature).toContain('Scenario Outline: Login');
+    expect(result.snapshot.feature).toContain(
+      '  Examples:\n    | user\\|name | note |\n    | Ada | line one\\nline two \\| ok |'
+    );
+    expect(result.snapshot.examples).toEqual({
+      headers: ['user|name', 'note'],
+      rows: [['Ada', 'line one\nline two | ok']],
+    });
+  });
+
+  it('rejects unknown sections without producing a snapshot', () => {
+    const result = composeCanonicalSnapshot({
+      ...source,
+      Steps: source.Steps?.map((step, index) => ({
+        ...step,
+        caseSteps: { ...step.caseSteps, section: index === 0 ? 'outline' : 'scenario' },
+      })),
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'Steps[0].caseSteps.section' })])
+      );
+  });
+
+  it('continues rejecting duplicate and non-positive step orders', () => {
+    const duplicate = composeCanonicalSnapshot({
+      ...source,
+      Steps: source.Steps?.map((step, index) => ({
+        ...step,
+        caseSteps: { ...step.caseSteps, stepNo: index === 2 ? 2 : step.caseSteps.stepNo },
+      })),
+    });
+    const nonPositive = composeCanonicalSnapshot({
+      ...source,
+      Steps: source.Steps?.map((step, index) => ({
+        ...step,
+        caseSteps: { ...step.caseSteps, stepNo: index === 0 ? 0 : step.caseSteps.stepNo },
+      })),
+    });
+
+    expect(duplicate.ok).toBe(false);
+    expect(nonPositive.ok).toBe(false);
+    if (!duplicate.ok)
+      expect(duplicate.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'Steps[2].caseSteps.stepNo' })])
+      );
+    if (!nonPositive.ok)
+      expect(nonPositive.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'Steps[0].caseSteps.stepNo' })])
+      );
   });
 
   it('enforces lifecycle transitions, timestamps, attempts, and result semantics', () => {

@@ -1,4 +1,22 @@
 function defineCase(sequelize, DataTypes) {
+  const parseGherkinExamples = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'object' && !Array.isArray(value)) return value;
+    if (typeof value !== 'string') return null;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const serializeGherkinExamples = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'string') return value;
+    return JSON.stringify(value);
+  };
+
   const Case = sequelize.define('Case', {
     title: {
       type: DataTypes.STRING,
@@ -29,6 +47,16 @@ function defineCase(sequelize, DataTypes) {
       allowNull: false,
     },
     automationVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    gherkinExamples: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      get() {
+        return parseGherkinExamples(this.getDataValue('gherkinExamples'));
+      },
+      set(value) {
+        this.setDataValue('gherkinExamples', serializeGherkinExamples(value));
+      },
+    },
     preConditions: {
       type: DataTypes.STRING,
       allowNull: true,

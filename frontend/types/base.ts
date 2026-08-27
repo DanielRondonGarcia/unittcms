@@ -16,7 +16,8 @@ export type AutomationStatusType = {
   uid: 'automated' | 'automation-not-required' | 'cannot-be-automated' | 'obsolete';
 };
 
-export type GherkinKeyword = 'given' | 'when' | 'then';
+export type GherkinKeyword = 'given' | 'when' | 'then' | 'and' | 'but';
+export type GherkinSection = 'background' | 'scenario';
 
 export type TemplateType = {
   uid: 'text' | 'step' | 'gherkin';

@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 
 export const EXECUTION_STATES = ['queued', 'running', 'passed', 'failed', 'error', 'cancelled'] as const;
 export type ExecutionState = (typeof EXECUTION_STATES)[number];
-export type GherkinKeyword = 'given' | 'when' | 'then';
+export type GherkinKeyword = 'given' | 'when' | 'then' | 'and' | 'but';
+export type GherkinSection = 'background' | 'scenario';
 export type FieldError = { field: string; code: string; message: string };
 
 type SourceStep = {
@@ -10,7 +11,8 @@ type SourceStep = {
   step?: unknown;
   keyword?: unknown;
   stepNo?: unknown;
-  caseSteps?: { keyword?: unknown; stepNo?: unknown };
+  section?: unknown;
+  caseSteps?: { keyword?: unknown; stepNo?: unknown; section?: unknown };
 };
 
 export type CaseSource = {
@@ -19,11 +21,16 @@ export type CaseSource = {
   title?: unknown;
   template?: unknown;
   automationVersion?: unknown;
+  gherkinExamples?: unknown;
   Steps?: SourceStep[];
   steps?: SourceStep[];
 };
 
-export type CanonicalStep = { keyword: GherkinKeyword; text: string; stepNo: number };
+export type GherkinExamples = Readonly<{
+  headers: readonly string[];
+  rows: readonly (readonly string[])[];
+}>;
+export type CanonicalStep = { keyword: GherkinKeyword; section: GherkinSection; text: string; stepNo: number };
 export type CanonicalSnapshot = Readonly<{
   caseId: number;
   title: string;
@@ -31,6 +38,7 @@ export type CanonicalSnapshot = Readonly<{
   hash: string;
   feature: string;
   steps: readonly CanonicalStep[];
+  examples: GherkinExamples | null;
 }>;
 export type SnapshotResult = { ok: true; snapshot: CanonicalSnapshot } | { ok: false; errors: FieldError[] };
 
@@ -44,6 +52,79 @@ function deepFreeze<T>(value: T): T {
 
 function field(field: string, code: string, message: string): FieldError {
   return { field, code, message };
+}
+
+function normalizeSection(value: unknown): GherkinSection | null {
+  if (value === undefined || value === null || value === '') return 'scenario';
+  return value === 'background' || value === 'scenario' ? value : null;
+}
+
+function normalizeExamples(value: unknown): { examples: GherkinExamples | null; errors: FieldError[] } {
+  if (value === undefined || value === null || value === '') return { examples: null, errors: [] };
+
+  let candidate = value;
+  if (typeof candidate === 'string') {
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      return {
+        examples: null,
+        errors: [field('gherkinExamples', 'invalid', 'examples must be a valid table object')],
+      };
+    }
+  }
+
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return {
+      examples: null,
+      errors: [field('gherkinExamples', 'invalid', 'examples must be a valid table object')],
+    };
+  }
+
+  const source = candidate as { headers?: unknown; rows?: unknown };
+  const headers = source.headers;
+  const rows = source.rows;
+  const errors: FieldError[] = [];
+  if (!Array.isArray(headers) || headers.length === 0 || headers.some((header) => typeof header !== 'string')) {
+    errors.push(field('gherkinExamples.headers', 'invalid', 'examples need one or more string headers'));
+  } else if (headers.some((header) => header.trim() === '')) {
+    errors.push(field('gherkinExamples.headers', 'invalid', 'example headers cannot be empty'));
+  } else if (new Set(headers).size !== headers.length) {
+    errors.push(field('gherkinExamples.headers', 'invalid', 'example headers must be unique'));
+  }
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    errors.push(field('gherkinExamples.rows', 'invalid', 'examples need one or more data rows'));
+  } else if (Array.isArray(headers)) {
+    rows.forEach((row, index) => {
+      if (!Array.isArray(row) || row.length !== headers.length || row.some((cell) => typeof cell !== 'string')) {
+        errors.push(
+          field(`gherkinExamples.rows[${index}]`, 'invalid', 'each example row must match the header column count')
+        );
+      }
+    });
+  }
+
+  if (errors.length) return { examples: null, errors };
+  return {
+    examples: {
+      headers: [...(headers as string[])],
+      rows: (rows as string[][]).map((row) => [...row]),
+    },
+    errors: [],
+  };
+}
+
+function escapeTableCell(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\r\n|\r|\n/g, '\\n')
+    .replace(/\|/g, '\\|');
+}
+
+function formatExamples(examples: GherkinExamples): string[] {
+  const row = (cells: readonly string[]) => `    | ${cells.map(escapeTableCell).join(' | ')} |`;
+  return ['  Examples:', row(examples.headers), ...examples.rows.map(row)];
 }
 
 export function composeCanonicalSnapshot(source: CaseSource): SnapshotResult {
@@ -68,57 +149,98 @@ export function composeCanonicalSnapshot(source: CaseSource): SnapshotResult {
   const steps: CanonicalStep[] = [];
   const seen = new Set<number>();
   for (const [index, item] of (Array.isArray(sourceSteps) ? sourceSteps : []).entries()) {
-    const metadata = item.caseSteps ?? item;
+    const value = (item && typeof item === 'object' ? item : {}) as SourceStep;
+    const metadata = value.caseSteps ?? value;
     const stepNo = Number(metadata.stepNo);
     const keyword = typeof metadata.keyword === 'string' ? metadata.keyword.toLowerCase() : '';
-    const text = typeof item.step === 'string' ? item.step.trim() : '';
+    const section = normalizeSection(metadata.section ?? value.section);
+    const text = typeof value.step === 'string' ? value.step.trim() : '';
     const prefix = `Steps[${index}]`;
     if (!Number.isInteger(stepNo) || stepNo < 1 || seen.has(stepNo))
       errors.push(field(`${prefix}.caseSteps.stepNo`, 'invalid', 'step order must be unique and positive'));
     else seen.add(stepNo);
-    if (!['given', 'when', 'then'].includes(keyword))
-      errors.push(field(`${prefix}.caseSteps.keyword`, 'unsupported', 'keyword must be given, when, or then'));
+    if (!['given', 'when', 'then', 'and', 'but'].includes(keyword))
+      errors.push(
+        field(`${prefix}.caseSteps.keyword`, 'unsupported', 'keyword must be given, when, then, and, or but')
+      );
+    if (!section)
+      errors.push(field(`${prefix}.caseSteps.section`, 'unsupported', 'section must be background or scenario'));
     if (!text || /[\r\n]/.test(text))
       errors.push(field(`${prefix}.step`, 'required', 'step text must be a single non-empty line'));
-    if (Number.isInteger(stepNo) && stepNo > 0 && ['given', 'when', 'then'].includes(keyword) && text) {
-      steps.push({ keyword: keyword as GherkinKeyword, text, stepNo });
+    if (
+      Number.isInteger(stepNo) &&
+      stepNo > 0 &&
+      ['given', 'when', 'then', 'and', 'but'].includes(keyword) &&
+      section &&
+      text
+    ) {
+      steps.push({ keyword: keyword as GherkinKeyword, section, text, stepNo });
     }
   }
 
-  steps.sort((left, right) => left.stepNo - right.stepNo);
   for (const keyword of ['given', 'when', 'then'] as const) {
     if (!steps.some((step) => step.keyword === keyword))
       errors.push(field('Steps', 'syntax', `at least one ${keyword} step is required`));
   }
+
+  const examplesResult = normalizeExamples(source.gherkinExamples);
+  errors.push(...examplesResult.errors);
+  const normalizedSteps = steps;
+
+  normalizedSteps.sort((left, right) => {
+    return left.stepNo - right.stepNo;
+  });
   if (errors.length) return { ok: false, errors };
 
-  const feature = [
-    `Feature: ${title}`,
-    '',
-    `  Scenario: ${title}`,
-    ...steps.map(({ keyword, text }) => `    ${keyword[0].toUpperCase()}${keyword.slice(1)} ${text}`),
-    '',
-  ].join('\n');
-  const payload = JSON.stringify({ caseId, title, version, steps });
+  const scenarioLabel = examplesResult.examples ? 'Scenario Outline' : 'Scenario';
+  const stepLine = ({ keyword, text }: CanonicalStep) => `    ${keyword[0].toUpperCase()}${keyword.slice(1)} ${text}`;
+  const backgroundSteps = normalizedSteps.filter((step) => step.section === 'background');
+  const scenarioSteps = normalizedSteps.filter((step) => step.section === 'scenario');
+  const featureLines = [`Feature: ${title}`, ''];
+  if (backgroundSteps.length > 0) {
+    featureLines.push('  Background:', ...backgroundSteps.map(stepLine), '');
+  }
+  featureLines.push(`  ${scenarioLabel}: ${title}`, ...scenarioSteps.map(stepLine));
+  if (examplesResult.examples) featureLines.push('', ...formatExamples(examplesResult.examples));
+  featureLines.push('');
+  const feature = featureLines.join('\n');
+  const payload = JSON.stringify({ caseId, title, version, steps: normalizedSteps, examples: examplesResult.examples });
   const snapshot = deepFreeze({
     caseId,
     title,
     version,
     feature,
-    steps,
+    steps: normalizedSteps,
+    examples: examplesResult.examples,
     hash: createHash('sha256').update(payload).digest('hex'),
   });
   return { ok: true, snapshot };
 }
 
-export function presentSnapshot(snapshot: CanonicalSnapshot, labels: Record<GherkinKeyword, string>): string {
-  return [
-    `Feature: ${snapshot.title}`,
-    '',
-    `  Scenario: ${snapshot.title}`,
-    ...snapshot.steps.map(({ keyword, text }) => `    ${labels[keyword]} ${text}`),
-    '',
-  ].join('\n');
+export function presentSnapshot(
+  snapshot: CanonicalSnapshot,
+  labels: Record<GherkinKeyword, string> & Partial<Record<GherkinSection | 'examples', string>>
+): string {
+  const line = ({ keyword, text }: CanonicalStep) => `    ${labels[keyword]} ${text}`;
+  const scenarioLabel = snapshot.examples
+    ? `${labels.scenario ?? 'Scenario'} Outline`
+    : (labels.scenario ?? 'Scenario');
+  const backgroundSteps = snapshot.steps.filter((step) => step.section === 'background');
+  const scenarioSteps = snapshot.steps.filter((step) => step.section === 'scenario');
+  const lines = [`Feature: ${snapshot.title}`, ''];
+  if (backgroundSteps.length > 0) {
+    lines.push(`  ${labels.background ?? 'Background'}:`, ...backgroundSteps.map(line), '');
+  }
+  lines.push(`  ${scenarioLabel}: ${snapshot.title}`, ...scenarioSteps.map(line));
+  if (snapshot.examples) {
+    lines.push(
+      '',
+      labels.examples ? `  ${labels.examples}:` : '  Examples:',
+      ...formatExamples(snapshot.examples).slice(1)
+    );
+  }
+  lines.push('');
+  return lines.join('\n');
 }
 
 type ExecutionRecord = {

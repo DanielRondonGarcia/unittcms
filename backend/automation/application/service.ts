@@ -47,6 +47,7 @@ type HistoryInput = {
   limit?: number;
   status?: string;
   caseId?: number;
+  runCaseId?: number;
 };
 
 function unavailable(): never {
@@ -82,6 +83,22 @@ export function createAutomationApplication({
       ) {
         throw new AutomationError(404, 'environment_not_found');
       }
+      if (input.runCaseId !== undefined) {
+        if (!Number.isInteger(input.runCaseId) || input.runCaseId <= 0 || !store.findRunCase) {
+          throw new AutomationError(404, 'run_case_not_found');
+        }
+        const runCase = await store.findRunCase(input.runCaseId);
+        if (
+          !runCase ||
+          Number(runCase.id) !== input.runCaseId ||
+          Number(runCase.caseId) !== input.caseId ||
+          Number(runCase.projectId) !== input.projectId ||
+          !Number.isInteger(Number(runCase.runId)) ||
+          Number(runCase.runId) <= 0
+        ) {
+          throw new AutomationError(404, 'run_case_not_found');
+        }
+      }
       let resolvedEnvironment;
       try {
         resolvedEnvironment = await environmentResolver.resolve(input.environmentId);
@@ -115,6 +132,7 @@ export function createAutomationApplication({
         projectId: input.projectId,
         caseId: input.caseId,
         environmentId: input.environmentId,
+        captureVideo: resolvedEnvironment.captureVideo === true,
         runCaseId: input.runCaseId,
         idempotencyKey: input.idempotencyKey,
         correlationId: input.correlationId ?? randomUUID(),
@@ -126,6 +144,7 @@ export function createAutomationApplication({
         attempt: execution.attempt,
         snapshot: snapshot.snapshot.feature,
         environment: resolvedEnvironment,
+        ...(input.executorKey ? { executorKey: input.executorKey } : {}),
       });
       return { ...execution, jobId, snapshotHash: snapshot.snapshot.hash };
     },
@@ -145,12 +164,15 @@ export function createAutomationApplication({
       const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 20)));
       if (input.status && !['queued', 'running', 'passed', 'failed', 'error', 'cancelled'].includes(input.status))
         throw new AutomationError(400, 'invalid_status');
+      if (input.runCaseId !== undefined && (!Number.isInteger(input.runCaseId) || input.runCaseId <= 0))
+        throw new AutomationError(400, 'invalid_run_case_id');
       return store.listExecutions({
         projectId: input.projectId,
         offset: (page - 1) * limit,
         limit,
         status: input.status,
         ...(input.caseId === undefined ? {} : { caseId: input.caseId }),
+        ...(input.runCaseId === undefined ? {} : { runCaseId: input.runCaseId }),
       });
     },
 
@@ -168,6 +190,7 @@ export function createAutomationApplication({
       const execution = await this.detail(input.userId, input.executionId);
       if (['passed', 'failed', 'error', 'cancelled'].includes(execution.status)) return execution;
       await queue.cancel(execution.id);
+      if (store.cancelExecution) return store.cancelExecution(execution.id);
       return store.updateExecution(execution.id, transitionExecution(execution, 'cancelled'));
     },
 
@@ -222,9 +245,14 @@ export function createAutomationApplication({
           : typeof candidate?.status === 'number' && typeof candidate.code === 'string'
             ? new AutomationError(candidate.status, candidate.code, candidate.details)
             : new AutomationError(500, 'internal_error');
+      const fields = safeErrorFields(known.details);
       return {
         status: known.status,
-        body: { error: known.code, correlationId, ...(known.details ? { fields: known.details } : {}) },
+        body: {
+          error: known.code,
+          correlationId,
+          ...(fields.length > 0 ? { fields } : {}),
+        },
       };
     },
   };
@@ -243,7 +271,22 @@ function safeEnvironment(value: Record<string, unknown>): Record<string, unknown
     id: value.id,
     name: value.name,
     enabled: value.enabled !== false,
+    isDefault: value.isDefault === true,
   };
+}
+
+function safeErrorFields(value: unknown): Array<{ field: string; code: string; message: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const candidate = item as Record<string, unknown>;
+      const field = typeof candidate.field === 'string' ? candidate.field.trim().slice(0, 200) : '';
+      const code = typeof candidate.code === 'string' ? candidate.code.trim().slice(0, 64) : '';
+      const message = typeof candidate.message === 'string' ? candidate.message.trim().slice(0, 500) : '';
+      return field && code && message ? [{ field, code, message }] : [];
+    })
+    .slice(0, 32);
 }
 
 export type AutomationApplication = ReturnType<typeof createAutomationApplication>;

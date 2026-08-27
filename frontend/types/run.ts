@@ -1,4 +1,4 @@
-import type { GherkinKeyword } from './base';
+import type { GherkinKeyword, GherkinSection } from './base';
 
 type RunType = {
   id: number;
@@ -26,6 +26,7 @@ type RunCaseType = {
 type RunCaseStepType = {
   stepNo: number;
   keyword?: GherkinKeyword | null;
+  section?: GherkinSection | null;
 };
 
 type RunStatusCountType = {
@@ -81,6 +82,22 @@ type RunMessages = {
   testCaseSelection: string;
   includeInRun: string;
   excludeFromRun: string;
+  runCaseStatus: string;
+  included: string;
+  excluded: string;
+  runIncludedGherkin: string;
+  runGherkinCasesDescription: string;
+  runGherkinCasesProgress: string;
+  runGherkinCasesSkipped: string;
+  runGherkinCasesComplete: string;
+  runGherkinCasesError: string;
+  automationEnvironment: string;
+  automationQueued: string;
+  automationRunning: string;
+  automationPassed: string;
+  automationFailed: string;
+  automationError: string;
+  automationCancelled: string;
   noCasesFound: string;
   areYouSureLeave: string;
   type: string;
@@ -112,6 +129,8 @@ type RunMessages = {
   errorTitle: string;
   saveError: string;
   exportOptions: string;
+  expandFolder: string;
+  collapseFolder: string;
   testCaseActions: string;
   testCaseSelectActions: string;
   includeExcludeActions: string;
@@ -144,6 +163,45 @@ type RunDetailMessages = {
   given: string;
   when: string;
   then: string;
+  and: string;
+  but: string;
+  background: string;
+  scenario: string;
+  examples: string;
+  noScenarioSteps: string;
+  automation: string;
+  automationEnvironment: string;
+  selectAutomationEnvironment: string;
+  noAutomationEnvironments: string;
+  runAutomatically: string;
+  automationLoading: string;
+  automationQueued: string;
+  automationRunning: string;
+  automationPassed: string;
+  automationFailed: string;
+  automationError: string;
+  automationCancelled: string;
+  automationSummary: string;
+  automationErrorDetail: string;
+  automationDuration: string;
+  automationEvidence: string;
+  automationHistory: string;
+  cancelAutomation: string;
+  downloadAutomationArtifact: string;
+  automationUnavailable: string;
+  automationNoEvidence: string;
+  automationHistoryLoading: string;
+  automationHistoryEmpty: string;
+  automationViewDetail: string;
+  automationExecutionDetail: string;
+  automationQueuedAt: string;
+  automationStartedAt: string;
+  automationFinishedAt: string;
+  automationAttempt: string;
+  automationSnapshot: string;
+  automationVideo: string;
+  automationBackToHistory: string;
+  automationNoVideo: string;
 };
 
 export type {

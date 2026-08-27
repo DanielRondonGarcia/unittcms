@@ -14,7 +14,9 @@ records. Localized labels are presentation-only.
 The repository does **not** claim production readiness until the isolated
 compatibility job passes with the pinned image, real evidence, resource limits,
 telemetry policy, timeout/cancellation proof, and target allowlist proof. The
-default API registry is empty and the default execution mode is `disabled`.
+default API registry is empty and the default execution mode is `disabled`; an
+explicit API `real` override only wires Redis/store/resolver access and does
+not prove worker or Hercules readiness.
 
 :::
 
@@ -127,14 +129,16 @@ build; generated files are intentionally ignored by `backend/.gitignore`.
 | `GET`  | `/automation/projects/{projectId}/environments`                        | List safe, enabled environment metadata |
 | `POST` | `/automation/executions`                                               | Validate, snapshot, and queue (`202`)   |
 | `GET`  | `/automation/executions/{executionId}`                                 | Poll one execution                      |
-| `GET`  | `/automation/projects/{projectId}/executions?page&limit&status&caseId` | Page/filter history                     |
+| `GET`  | `/automation/projects/{projectId}/executions?page&limit&status&caseId&runCaseId` | Page/filter history                     |
 | `POST` | `/automation/executions/{executionId}/cancel`                          | Idempotent cancellation                 |
 | `GET`  | `/automation/executions/{executionId}/artifacts`                       | List authorized evidence metadata       |
 | `GET`  | `/automation/artifacts/{artifactId}/download`                          | Return authorized private content       |
 | `GET`  | `/automation/health`                                                   | Report executor readiness               |
 
-Errors use `{ "error": "code", "correlationId": "safe-id" }`. They do not
-include snapshots, credentials, internal paths, or cross-project details.
+Errors use `{ "error": "code", "correlationId": "safe-id" }`. Validation
+failures may also include bounded `{ "fields": [{ "field", "code", "message" }] }`
+diagnostics. Responses never include snapshots, credentials, internal paths, or
+cross-project details.
 
 ## Artifact format
 
@@ -157,16 +161,174 @@ download without exposing storage.
 Copy `.env.example` to a local, ignored `.env` and replace placeholders outside
 source control. Never commit real credentials.
 
-| Variable                    | Safe/default value   | Meaning                                                                        |
-| --------------------------- | -------------------- | ------------------------------------------------------------------------------ |
-| `AUTOMATION_EXECUTION_MODE` | `disabled`           | `disabled`, test/dev-only `fake`, or gated `real`                              |
-| `AUTOMATION_PHASE0_READY`   | `false`              | Deployment signal; not evidence by itself                                      |
-| `AUTOMATION_REDIS_URL`      | `redis://redis:6379` | Queue dependency address                                                       |
-| `AUTOMATION_ARTIFACT_ROOT`  | private volume path  | Evidence root outside public uploads                                           |
-| `AUTOMATION_WORKER_MODULE`  | unset                | External worker bootstrap; required only for the optional worker profile       |
-| `LITELLM_BASE_URL`          | unset                | Injected only into isolated real execution                                     |
-| `LITELLM_API_KEY`           | unset                | CI secret; never source, logs, or fixtures                                     |
-| `HERCULES_ALLOWED_HOSTS`    | unset                | Explicit target allowlist; `example.test` is required by the canonical fixture |
+### Default API stack
+
+`docker compose up -d` starts only `unittcms` and Redis. Compose defaults the
+API to `AUTOMATION_EXECUTION_MODE=disabled` and
+`AUTOMATION_PHASE0_READY=false`; it does not receive worker LLM variables, a
+worker secret, or the Docker socket. An explicit
+`AUTOMATION_EXECUTION_MODE=real` in `.env` enables the API's Redis/store/resolver
+wiring so project environments can be listed, but it does not start the worker,
+bypass Phase 0, or prove execution readiness.
+
+| Variable                    | Safe/default value                       | Meaning                                                           |
+| --------------------------- | ---------------------------------------- | ----------------------------------------------------------------- |
+| `AUTOMATION_EXECUTION_MODE` | `${AUTOMATION_EXECUTION_MODE:-disabled}` | API defaults fail-closed; explicit `real` enables API wiring only |
+| `AUTOMATION_PHASE0_READY`   | `false`                                  | Not evidence and not an API readiness claim                       |
+| `AUTOMATION_REDIS_URL`      | `redis://redis:6379`                     | Queue dependency address                                          |
+| `AUTOMATION_ARTIFACT_ROOT`  | private volume path                      | Evidence root outside public uploads                              |
+
+### Opt-in worker profile
+
+The worker image is built with the Docker CLI only when the profile is enabled.
+The compiled module is `/app/backend/automation/worker-bootstrap.js`, loaded as
+`./backend/automation/worker-bootstrap.js` from the application root.
+
+| Variable                        | Safe/default value                         | Meaning                                                                                                  |
+| ------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `AUTOMATION_EXECUTION_MODE`     | `real`                                     | Worker service pins `real`; API mode is opted in separately                                              |
+| `AUTOMATION_PHASE0_READY`       | `false`                                    | Worker exits safely until Phase-0 evidence is approved                                                   |
+| `AUTOMATION_WORKER_MODULE`      | `./backend/automation/worker-bootstrap.js` | Compiled worker bootstrap                                                                                |
+| `AUTOMATION_WORKER_SECRET`      | unset                                      | Non-Compose fallback only; prefer the mounted secret file                                                |
+| `AUTOMATION_WORKER_SECRET_FILE` | `/run/secrets/automation_worker_secret`    | Mandatory worker-only HMAC secret file                                                                   |
+| `AUTOMATION_SECRETS_DIR_HOST`   | `./.secrets`                               | Read-only host directory mounted only into the worker                                                    |
+| `AUTOMATION_HERCULES_WORKDIR`   | private volume path                        | Ephemeral Hercules work directory                                                                        |
+| `HERCULES_LLM_PROVIDER`         | `ollama`                                   | `ollama` for the host daemon, `ollama-cloud` for direct Cloud, or `openai-compatible` for keyed gateways |
+| `HERCULES_LLM_MODEL`            | exact installed Ollama tag                 | Required local tag or available Cloud model/deployment identifier                                        |
+| `LITELLM_BASE_URL`              | `http://host.docker.internal:11434`        | Local daemon/LiteLLM endpoint, or exactly `https://ollama.com/api` for Cloud                             |
+| `LITELLM_API_KEY_FILE`          | `/run/secrets/litellm_api_key`             | Required and non-empty for keyed LiteLLM production routes                                               |
+| `OLLAMA_API_KEY_FILE`           | `/run/secrets/ollama_api_key`              | Required and non-empty only for the authenticated `ollama-cloud` route                                   |
+| `HERCULES_ALLOWED_HOSTS`        | unset                                      | Explicit target allowlist; `example.com` is required by the canonical fixture                            |
+
+The API service and project `TestEnvironment` contain none of the global LLM
+credentials. The worker reads and validates this contract only when it starts.
+The API publishes jobs through Redis and reads a short-lived worker heartbeat;
+it does not construct `HerculesAutomationExecutor` or load the LLM key.
+Provider and model are trimmed generic identifiers. The endpoint must be HTTP(S)
+without URL credentials; `ollama-cloud` additionally requires the exact
+`https://ollama.com/api` endpoint without query parameters or fragments. A keyed
+provider's key is trimmed in memory and is never written to a case, canonical
+snapshot, database row, API response, log, evidence file, or Docker argument
+value. The pinned invocation contains only explicitly inherited variable names.
+`LLM_MODEL_API_KEY` is omitted for local keyless `ollama` and is populated for
+`ollama-cloud` and other authenticated providers.
+
+The Compose worker requires the local, ignored secrets directory and the worker
+secret before it can start. Local keyless Ollama does not require a provider key
+file; authenticated profiles use their own file:
+
+- `./.secrets/automation_worker_secret`, mounted read-only at `/run/secrets/automation_worker_secret`
+- `./.secrets/ollama_api_key`, mounted at `/run/secrets/ollama_api_key` for `ollama-cloud`
+- `./.secrets/litellm_api_key`, mounted at `/run/secrets/litellm_api_key` for a keyed LiteLLM route
+
+PowerShell setup for the mandatory worker secret can read the value without printing it:
+
+```powershell
+New-Item -ItemType Directory -Force .secrets | Out-Null
+function Write-ComposeSecret([string]$Path, [string]$Prompt) {
+  $secure = Read-Host $Prompt -AsSecureString
+  $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+  try {
+    $fullPath = [IO.Path]::GetFullPath((Join-Path (Get-Location) $Path))
+    [IO.File]::WriteAllText($fullPath, [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer))
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+  }
+  Remove-Variable secure
+}
+Write-ComposeSecret '.secrets/automation_worker_secret' 'Automation worker secret'
+# For direct Ollama Cloud only:
+# Write-ComposeSecret '.secrets/ollama_api_key' 'Ollama Cloud API key'
+# For a keyed LiteLLM provider only:
+# Write-ComposeSecret '.secrets/litellm_api_key' 'LiteLLM API key'
+```
+
+Start the safe default stack with:
+
+```powershell
+Copy-Item .env.example .env
+$env:SECRET_KEY = [guid]::NewGuid().ToString('N')
+docker compose --env-file .env up -d
+```
+
+For the explicit API wiring opt-in, set `AUTOMATION_EXECUTION_MODE=real` in
+the ignored `.env` file and recreate the base stack with:
+
+```powershell
+docker compose --env-file .env up -d --build
+```
+
+The configured project environments can then be loaded by the API, but jobs
+remain not ready until the separate worker is running and reporting a valid
+heartbeat.
+
+The opt-in command is:
+
+```powershell
+$env:AUTOMATION_PHASE0_READY = 'false'
+docker compose --env-file .env --profile automation-worker up -d --build
+```
+
+The worker fails with a safe `automation_phase0_not_ready` message while the
+gate is false. Set the process value to `true` only after the independent
+Phase-0 compatibility evidence is approved, then rerun the same profile
+command. This enables consumption; it does not prove Hercules or LLM
+readiness.
+
+The worker alone mounts `/var/run/docker.sock` read-only because the pinned
+executor invokes the host Docker CLI. A read-only socket mount does not make the
+Docker API read-only: it grants powerful host-daemon control. Enable the
+profile only on a trusted machine and keep it explicitly opt-in.
+
+`GET /api/health/` proves only API liveness. Successful automation readiness
+would require `GET /api/automation/health` to report `ready: true`,
+`phase0Ready: true`, and a ready `hercules` executor backed by a live Redis
+heartbeat. This work unit does not run Docker, Hercules, or an LLM and makes no
+real-readiness claim.
+
+For local Ollama, no provider key is needed:
+
+```bash
+export HERCULES_LLM_PROVIDER=ollama
+export HERCULES_LLM_MODEL=replace-with-exact-installed-ollama-tag
+export LITELLM_BASE_URL=http://host.docker.internal:11434
+unset LITELLM_API_KEY
+```
+
+For direct Ollama Cloud, use the official API endpoint and the worker-only key
+file:
+
+```bash
+export HERCULES_LLM_PROVIDER=ollama-cloud
+export HERCULES_LLM_MODEL=replace-with-ollama-cloud-model
+export LITELLM_BASE_URL=https://ollama.com/api
+export OLLAMA_API_KEY_FILE=/run/secrets/ollama_api_key
+```
+
+Create `.secrets/ollama_api_key` before starting the Compose worker. For local
+non-production tests without Compose, unset `OLLAMA_API_KEY_FILE` and use
+`OLLAMA_API_KEY` instead; production requires `OLLAMA_API_KEY_FILE`.
+
+For a keyed local worker, use a file outside source control rather than putting
+a key in `.env`:
+
+```bash
+mkdir -p .secrets
+printf '%s\n' '<local-development-key>' > .secrets/litellm_api_key
+chmod 600 .secrets/litellm_api_key
+export LITELLM_API_KEY_FILE="$PWD/.secrets/litellm_api_key"
+export HERCULES_LLM_PROVIDER=openai-compatible
+export HERCULES_LLM_MODEL=replace-with-approved-model
+export LITELLM_BASE_URL=https://replace-with-approved-litellm-endpoint/v1
+```
+
+The explicit `LITELLM_API_KEY` environment fallback exists only for local
+development tests of keyed LiteLLM providers. The equivalent `OLLAMA_API_KEY`
+fallback is only for non-production tests of `ollama-cloud`. Production workers
+fail closed unless the provider-specific file is readable and non-empty; local
+keyless Ollama does not read or pass either optional provider key. A configured
+provider/model/endpoint does not prove Hercules readiness; the Phase-0
+compatibility evidence and the separate worker gate are still required.
 
 The pinned compatibility image is:
 
@@ -184,9 +346,11 @@ The real browser/LLM path is intentionally isolated and opt-in:
 
 ```bash
 UNITTCMS_HERCULES_COMPAT_REAL=1 \
-LITELLM_BASE_URL="$LITELLM_BASE_URL" \
-LITELLM_API_KEY="$LITELLM_API_KEY" \
-HERCULES_ALLOWED_HOSTS=example.test \
+LLM_MODEL_API_TYPE=ollama \
+LLM_MODEL_NAME="$HERCULES_LLM_MODEL" \
+LLM_MODEL_BASE_URL="$LITELLM_BASE_URL" \
+LLM_MODEL_CLIENT_HOST="$LITELLM_BASE_URL" \
+HERCULES_ALLOWED_HOSTS=example.com \
 npm run hercules:compatibility:real
 ```
 

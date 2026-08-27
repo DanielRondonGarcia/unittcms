@@ -10,7 +10,13 @@ export interface CreateAutomationExecutionRequest {
 export interface AutomationErrorResponse {
   error: string;
   correlationId: string;
-  fields?: unknown;
+  fields?: AutomationErrorField[];
+}
+
+export interface AutomationErrorField {
+  field: string;
+  code: string;
+  message: string;
 }
 
 export type AutomationResponse = Record<string, unknown> | AutomationErrorResponse;

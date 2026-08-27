@@ -1,16 +1,63 @@
-import { spawn as defaultSpawn } from 'node:child_process';
+import { execFile as defaultExecFile, spawn as defaultSpawn } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
 const HERCULES_IMAGE =
   'testzeus/hercules:0.1.2@sha256:11ff3700104f92230bafdff1e85f43b8932e8a7df5ab85b7f7d00d3cea61f52c';
-const FIXED_DOCKER_ARGS =
-  'run --rm --init --cpus=2 --memory=4g --pids-limit=256 --env AUTO_MODE=1 --env ENABLE_TELEMETRY=0 --env HEADLESS=true --env BROWSER_TYPE=chromium --env RECORD_VIDEO=true --env TAKE_SCREENSHOTS=true --env CAPTURE_NETWORK=true'.split(
-    ' '
+const HERCULES_IMAGE_COMPONENT = '[a-z0-9]+(?:[._]|__|[-]*[a-z0-9]+)*';
+const HERCULES_IMAGE_PATTERN = new RegExp(
+  `^(?=.{1,255}$)(?:${HERCULES_IMAGE_COMPONENT}(?::[0-9]+)?\\/)?${HERCULES_IMAGE_COMPONENT}(?:\\/${HERCULES_IMAGE_COMPONENT})*(?::[\\w][\\w.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$`
+);
+const HERCULES_VOLUME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/;
+export const HERCULES_LLM_ENV_NAMES = Object.freeze([
+  'LLM_MODEL_NAME',
+  'LLM_MODEL_API_KEY',
+  'LLM_MODEL_BASE_URL',
+  'LLM_MODEL_CLIENT_HOST',
+  'LLM_MODEL_API_TYPE',
+]);
+export const HERCULES_TARGET_ENV_NAMES = Object.freeze(['HERCULES_BASE_URL', 'HERCULES_ALLOWED_HOSTS']);
+const FIXED_DOCKER_ARGS = [
+  'run',
+  '--rm',
+  '--init',
+  '--cpus=2',
+  '--memory=4g',
+  '--pids-limit=256',
+  '--env',
+  'AUTO_MODE=1',
+  '--env',
+  'ENABLE_TELEMETRY=0',
+  '--env',
+  'HEADLESS=true',
+  '--env',
+  'BROWSER_TYPE=chromium',
+  '--env',
+  'RECORD_VIDEO=true',
+  '--env',
+  'TAKE_SCREENSHOTS=true',
+  '--env',
+  'CAPTURE_NETWORK=true',
+  ...HERCULES_LLM_ENV_NAMES.flatMap((name) => ['--env', name]),
+  ...HERCULES_TARGET_ENV_NAMES.flatMap((name) => ['--env', name]),
+];
+
+function dockerArgs(includeApiKey = true) {
+  if (includeApiKey) return FIXED_DOCKER_ARGS;
+  const args = [...FIXED_DOCKER_ARGS];
+  const keyIndex = args.indexOf('LLM_MODEL_API_KEY');
+  args.splice(keyIndex - 1, 2);
+  return args;
+}
+function shouldIncludeApiKey(runtimeEnv = {}) {
+  return (
+    runtimeEnv.LLM_MODEL_API_TYPE !== 'ollama' ||
+    (typeof runtimeEnv.LLM_MODEL_API_KEY === 'string' && runtimeEnv.LLM_MODEL_API_KEY.trim().length > 0)
   );
+}
 const EVIDENCE_PATTERNS = {
-  junit: /^output\/[^/]+\.xml$/i,
-  html: /^output\/[^/]+\.html$/i,
+  junit: /^output\/(?:[^/\\]+\.xml|(?:run_[^/\\]+\/)+[^/\\]+\.xml)$/i,
+  html: /^output\/(?:[^/\\]+\.html|(?:run_[^/\\]+\/)+[^/\\]+\.html)$/i,
   screenshots: /^proofs\/[^/]+\/run_[^/]+\/screenshots\/.+\.(?:png|jpe?g)$/i,
   videos: /^proofs\/[^/]+\/run_[^/]+\/videos\/.+\.(?:webm|mp4)$/i,
   logs: /^log_files\/.+/i,
@@ -19,22 +66,50 @@ const EVIDENCE_PATTERNS = {
 };
 const TEXT_EVIDENCE = /\.(?:xml|html|json|log|txt)$/i;
 const MAX_BINARY_SCAN_BYTES = 1024 * 1024;
-const LOCAL_HOSTNAMES = new Set(['local', 'localhost', 'localhost.localdomain', 'ip6-localhost', 'ip6-loopback']);
+const LOCAL_HOSTNAMES = new Set([
+  'local',
+  'localhost',
+  'localhost.localdomain',
+  'ip6-localhost',
+  'ip6-loopback',
+  'metadata',
+  'metadata.google.internal',
+  'instance-data.ec2.internal',
+  'host.docker.internal',
+]);
 export const HERCULES_CONTRACT = Object.freeze({
   release: '0.1.2',
   image: HERCULES_IMAGE,
   argv: Object.freeze(FIXED_DOCKER_ARGS),
-  timeoutMs: 120_000,
+  timeoutMs: 300_000,
   resourceLimits: Object.freeze({
     container: Object.freeze({ cpus: 2, memory: '4g', pids: 256 }),
     browser: Object.freeze({ headless: true, maxConcurrentPages: 1 }),
     llm: Object.freeze({ maxRequests: 10, maxTokens: 4096 }),
   }),
 });
+export function resolveHerculesImage(value) {
+  if (value === undefined || value === '') return HERCULES_IMAGE;
+  if (typeof value !== 'string' || /[\s\u0000-\u001f\u007f]/.test(value) || !HERCULES_IMAGE_PATTERN.test(value))
+    throw new Error('hercules_image_invalid');
+  return value;
+}
+export function resolveHerculesVolume(value) {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== 'string' ||
+    value.length < 2 ||
+    value.length > 255 ||
+    /[\s\u0000-\u001f\u007f]/.test(value) ||
+    !HERCULES_VOLUME_PATTERN.test(value)
+  )
+    throw new Error('hercules_volume_invalid');
+  return value;
+}
 export const CANONICAL_FEATURE = `Feature: UnitTCMS compatibility
 
   Scenario: Open the allowed test page
-    Given I open the page "https://example.test"
+    Given I open the page "https://example.com"
     When I inspect the page
     Then the page is available
 `;
@@ -44,34 +119,54 @@ export function validateCanonicalFeature(feature) {
   const localized = /\b(?:Dado|Cuando|Entonces|Y|Pero)\b/i.test(text);
   const valid =
     /^\s*Feature:\s*\S+/m.test(text) &&
-    /^\s*Scenario:\s*\S+/m.test(text) &&
+    /^\s*Scenario(?: Outline)?:\s*\S+/m.test(text) &&
     !localized &&
     ['Given', 'When', 'Then'].every((keyword) => steps.includes(keyword));
   return {
     valid,
-    errors: valid ? [] : ['feature must contain English Feature, Scenario, Given, When, and Then keywords'],
+    errors: valid
+      ? []
+      : ['feature must contain English Feature, Scenario or Scenario Outline, Given, When, and Then keywords'],
   };
 }
-export function buildHerculesInvocation(workdir) {
+export function buildHerculesInvocation(workdir, image, workVolume, { includeApiKey = true } = {}) {
   const cwd = resolve(workdir);
   if (/[\r\n,]/.test(cwd)) {
     throw new Error('compatibility workspace path contains unsafe mount characters');
   }
+  const selectedImage = resolveHerculesImage(image);
+  const selectedVolume = workVolume === undefined ? undefined : resolveHerculesVolume(workVolume);
+  const mount = selectedVolume
+    ? `type=volume,src=${selectedVolume},dst=/testzeus-hercules/opt`
+    : `type=bind,src=${cwd},dst=/testzeus-hercules/opt`;
   return {
     file: 'docker',
     cwd,
-    argv: [...FIXED_DOCKER_ARGS, '--mount', `type=bind,src=${cwd},dst=/testzeus-hercules/opt`, HERCULES_IMAGE],
+    argv: [...dockerArgs(includeApiKey), '--mount', mount, selectedImage],
   };
+}
+function defaultKillProcessGroup(pid, signal, platform, execFileImpl) {
+  if (platform === 'win32') {
+    const numericPid = Math.abs(pid);
+    if (!Number.isSafeInteger(numericPid) || numericPid === 0) return;
+    execFileImpl('taskkill', ['/PID', String(numericPid), '/T', '/F'], { shell: false, windowsHide: true }, () => {});
+    return;
+  }
+  process.kill(pid, signal);
 }
 export function runHerculesProcess(
   invocation,
   {
     spawnImpl = defaultSpawn,
     timeoutMs = HERCULES_CONTRACT.timeoutMs,
-    killProcessGroup = (pid, signal) => process.kill(pid, signal),
+    killProcessGroup,
+    platform = process.platform,
+    execFileImpl = defaultExecFile,
     env: runtimeEnv = {},
   } = {}
 ) {
+  const terminateProcess =
+    killProcessGroup ?? ((pid, signal) => defaultKillProcessGroup(pid, signal, platform, execFileImpl));
   return new Promise((resolveResult, reject) => {
     let timer;
     let settled = false;
@@ -98,12 +193,13 @@ export function runHerculesProcess(
     child.once('close', (exitCode, signal) => finish(resolveResult, { exitCode, signal }));
     timer = setTimeout(() => {
       try {
-        if (child.pid) killProcessGroup(-child.pid, 'SIGKILL');
-      } finally {
-        const error = new Error(`Hercules compatibility process exceeded ${timeoutMs}ms`);
-        error.code = 'ETIMEDOUT';
-        finish(reject, error);
+        if (child.pid) terminateProcess(-child.pid, 'SIGKILL');
+      } catch {
+        // The process may already have exited before termination completed.
       }
+      const error = new Error(`Hercules compatibility process exceeded ${timeoutMs}ms`);
+      error.code = 'ETIMEDOUT';
+      finish(reject, error);
     }, timeoutMs);
   });
 }
@@ -192,6 +288,27 @@ export function validateHostAllowlist(urls, allowedHosts) {
   });
   return { allowed: rejected.length === 0, rejected };
 }
+export function normalizeEnvironmentTarget(value) {
+  let target;
+  try {
+    target = new URL(String(value ?? ''));
+  } catch {
+    throw new Error('environment_url_invalid');
+  }
+  const host = target.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '');
+  if (
+    !['http:', 'https:'].includes(target.protocol) ||
+    target.username ||
+    target.password ||
+    !validateHostAllowlist([target.toString()], [host]).allowed
+  ) {
+    throw new Error('environment_target_rejected');
+  }
+  return { baseUrl: target.toString(), allowedHosts: [host] };
+}
 export function evaluateCompatibility({ feature, result, evidence, proof = {} }) {
   const errors = [...validateCanonicalFeature(feature).errors];
   if (result?.exitCode !== 0 || result?.result !== 'passed')
@@ -226,8 +343,59 @@ export function evaluateCompatibility({ feature, result, evidence, proof = {} })
   if (evidence.binaryScan?.suspiciousFiles?.length) errors.push('binary evidence contains secret material');
   return { ready: errors.length === 0, errors };
 }
+
+function diagnosticExecution(execution) {
+  const value = execution && typeof execution === 'object' ? execution : {};
+  const signal = typeof value.signal === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(value.signal) ? value.signal : null;
+  const result = value.result === 'passed' || value.result === 'failed' ? value.result : undefined;
+  return {
+    exitCode: typeof value.exitCode === 'number' && Number.isFinite(value.exitCode) ? value.exitCode : null,
+    ...(Object.prototype.hasOwnProperty.call(value, 'signal') ? { signal } : {}),
+    ...(result ? { result } : {}),
+    ...(typeof value.timedOut === 'boolean' ? { timedOut: value.timedOut } : {}),
+  };
+}
+
+function diagnosticProof(proof) {
+  const value = proof && typeof proof === 'object' ? proof : {};
+  const proofResult = (candidate) => {
+    if (!candidate || typeof candidate !== 'object') return null;
+    return {
+      exitCode:
+        typeof candidate.exitCode === 'number' && Number.isFinite(candidate.exitCode) ? candidate.exitCode : null,
+      result: candidate.result === 'passed' || candidate.result === 'failed' ? candidate.result : 'unknown',
+    };
+  };
+  const source =
+    typeof value.verificationSource === 'string' && /^[A-Za-z0-9._/-]{1,100}$/.test(value.verificationSource)
+      ? value.verificationSource
+      : undefined;
+  return {
+    exitSemantics: {
+      pass: proofResult(value.exitSemantics?.pass),
+      fail: proofResult(value.exitSemantics?.fail),
+    },
+    timeoutHardKill: value.timeoutHardKill === true,
+    browserLimits: {
+      headless: value.browserLimits?.headless === true,
+      maxConcurrentPages: Number.isSafeInteger(value.browserLimits?.maxConcurrentPages)
+        ? value.browserLimits.maxConcurrentPages
+        : 0,
+    },
+    llmLimits: {
+      maxRequests: Number.isSafeInteger(value.llmLimits?.maxRequests) ? value.llmLimits.maxRequests : 0,
+      maxTokens: Number.isSafeInteger(value.llmLimits?.maxTokens) ? value.llmLimits.maxTokens : 0,
+    },
+    telemetryDisabled: value.telemetryDisabled === true,
+    hostAllowlistVerified: value.hostAllowlistVerified === true,
+    secretAbsenceVerified: value.secretAbsenceVerified === true,
+    binaryEvidenceVerified: value.binaryEvidenceVerified === true,
+    ...(source ? { verificationSource: source } : {}),
+  };
+}
+
 /**
- * @param {{ workdir?: string, evidenceRoot?: string, feature?: string, allowedHosts?: string[], runner?: Function, runtimeEnv?: Record<string, string> }} options
+ * @param {{ workdir?: string, evidenceRoot?: string, feature?: string, allowedHosts?: string[], runner?: Function, runtimeEnv?: Record<string, string>, image?: string, workVolume?: string, proofFactory?: Function }} options
  */
 export async function runCompatibilityGate({
   workdir,
@@ -236,7 +404,11 @@ export async function runCompatibilityGate({
   allowedHosts = [],
   runner,
   runtimeEnv = {},
+  image,
+  workVolume,
+  proofFactory,
 } = {}) {
+  const selectedVolume = workVolume === undefined ? undefined : resolveHerculesVolume(workVolume);
   if (!runner && process.env.UNITTCMS_HERCULES_COMPAT_REAL !== '1') {
     return { ready: false, skipped: true, reason: 'real Hercules compatibility execution is opt-in' };
   }
@@ -252,13 +424,39 @@ export async function runCompatibilityGate({
   const input = join(workdir, 'input', 'test.feature');
   mkdirSync(dirname(input), { recursive: true });
   writeFileSync(input, feature, 'utf8');
-  const invocation = buildHerculesInvocation(workdir);
+  const invocation = buildHerculesInvocation(workdir, image, selectedVolume, {
+    includeApiKey: shouldIncludeApiKey(runtimeEnv),
+  });
   const execution = await (runner ? runner(invocation) : runHerculesProcess(invocation, { env: runtimeEnv }));
   const evidence = collectCompatibilityEvidence(evidenceRoot);
+  let factoryOutput;
+  if (proofFactory) {
+    try {
+      factoryOutput = await proofFactory({
+        feature,
+        allowedHosts,
+        runtimeEnv,
+        invocation,
+        execution,
+        evidence,
+        evidenceRoot,
+      });
+    } catch {
+      factoryOutput = undefined;
+    }
+  }
+  const evaluated =
+    factoryOutput &&
+    Object.prototype.hasOwnProperty.call(factoryOutput, 'result') &&
+    Object.prototype.hasOwnProperty.call(factoryOutput, 'proof')
+      ? factoryOutput
+      : { result: execution, proof: execution?.proof };
   return {
-    ...evaluateCompatibility({ feature, result: execution, evidence, proof: execution.proof }),
+    ...evaluateCompatibility({ feature, result: evaluated.result, evidence, proof: evaluated.proof }),
     skipped: false,
     invocation,
     evidence,
+    execution: diagnosticExecution(execution),
+    proof: diagnosticProof(evaluated.proof),
   };
 }

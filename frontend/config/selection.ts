@@ -78,7 +78,16 @@ const automationStatus: AutomationStatusType[] = [
 
 const templates: TemplateType[] = [{ uid: 'text' }, { uid: 'step' }, { uid: 'gherkin' }];
 const gherkinTemplate = 2;
-const gherkinKeywords: GherkinKeyword[] = ['given', 'when', 'then'];
+const gherkinKeywords: GherkinKeyword[] = ['given', 'when', 'then', 'and', 'but'];
+
+const gherkinKeywordStyles: Record<GherkinKeyword, string> = {
+  given:
+    'border-emerald-600 bg-emerald-50 text-emerald-800 dark:border-emerald-400 dark:bg-emerald-950/40 dark:text-emerald-200',
+  when: 'border-sky-600 bg-sky-50 text-sky-800 dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-200',
+  then: 'border-violet-600 bg-violet-50 text-violet-800 dark:border-violet-400 dark:bg-violet-950/40 dark:text-violet-200',
+  and: 'border-amber-600 bg-amber-50 text-amber-900 dark:border-amber-400 dark:bg-amber-950/40 dark:text-amber-200',
+  but: 'border-rose-600 bg-rose-50 text-rose-800 dark:border-rose-400 dark:bg-rose-950/40 dark:text-rose-200',
+};
 
 export {
   roles,
@@ -90,6 +99,7 @@ export {
   templates,
   gherkinTemplate,
   gherkinKeywords,
+  gherkinKeywordStyles,
   testRunStatus,
   testRunCaseStatus,
 };

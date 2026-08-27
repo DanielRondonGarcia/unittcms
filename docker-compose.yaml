@@ -3,6 +3,7 @@ services:
     image: unittcms:latest
     build:
       context: .
+      target: default
       args:
         - API_PATH=${API_PATH:-/api}
     ports:
@@ -17,8 +18,8 @@ services:
       - API_PATH=${API_PATH:-/api}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:8000}
       - AUTOMATION_EXECUTION_MODE=${AUTOMATION_EXECUTION_MODE:-disabled}
-      - AUTOMATION_PHASE0_READY=${AUTOMATION_PHASE0_READY:-false}
-      - AUTOMATION_REDIS_URL=${AUTOMATION_REDIS_URL:-redis://redis:6379}
+      - AUTOMATION_PHASE0_READY=false
+      - AUTOMATION_REDIS_URL=redis://redis:6379
       - AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
     volumes:
       - db-data:/app/backend/database
@@ -59,7 +60,12 @@ services:
           memory: 256M
 
   automation-worker:
-    image: unittcms:latest
+    image: unittcms-automation-worker:latest
+    build:
+      context: .
+      target: automation-worker
+      args:
+        - API_PATH=${API_PATH:-/api}
     profiles: ['automation-worker']
     depends_on:
       unittcms:
@@ -69,14 +75,43 @@ services:
     command: ['node', 'entrypoint.js']
     environment:
       - SERVICE_ROLE=worker
-      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY outside this file}
-      - AUTOMATION_EXECUTION_MODE=${AUTOMATION_EXECUTION_MODE:-disabled}
+      - AUTOMATION_EXECUTION_MODE=real
       - AUTOMATION_PHASE0_READY=${AUTOMATION_PHASE0_READY:-false}
-      - AUTOMATION_REDIS_URL=${AUTOMATION_REDIS_URL:-redis://redis:6379}
-      - AUTOMATION_WORKER_MODULE=${AUTOMATION_WORKER_MODULE:-}
+      - UNITTCMS_HERCULES_COMPAT_REAL=${UNITTCMS_HERCULES_COMPAT_REAL:-0}
+      - AUTOMATION_REDIS_URL=redis://redis:6379
+      - AUTOMATION_WORKER_MODULE=./backend/automation/worker-bootstrap.js
       - AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
+      - AUTOMATION_HERCULES_WORKDIR=/app/backend/private/hercules-work
+      - AUTOMATION_HERCULES_VOLUME=${AUTOMATION_HERCULES_VOLUME:-unittcms_hercules-work}
+      - AUTOMATION_HERCULES_IMAGE=${AUTOMATION_HERCULES_IMAGE:-}
+      - AUTOMATION_WORKER_SECRET_FILE=/run/secrets/automation_worker_secret
+      - HERCULES_LLM_PROVIDER=${HERCULES_LLM_PROVIDER:-openai-compatible}
+      - HERCULES_LLM_MODEL=${HERCULES_LLM_MODEL:-}
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-}
+      - LITELLM_API_KEY_FILE=/run/secrets/litellm_api_key
+      - OLLAMA_API_KEY_FILE=/run/secrets/ollama_api_key
+      - HERCULES_ALLOWED_HOSTS=${HERCULES_ALLOWED_HOSTS:-}
     volumes:
+      - db-data:/app/backend/database
       - automation-artifacts:/app/backend/private/automation-artifacts
+      - hercules-work:/app/backend/private/hercules-work
+      # The worker secret is mandatory; provider key files are optional and selected
+      # by the worker provider. These files are never mounted into the API service.
+      - type: bind
+        source: ${AUTOMATION_SECRETS_DIR_HOST:-./.secrets}
+        target: /run/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      # This trusted, opt-in worker invokes the host Docker CLI for Hercules.
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      disable: true
     deploy:
       resources:
         limits:
@@ -87,3 +122,5 @@ volumes:
   db-data:
   redis-data:
   automation-artifacts:
+  hercules-work:
+    name: ${AUTOMATION_HERCULES_VOLUME:-unittcms_hercules-work}

@@ -9,7 +9,15 @@ import defineStep from '../../models/steps.js';
 import defineCaseStep from '../../models/caseSteps.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
-import { priorities, testTypes, automationStatus, templates } from '../../config/enums.js';
+import {
+  priorities,
+  testTypes,
+  automationStatus,
+  templates,
+  gherkinKeywords,
+  gherkinTemplate,
+  normalizeGherkinSection,
+} from '../../config/enums.js';
 
 const fileFilter = (req, file, cb) => {
   const allowedFileTypes = ['.xlsx', '.xls'];
@@ -99,6 +107,8 @@ export default function (sequelize) {
             stepNo: stepNo,
             step: row['step'] || '',
             result: row['expectedStepResult'] || '',
+            keyword: row['keyword'] || null,
+            section: row['section'],
           });
         } else {
           stepNo = 1;
@@ -121,6 +131,8 @@ export default function (sequelize) {
             stepNo: stepNo,
             step: row['step'] || '',
             result: row['expectedStepResult'] || '',
+            keyword: row['keyword'] || null,
+            section: row['section'],
           });
         }
       }
@@ -143,6 +155,9 @@ export default function (sequelize) {
               caseId: createdCase.id,
               stepId: createdStep.id,
               stepNo: stepData.stepNo,
+              keyword: stepData.keyword,
+              section:
+                createdCase.template === gherkinTemplate ? 'scenario' : normalizeGherkinSection(stepData.section),
             },
             { transaction: t }
           );
@@ -201,6 +216,19 @@ function _getRowValidationError(row, index) {
     if (templateIndex === -1) {
       return `Row ${rowNumber} has invalid template: ${row['template']}`;
     }
+  }
+
+  if (row['section'] !== undefined && normalizeGherkinSection(row['section']) === null) {
+    return `Row ${rowNumber} has invalid section: ${row['section']}`;
+  }
+
+  if (
+    row['keyword'] !== undefined &&
+    row['keyword'] !== null &&
+    row['keyword'] !== '' &&
+    !gherkinKeywords.includes(row['keyword'])
+  ) {
+    return `Row ${rowNumber} has invalid keyword: ${row['keyword']}`;
   }
 
   return null;

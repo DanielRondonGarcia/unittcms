@@ -6,6 +6,7 @@ import defineStep from '../../models/steps.js';
 import defineCaseStep from '../../models/caseSteps.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
+import { gherkinTemplate, normalizeGherkinSection } from '../../config/enums.js';
 
 export default function (sequelize) {
   const { verifySignedIn } = authMiddleware(sequelize);
@@ -27,7 +28,7 @@ export default function (sequelize) {
     try {
       const caseRecords = await Case.findAll({
         where: { id: caseIds },
-        include: [{ model: Step, through: { attributes: ['stepNo', 'keyword'] } }],
+        include: [{ model: Step, through: { attributes: ['stepNo', 'keyword', 'section'] } }],
       });
 
       if (caseRecords.length !== caseIds.length) {
@@ -35,6 +36,11 @@ export default function (sequelize) {
       }
 
       const cases = caseRecords.map((c) => c.get({ plain: true }));
+      if (
+        cases.some((c) => (c.Steps ?? []).some((step) => normalizeGherkinSection(step.caseSteps?.section) === null))
+      ) {
+        return res.status(400).json({ error: 'Invalid Gherkin step section' });
+      }
 
       const clonedCases = cases.map((c) => {
         // eslint-disable-next-line no-unused-vars
@@ -59,6 +65,10 @@ export default function (sequelize) {
               stepId: step.id,
               stepNo: clonedSteps[index].caseSteps.stepNo,
               keyword: clonedSteps[index].caseSteps.keyword ?? null,
+              section:
+                c.template === gherkinTemplate
+                  ? 'scenario'
+                  : normalizeGherkinSection(clonedSteps[index].caseSteps?.section),
             }));
 
             await CaseStep.bulkCreate(newCaseSteps, { transaction: t });

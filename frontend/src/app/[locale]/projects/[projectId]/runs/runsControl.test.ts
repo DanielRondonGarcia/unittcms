@@ -1,5 +1,12 @@
 import { describe, expect, test, assert } from 'vitest';
-import { changeStatus, includeExcludeTestCases } from './runsControl';
+import {
+  changeStatus,
+  getPersistedRunCase,
+  hasUnsavedRunCaseChanges,
+  includeExcludeTestCases,
+  isRunCaseIncluded,
+  mergeRunCaseChanges,
+} from './runsControl';
 import { CaseType } from '@/types/case';
 
 const sampleTestCase: CaseType = {
@@ -177,5 +184,44 @@ describe('runsControl', () => {
     } else {
       assert.fail("RunCases isn't exist");
     }
+  });
+
+  test('distinguishes included RunCases from deleted or unsaved memberships', () => {
+    const included = {
+      ...initialTestCases[0],
+      RunCases: [{ ...initialTestCases[0].RunCases![0], editState: 'notChanged' as const }],
+    };
+    expect(isRunCaseIncluded(included)).toBe(true);
+    expect(isRunCaseIncluded(initialTestCases[3])).toBe(false);
+    expect(getPersistedRunCase(included)?.id).toBe(1);
+    expect(getPersistedRunCase(initialTestCases[2])).toBeUndefined();
+    expect(hasUnsavedRunCaseChanges([initialTestCases[0]])).toBe(false);
+    expect(hasUnsavedRunCaseChanges([initialTestCases[2]])).toBe(true);
+  });
+
+  test('merges filtered changes into the global list without losing pending states or order', () => {
+    const currentCases = [
+      {
+        ...initialTestCases[0],
+        RunCases: [{ ...initialTestCases[0].RunCases![0], editState: 'changed' as const }],
+      },
+      {
+        ...initialTestCases[1],
+        RunCases: [{ ...initialTestCases[1].RunCases![0], editState: 'changed' as const }],
+      },
+    ];
+    const filteredChanges = [
+      {
+        ...currentCases[0],
+        RunCases: [{ ...currentCases[0].RunCases![0], editState: 'deleted' as const }],
+      },
+    ];
+
+    const mergedCases = mergeRunCaseChanges(currentCases, filteredChanges);
+
+    expect(mergedCases.map((testCase) => testCase.id)).toEqual([1, 2]);
+    expect(mergedCases[0].RunCases?.[0].editState).toBe('deleted');
+    expect(mergedCases[1].RunCases?.[0].editState).toBe('changed');
+    expect(currentCases[0].RunCases?.[0].editState).toBe('changed');
   });
 });

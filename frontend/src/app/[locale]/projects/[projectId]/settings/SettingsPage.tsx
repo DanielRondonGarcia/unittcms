@@ -14,6 +14,7 @@ import { UserType } from '@/types/user';
 import { findUser } from '@/utils/usersControl';
 import { logError } from '@/utils/errorHandler';
 import UserAvatar from '@/components/UserAvatar';
+import AutomationEnvironmentSettings from './AutomationEnvironmentSettings';
 
 type Props = {
   projectId: string;
@@ -152,6 +153,8 @@ export default function SettingsPage({ projectId, messages, projectDialogMessage
       <div className="w-full p-3">
         <ProjectTagsManager projectId={projectId} messages={messages} />
       </div>
+
+      <AutomationEnvironmentSettings projectId={projectId} messages={messages} />
 
       <ProjectDialog
         isOpen={isProjectDialogOpen}
