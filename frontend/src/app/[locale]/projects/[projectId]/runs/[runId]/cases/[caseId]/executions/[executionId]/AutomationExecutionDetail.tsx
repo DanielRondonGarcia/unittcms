@@ -121,7 +121,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
     typeof execution.snapshot === 'string' ? execution.snapshot : JSON.stringify(execution.snapshot ?? {}, null, 2);
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-6">
+    <main className="mx-auto w-full min-w-0 max-w-4xl space-y-6 overflow-x-hidden p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">{messages.automationExecutionDetail}</h1>
@@ -140,7 +140,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
         </Button>
       </div>
 
-      <section className="min-w-0 rounded-md border p-4">
+      <section className="min-w-0 max-w-full rounded-md border p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Chip
             color={
@@ -193,12 +193,12 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
         )}
       </section>
 
-      <section className="min-w-0 rounded-md border p-4">
+      <section className="min-w-0 max-w-full rounded-md border p-4">
         <h2 className="font-semibold">{messages.automationSnapshot}</h2>
-        <pre className="mt-3 max-h-96 overflow-auto rounded bg-default-100 p-3 text-xs">{snapshot}</pre>
+        <pre className="mt-3 max-h-96 max-w-full overflow-auto rounded bg-default-100 p-3 text-xs">{snapshot}</pre>
       </section>
 
-      <section className="min-w-0 rounded-md border p-4">
+      <section className="min-w-0 max-w-full rounded-md border p-4">
         <h2 className="font-semibold">{messages.automationEvidence}</h2>
         {artifacts.length === 0 ? (
           <p className="mt-2 text-sm">{messages.automationNoEvidence}</p>
@@ -217,7 +217,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
         {execution.captureVideo === true && videoUrl ? (
           <div className="mt-4">
             <h3 className="font-semibold">{messages.automationVideo}</h3>
-            <video className="mt-2 w-full rounded" controls src={videoUrl} />
+            <video className="mt-2 max-w-full rounded" controls src={videoUrl} />
           </div>
         ) : execution.captureVideo !== true ? (
           <p className="mt-3 text-sm text-default-500">{messages.automationNoVideo}</p>

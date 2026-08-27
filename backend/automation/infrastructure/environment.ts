@@ -42,9 +42,17 @@ export class EnvironmentResolver implements EnvironmentResolverPort {
   async resolve(environmentId: number): Promise<EnvironmentRecord> {
     const record = await this.load(environmentId);
     if (!record) throw new Error('environment_not_found');
-    const configuredHosts = Array.isArray(record.allowedHosts) ? record.allowedHosts : [];
-    const hosts = allowedHosts(configuredHosts.length > 0 ? configuredHosts : [new URL(record.baseUrl).hostname]);
-    const url = safeUrl(record.baseUrl, hosts);
+    let configuredUrl: URL;
+    try {
+      configuredUrl = new URL(record.baseUrl);
+    } catch {
+      throw new Error('environment_url_invalid');
+    }
+    const configuredHosts = allowedHosts(Array.isArray(record.allowedHosts) ? record.allowedHosts : []);
+    const hosts = allowedHosts([configuredUrl.hostname]);
+    if (configuredHosts.length > 0 && !configuredHosts.includes(hosts[0]))
+      throw new Error('environment_target_rejected');
+    const url = safeUrl(configuredUrl.toString(), hosts);
     const refs = (Array.isArray(record.secretRefs) ? record.secretRefs : [])
       .filter((ref) => typeof ref === 'string' && /^(?:secret|vault|env):\/\//i.test(ref.trim()))
       .map((ref) => ref.trim());

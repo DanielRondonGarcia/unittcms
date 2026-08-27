@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HERCULES_CONTRACT, HERCULES_LLM_ENV_NAMES, runHerculesProcess, validateHostAllowlist } from './hercules.js';
+import {
+  HERCULES_CONTRACT,
+  HERCULES_LLM_ENV_NAMES,
+  HERCULES_PATH_ENV_NAMES,
+  runHerculesProcess,
+  validateHostAllowlist,
+} from './hercules.js';
 
 export const HERCULES_PROOF_SOURCE = 'unittcms-hercules-proof/v1';
 
@@ -31,7 +37,7 @@ export function parseCanonicalJUnit(first, second) {
   if (!/<testsuites?\b/i.test(xml)) return null;
 
   const trimmed = xml.trim();
-  if (!/<\/testsuites?>\s*$/i.test(trimmed) && !/<testsuites?\b[^>]*\/\>\s*$/i.test(trimmed)) return null;
+  if (!/<\/testsuites?>\s*$/i.test(trimmed) && !/<testsuites?\b[^>]*\/>\s*$/i.test(trimmed)) return null;
   const counts = { failures: [], errors: [] };
   for (const match of xml.matchAll(/\b(failures|errors)\s*=\s*(['"])(\d+)\2/gi)) {
     counts[match[1].toLowerCase()].push(Number(match[3]));
@@ -189,6 +195,9 @@ export function buildCompatibilityProof(context = {}) {
       hasInvocationEnvName(argv, name)
     ) &&
     validLlmRuntime(runtimeEnv);
+  const pathEnvironmentVerified =
+    fixedArgsVerified &&
+    HERCULES_PATH_ENV_NAMES.every((name) => hasInvocationEnvName(argv, name) && isNonEmptyString(runtimeEnv[name]));
   const urls = [...String(context.feature ?? '').matchAll(URL_PATTERN)].map(([url]) => url);
   const hostAllowlistVerified =
     urls.length > 0 && Array.isArray(context.allowedHosts) && validateHostAllowlist(urls, context.allowedHosts).allowed;
@@ -214,6 +223,7 @@ export function buildCompatibilityProof(context = {}) {
         maxRequests: llmRuntimeVerified ? HERCULES_CONTRACT.resourceLimits.llm.maxRequests : 0,
         maxTokens: llmRuntimeVerified ? HERCULES_CONTRACT.resourceLimits.llm.maxTokens : 0,
       },
+      pathEnvironmentVerified,
       telemetryDisabled: fixedArgsVerified && hasInvocationEnv(argv, 'ENABLE_TELEMETRY', '0'),
       hostAllowlistVerified,
       secretAbsenceVerified: evidence.secretAbsenceVerified,

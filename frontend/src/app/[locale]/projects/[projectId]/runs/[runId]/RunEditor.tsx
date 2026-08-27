@@ -341,7 +341,7 @@ export default function RunEditor({
   };
 
   return (
-    <>
+    <div className="min-w-0 max-w-full overflow-x-hidden">
       <div className="flex w-full flex-wrap items-center justify-between gap-2 border-b-1 p-3 dark:border-neutral-700">
         <div className="flex min-w-0 items-center">
           <Tooltip content={messages.backToRuns}>
@@ -448,9 +448,9 @@ export default function RunEditor({
         </div>
       </div>
 
-      <div className="container mx-auto min-w-0 max-w-5xl flex-grow px-6 pt-6">
+      <div className="container mx-auto min-w-0 w-full max-w-5xl flex-grow px-6 pt-6">
         <div className="flex flex-col gap-4 md:flex-row">
-          <div>
+          <div className="min-w-0">
             <div className="h-72 w-full max-w-96 md:w-96">
               <div className="flex items-center">
                 <h4 className="font-bold">{messages.progress}</h4>
@@ -654,6 +654,6 @@ export default function RunEditor({
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

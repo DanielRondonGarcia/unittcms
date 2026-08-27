@@ -96,11 +96,11 @@ export default function TestCaseDetailPane({
     return <div>{messages.loading}</div>;
   } else {
     return (
-      <div className="flex h-full min-w-0 w-full flex-col p-3">
+      <div className="flex h-full min-w-0 w-full max-w-full flex-col overflow-x-hidden p-3">
         <Tabs
           aria-label={messages.options}
           size="sm"
-          className="min-w-0 max-w-full"
+          className="min-w-0 w-full max-w-full overflow-x-hidden"
           selectedKey={selectedTab}
           onSelectionChange={(key) => setSelectedTab(String(key))}
         >

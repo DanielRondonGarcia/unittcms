@@ -1,14 +1,60 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { mapExecutorResult, transitionExecution } from './domain/index.js';
 import type { ExecutorOutcome } from './domain/index.js';
 /* prettier-ignore */
 import { RUN_CASE_STATUS } from './ports/index.js';
 /* prettier-ignore */
-import type { AutomationStore, ExecutionJob, ExecutionQueue, ExecutorRegistry, RunCaseStatusUpdater, StoredExecution } from './ports/index.js';
+import type {
+  ArtifactStorage,
+  AutomationStore,
+  ExecutionJob,
+  ExecutionQueue,
+  ExecutorArtifact,
+  ExecutorRegistry,
+  ExecutorResult,
+  RunCaseStatusUpdater,
+  StoredExecution,
+} from './ports/index.js';
 
 const MAX_ATTEMPTS = 2;
 const TERMINAL = new Set(['passed', 'failed', 'error', 'cancelled']);
 const RETRYABLE = new Set<ExecutorOutcome>(['technical_error', 'timeout', 'abandoned']);
+const ARTIFACT_KINDS = new Set(['junit', 'html', 'screenshot', 'video', 'log', 'network', 'planner']);
+const ARTIFACT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+type ArtifactPersistenceStage =
+  | 'validation'
+  | 'storage_put'
+  | 'metadata_create'
+  | 'metadata_cleanup'
+  | 'storage_cleanup';
+type ArtifactPersistenceErrorCategory =
+  | 'database_busy'
+  | 'database_constraint'
+  | 'database_readonly'
+  | 'storage_missing'
+  | 'storage_invalid'
+  | 'unknown';
+const STORAGE_INVALID_CODES = new Set([
+  'ARTIFACT_INVALID',
+  'ARTIFACT_MIME_NOT_ALLOWED',
+  'ARTIFACT_EXTENSION_NOT_ALLOWED',
+  'ARTIFACT_SCOPE_INVALID',
+  'ARTIFACT_SIZE_EXCEEDED',
+  'ARTIFACT_UNSCANNABLE',
+  'ARTIFACT_CONTAINS_SECRET',
+  'ARTIFACT_RETENTION_INVALID',
+  'ARTIFACT_PATH_INVALID',
+  'EACCES',
+  'EEXIST',
+  'EISDIR',
+  'EINVAL',
+  'ELOOP',
+  'ENAMETOOLONG',
+  'ENOTDIR',
+  'EPERM',
+  'EROFS',
+]);
+const SAFE_ERROR_MESSAGES = new Set(['ENOENT', ...STORAGE_INVALID_CODES]);
 const VALID_OUTCOMES = new Set<ExecutorOutcome>([
   'passed',
   'functional_failure',
@@ -33,6 +79,158 @@ export function jobIdFor(job: Pick<ExecutionJob, 'executionId' | 'attempt'>): st
 function emit(hooks: WorkerHooks = {}, event: WorkerLog): void { hooks.log?.(event); if (event.status) hooks.metric?.(`automation.execution.${event.status}`, event); }
 /* prettier-ignore */
 function limit(value: Limits): Required<Limits> { return { attempts: Math.min(MAX_ATTEMPTS, Math.max(1, value.attempts ?? MAX_ATTEMPTS)), backoffMs: Math.min(60_000, Math.max(1, value.backoffMs ?? 1_000)), concurrency: Math.max(1, value.concurrency ?? 1), deadlineMs: Math.max(1, value.deadlineMs ?? 300_000) }; }
+
+function stableErrorIdentifiers(error: unknown): string[] {
+  const values: unknown[] = [];
+  const visit = (value: unknown, depth: number): void => {
+    if (!value || typeof value !== 'object' || depth > 1) return;
+    const record = value as { code?: unknown; name?: unknown; message?: unknown; parent?: unknown; original?: unknown };
+    values.push(record.code, record.name);
+    if (typeof record.message === 'string' && SAFE_ERROR_MESSAGES.has(record.message.toUpperCase()))
+      values.push(record.message);
+    visit(record.parent, depth + 1);
+    visit(record.original, depth + 1);
+  };
+  try {
+    visit(error, 0);
+  } catch {
+    return [];
+  }
+  return values.filter((value): value is string => typeof value === 'string').map((value) => value.toUpperCase());
+}
+
+function classifyArtifactPersistenceError(error: unknown): ArtifactPersistenceErrorCategory {
+  const codes = stableErrorIdentifiers(error);
+  if (codes.some((code) => code.startsWith('SQLITE_BUSY'))) return 'database_busy';
+  if (codes.some((code) => code.startsWith('SQLITE_CONSTRAINT') || code === 'SEQUELIZEUNIQUECONSTRAINTERROR'))
+    return 'database_constraint';
+  if (codes.some((code) => code.startsWith('SQLITE_READONLY'))) return 'database_readonly';
+  if (codes.includes('ENOENT')) return 'storage_missing';
+  if (codes.some((code) => STORAGE_INVALID_CODES.has(code))) return 'storage_invalid';
+  return 'unknown';
+}
+
+function emitArtifactDiagnostic(
+  hooks: WorkerHooks | undefined,
+  executionId: string,
+  attempt: number,
+  stage: ArtifactPersistenceStage,
+  errorCategory: ArtifactPersistenceErrorCategory
+): void {
+  try {
+    emit(hooks, { executionId, attempt, stage, errorCategory });
+  } catch {
+    // Diagnostics must not alter fail-closed persistence or cleanup behavior.
+  }
+}
+
+type ArtifactPersistence = {
+  storage: ArtifactStorage;
+  store: Pick<AutomationStore, 'createArtifact' | 'deleteArtifacts'>;
+};
+
+async function persistArtifacts(
+  execution: StoredExecution,
+  attempt: number,
+  artifacts: ExecutorArtifact[] | undefined,
+  persistence: ArtifactPersistence | undefined,
+  hooks?: WorkerHooks
+): Promise<void> {
+  if (!artifacts?.length) return;
+  if (!persistence) {
+    emitArtifactDiagnostic(hooks, execution.id, attempt, 'validation', 'storage_missing');
+    throw new WorkerBoundaryError('artifact_persistence_failed');
+  }
+  if (artifacts.length > 128) {
+    emitArtifactDiagnostic(hooks, execution.id, attempt, 'validation', 'storage_invalid');
+    throw new WorkerBoundaryError('artifact_persistence_failed');
+  }
+  const storageKeys: string[] = [];
+  let stage: ArtifactPersistenceStage = 'validation';
+  try {
+    for (const artifact of artifacts) {
+      stage = 'validation';
+      if (
+        !ARTIFACT_KINDS.has(artifact.kind) ||
+        !(artifact.content instanceof Uint8Array) ||
+        typeof artifact.mimeType !== 'string' ||
+        !artifact.mimeType.trim()
+      )
+        throw new Error('artifact_invalid');
+      const mimeType = artifact.mimeType.split(';', 1)[0].trim().toLowerCase();
+      if (!mimeType) throw new Error('artifact_invalid');
+      const expiresAt = artifact.expiresAt ?? new Date(Date.now() + ARTIFACT_RETENTION_MS);
+      if (!(expiresAt instanceof Date) || !Number.isFinite(expiresAt.getTime())) throw new Error('artifact_invalid');
+      const sha256 = createHash('sha256').update(artifact.content).digest('hex');
+      stage = 'storage_put';
+      const stored = await persistence.storage.put({
+        executionId: execution.id,
+        attempt,
+        content: artifact.content,
+        mimeType,
+        filename: artifact.filename,
+        kind: artifact.kind,
+        expiresAt,
+      });
+      const storageKey = stored?.storageKey;
+      const storedHash = stored?.hash;
+      if (typeof storageKey === 'string' && storageKey) storageKeys.push(storageKey);
+      if (
+        typeof storageKey !== 'string' ||
+        !storageKey ||
+        typeof storedHash !== 'string' ||
+        !/^[a-f0-9]{64}$/i.test(storedHash) ||
+        storedHash.toLowerCase() !== sha256
+      )
+        throw new Error('artifact_invalid');
+      stage = 'metadata_create';
+      await persistence.store.createArtifact({
+        executionId: execution.id,
+        projectId: execution.projectId,
+        attempt,
+        kind: artifact.kind,
+        storageKey,
+        mimeType,
+        size: artifact.content.byteLength,
+        sha256,
+        expiresAt,
+      });
+    }
+  } catch (error) {
+    emitArtifactDiagnostic(hooks, execution.id, attempt, stage, classifyArtifactPersistenceError(error));
+    let metadataRemoved = true;
+    stage = 'metadata_cleanup';
+    try {
+      await persistence.store.deleteArtifacts(storageKeys);
+    } catch (error) {
+      emitArtifactDiagnostic(hooks, execution.id, attempt, stage, classifyArtifactPersistenceError(error));
+      metadataRemoved = false;
+    }
+    const deleteArtifact = persistence.storage.delete?.bind(persistence.storage);
+    if (metadataRemoved && deleteArtifact) {
+      stage = 'storage_cleanup';
+      const cleanupResults = await Promise.allSettled(storageKeys.map((storageKey) => deleteArtifact(storageKey)));
+      cleanupResults.forEach((result) => {
+        if (result.status === 'rejected')
+          emitArtifactDiagnostic(hooks, execution.id, attempt, stage, classifyArtifactPersistenceError(result.reason));
+      });
+    }
+    throw new WorkerBoundaryError('artifact_persistence_failed');
+  }
+}
+
+function resultEvent(
+  base: { executionId: string; attempt: number; correlationId: string; jobId: string },
+  outcome: ExecutorResult
+): Extract<WorkerEvent, { phase: 'result' }> {
+  return {
+    ...base,
+    phase: 'result',
+    outcome: outcome.outcome,
+    ...(outcome.summary !== undefined ? { summary: outcome.summary } : {}),
+    ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+  };
+}
 
 /* prettier-ignore */
 export class BullMqExecutionQueue implements ExecutionQueue {
@@ -103,7 +301,14 @@ export class WorkerResultUpdater {
 }
 
 /* prettier-ignore */
-type WorkerOptions = Limits & { secret: string; queue?: BullMqExecutionQueue; phase0Ready?: boolean; hooks?: WorkerHooks };
+type WorkerOptions = Limits & {
+  secret: string;
+  queue?: BullMqExecutionQueue;
+  phase0Ready?: boolean;
+  hooks?: WorkerHooks;
+  artifactStorage?: ArtifactStorage;
+  artifactStore?: Pick<AutomationStore, 'createArtifact' | 'deleteArtifacts'>;
+};
 /* prettier-ignore */
 export type WorkerRuntime = {
   consume(handler: (job: WorkerJob) => Promise<unknown>, options: { concurrency: number }): Promise<void> | void;
@@ -129,16 +334,33 @@ export class ExecutionWorker {
     if (!executor) return this.updater.record(signWorkerEvent({ ...base, phase: 'result', outcome: 'technical_error', error: 'executor_not_configured', errorCategory: 'configuration' }, this.config.secret));
     this.active.set(job.executionId, executor); const started = Date.now(); let result: Extract<WorkerEvent, { phase: 'result' }>;
     try {
+      const artifactPersistence = this.config.artifactStorage && this.config.artifactStore
+        ? { storage: this.config.artifactStorage, store: this.config.artifactStore }
+        : undefined;
+      let artifactsPersisted = false;
       const outcome = await withDeadline(
         executor.execute({
           executionId: job.executionId,
           snapshot: job.snapshot,
           ...(job.environment ? { environment: job.environment } : {}),
+          ...(artifactPersistence
+            ? {
+                artifactSink: async (artifacts) => {
+                  if (!artifacts.length) return;
+                  await persistArtifacts(current, job.attempt, artifacts, artifactPersistence, this.config.hooks);
+                  artifactsPersisted = true;
+                },
+              }
+            : {}),
         }),
         this.config.deadlineMs
-      ); result = { ...base, phase: 'result', ...outcome };
+      );
+      if (!artifactsPersisted)
+        await persistArtifacts(current, job.attempt, outcome.artifacts, artifactPersistence, this.config.hooks);
+      result = resultEvent(base, outcome);
     } catch (error) {
       if (error instanceof DeadlineError) { try { await executor.cancel(job.executionId); } catch { emit(this.config.hooks, { ...base, status: 'error', errorCategory: 'cancel_failed' }); } result = { ...base, phase: 'result', outcome: 'timeout', error: 'deadline_exceeded', errorCategory: 'timeout' }; }
+      else if (error instanceof WorkerBoundaryError && error.code === 'artifact_persistence_failed') result = { ...base, phase: 'result', outcome: 'technical_error', error: error.code, errorCategory: 'artifact' };
       else result = { ...base, phase: 'result', outcome: 'technical_error', error: 'executor_failure', errorCategory: 'technical', recoverable: (error as { recoverable?: unknown })?.recoverable === true };
     } finally { this.active.delete(job.executionId); }
     const updated = await this.updater.record(signWorkerEvent(result, this.config.secret)); if (shouldRetry(result) && updated.status === 'queued' && this.config.queue) await this.config.queue.enqueue({ ...job, attempt: updated.attempt });

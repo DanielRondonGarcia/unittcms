@@ -1,9 +1,11 @@
 import { spawn as defaultSpawn, type SpawnOptions } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   buildHerculesInvocation,
+  buildHerculesPathEnvironment,
   collectCompatibilityEvidence,
+  collectExecutionArtifacts,
   HERCULES_CONTRACT,
   validateHostAllowlist,
   runHerculesProcess,
@@ -14,7 +16,7 @@ import {
 import type {
   AutomationExecutor,
   ExecutorHealth,
-  ExecutorInput,
+  ExecutorInvocation,
   ExecutorResult,
   ResolvedEnvironment,
 } from '../ports/index.js';
@@ -32,7 +34,6 @@ export type HerculesProcessRunner = (
 ) => Promise<HerculesProcessResult>;
 export type HerculesExecutorOptions = {
   workdir: string;
-  allowedHosts?: string[];
   timeoutMs?: number;
   llmConfig: WorkerLlmConfig;
   image?: string;
@@ -160,23 +161,31 @@ const defaultProcessRunner: HerculesProcessRunner = (invocation, options) =>
     },
   });
 
-function junitFlags(workdir: string): { failures: boolean; errors: boolean; secretFree: boolean } {
-  const evidence = collectCompatibilityEvidence(workdir);
+function junitFlags(
+  workdir: string,
+  evidence = collectCompatibilityEvidence(workdir)
+): { failures: boolean; errors: boolean; safe: boolean } {
   const file = evidence.files.find((value: string) => /^output\/[^/]+\.xml$/i.test(value));
-  if (!file) return { failures: false, errors: false, secretFree: evidence.secretFree };
+  const safe = evidence.executionSafe ?? evidence.secretFree;
+  if (!file) return { failures: false, errors: false, safe };
   const text = readFileSync(join(workdir, file), 'utf8');
   return {
     failures: /<failure\b/i.test(text) || /failures\s*=\s*["'][1-9]\d*/i.test(text),
     errors: /<error\b/i.test(text) || /errors\s*=\s*["'][1-9]\d*/i.test(text),
-    secretFree: evidence.secretFree,
+    safe,
   };
 }
 
-function mapProcessResult(result: HerculesProcessResult, workdir: string, cancelled: boolean): ExecutorResult {
+function mapProcessResult(
+  result: HerculesProcessResult,
+  workdir: string,
+  cancelled: boolean,
+  evidence = collectCompatibilityEvidence(workdir)
+): ExecutorResult {
   if (cancelled) return { outcome: 'cancelled', error: 'hercules_cancelled' };
   if (result.timedOut) return { outcome: 'timeout', error: 'hercules_timeout' };
-  const junit = junitFlags(workdir);
-  if (!junit.secretFree) return { outcome: 'technical_error', error: 'evidence_secret_detected' };
+  const junit = junitFlags(workdir, evidence);
+  if (!junit.safe) return { outcome: 'technical_error', error: 'evidence_secret_detected' };
   if (junit.errors) return { outcome: 'technical_error', error: 'hercules_result_error' };
   if (result.exitCode === 0) return { outcome: junit.failures ? 'functional_failure' : 'passed' };
   if (result.exitCode === 1) return { outcome: 'functional_failure' };
@@ -195,7 +204,7 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
   constructor(options: HerculesExecutorOptions) {
     this.image = resolveHerculesImage(options.image);
     this.workVolume = options.workVolume === undefined ? undefined : resolveHerculesVolume(options.workVolume);
-    this.workdir = options.workdir;
+    this.workdir = resolve(options.workdir);
     mkdirSync(this.workdir, { recursive: true });
     const requested = options.timeoutMs ?? HERCULES_CONTRACT.timeoutMs;
     const maxTimeoutMs = Number(HERCULES_CONTRACT.timeoutMs);
@@ -204,7 +213,7 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
     this.processRunner = options.processRunner ?? defaultProcessRunner;
   }
 
-  async execute(input: ExecutorInput): Promise<ExecutorResult> {
+  async execute(input: ExecutorInvocation): Promise<ExecutorResult> {
     const feature = typeof input.snapshot === 'string' ? input.snapshot : input.snapshot.feature;
     if (!validateCanonicalFeature(feature).valid)
       return { outcome: 'technical_error', error: 'invalid_canonical_feature' };
@@ -228,6 +237,7 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
     try {
       workspace = mkdtempSync(join(this.workdir, 'run-'));
       mkdirSync(join(workspace, 'input'), { recursive: true });
+      mkdirSync(join(workspace, 'test-data'), { recursive: true });
       writeFileSync(join(workspace, 'input', 'test.feature'), target.feature, 'utf8');
       const registerCancellation = (terminate: () => void) => {
         run.terminate = terminate;
@@ -238,10 +248,12 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
           includeApiKey:
             this.environment.LLM_MODEL_API_TYPE !== 'ollama' ||
             Object.prototype.hasOwnProperty.call(this.environment, 'LLM_MODEL_API_KEY'),
+          volumeRoot: this.workdir,
         }),
         {
           env: Object.freeze({
             ...this.environment,
+            ...buildHerculesPathEnvironment(workspace, this.workVolume, this.workdir),
             RECORD_VIDEO: input.environment?.captureVideo === true ? 'true' : 'false',
             HERCULES_BASE_URL: target.baseUrl,
             HERCULES_ALLOWED_HOSTS: target.allowedHosts.join(','),
@@ -250,10 +262,24 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
           registerCancellation,
         }
       );
-      return mapProcessResult(result, workspace, run.cancelled);
+      const allowLargeVideos = input.environment?.captureVideo === true;
+      const secretValues = this.environment.LLM_MODEL_API_KEY ? [this.environment.LLM_MODEL_API_KEY] : [];
+      const evidence = collectCompatibilityEvidence(workspace, { allowLargeVideos, secretValues });
+      const mapped = mapProcessResult(result, workspace, run.cancelled, evidence);
+      if (!(evidence.executionSafe ?? evidence.secretFree)) return mapped;
+      const artifacts = collectExecutionArtifacts(workspace, {
+        includeVideo: allowLargeVideos,
+      });
+      if (artifacts.length === 0) return mapped;
+      if (input.artifactSink) {
+        await input.artifactSink(artifacts);
+        return mapped;
+      }
+      return { ...mapped, artifacts };
     } catch (error) {
       if (run.cancelled) return { outcome: 'cancelled', error: 'hercules_cancelled' };
       if ((error as { code?: unknown })?.code === 'ETIMEDOUT') return { outcome: 'timeout', error: 'hercules_timeout' };
+      if ((error as { code?: unknown })?.code === 'artifact_persistence_failed') throw error;
       return { outcome: 'technical_error', error: 'hercules_process_failed' };
     } finally {
       this.active.delete(input.executionId);

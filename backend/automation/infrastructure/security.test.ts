@@ -32,7 +32,7 @@ describe('secure environment boundary', () => {
   it('returns only safe connection data and references', async () => {
     const resolver = new EnvironmentResolver(async () => ({
       baseUrl: 'https://example.test/app',
-      allowedHosts: ['example.test'],
+      allowedHosts: ['example.test', 'other.example.test'],
       secretRefs: ['secret://llm', 'raw'],
       secretValue: 'raw',
     }));
@@ -93,6 +93,30 @@ describe('private artifact storage', () => {
     expect(await storage.get(ref.storageKey, ref.sha256)).toEqual(content);
   });
 
+  it('normalizes MIME parameters and scans binary evidence for configured secrets', async () => {
+    const storage = new FileArtifactStorage({ rootDir: await newRoot(), secretValues: ['raw-secret'] });
+    const text = await storage.put(input({ mimeType: 'text/plain; charset=utf-8' }));
+    expect(text.mimeType).toBe('text/plain');
+    await expect(
+      storage.put(
+        input({
+          mimeType: 'video/webm',
+          filename: 'step.webm',
+          content: Buffer.concat([Buffer.from([0, 255, 1]), Buffer.from('raw-secret')]),
+        })
+      )
+    ).rejects.toThrow('artifact_contains_secret');
+  });
+
+  it('keeps configured-secret scanning active for large video evidence', async () => {
+    const storage = new FileArtifactStorage({ rootDir: await newRoot(), secretValues: ['raw-secret'] });
+    const content = Buffer.concat([Buffer.alloc(1024 * 1024 + 1, 0), Buffer.from('raw-secret')]);
+
+    await expect(storage.put(input({ mimeType: 'video/webm', filename: 'large.webm', content }))).rejects.toThrow(
+      'artifact_contains_secret'
+    );
+  });
+
   it('rejects traversal, absolute paths, MIME/extension mismatches, and oversized evidence', async () => {
     const storage = new FileArtifactStorage({ rootDir: await newRoot(), maxBytes: 4 });
     await expect(storage.get('../outside')).rejects.toThrow();
@@ -136,6 +160,13 @@ describe('private artifact storage', () => {
         .map((value) => redactSecretValues(value, ['raw-secret']))
         .join()
     ).not.toContain('raw-secret');
+  });
+
+  it('rejects credential-shaped text even without configured secret values', async () => {
+    const storage = new FileArtifactStorage({ rootDir: await newRoot() });
+    await expect(storage.put(input({ content: Buffer.from('password=raw-secret') }))).rejects.toThrow(
+      'artifact_contains_secret'
+    );
   });
 });
 
@@ -182,5 +213,54 @@ describe('artifact application boundary', () => {
     await expect(app.artifacts(2, 'e1')).rejects.toMatchObject({ status: 403 });
     await expect(app.download(2, 'a1')).rejects.toMatchObject({ status: 404 });
     expect(storage.get).not.toHaveBeenCalled();
+  });
+
+  it('returns persisted artifact metadata and verified content through the download boundary', async () => {
+    const root = await newRoot();
+    const content = Buffer.from('private evidence');
+    const storage = new FileArtifactStorage({ rootDir: root });
+    const ref = await storage.put(input({ executionId: 'e1', mimeType: 'video/webm', filename: 'step.webm', content }));
+    const artifact = {
+      id: 'a1',
+      projectId: 10,
+      executionId: 'e1',
+      attempt: 1,
+      kind: 'video',
+      storageKey: ref.storageKey,
+      mimeType: ref.mimeType,
+      size: ref.size,
+      sha256: ref.sha256,
+      expiresAt: ref.expiresAt,
+    };
+    const store = {
+      canAccessProject: vi.fn(async () => true),
+      findExecution: vi.fn(async () => ({ id: 'e1', projectId: 10, caseId: 7, status: 'passed', attempt: 1 })),
+      listArtifacts: vi.fn(async () => [artifact]),
+      findArtifact: vi.fn(async () => artifact),
+    };
+    const app = createAutomationApplication({
+      store: store as unknown as AutomationStore,
+      registry: new NeutralExecutorRegistry(),
+      artifactStorage: storage,
+    });
+
+    const listed = await app.artifacts(1, 'e1');
+    const downloaded = await app.download(1, 'a1');
+
+    expect(listed[0]).toMatchObject({
+      id: 'a1',
+      kind: 'video',
+      mimeType: 'video/webm',
+      size: content.byteLength,
+      sha256: ref.sha256,
+    });
+    expect(downloaded).toMatchObject({
+      artifactId: 'a1',
+      storageKey: ref.storageKey,
+      sha256: ref.sha256,
+      size: content.byteLength,
+      content: content.toString('base64'),
+      encoding: 'base64',
+    });
   });
 });

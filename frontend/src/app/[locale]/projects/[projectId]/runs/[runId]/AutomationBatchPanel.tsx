@@ -145,7 +145,7 @@ export default function AutomationBatchPanel({
             if (selection !== 'all' && selection.size > 0) setSelectedEnvironment(String(Array.from(selection)[0]));
           }}
           isDisabled={!isAuthorized || isLoading || environments.length === 0}
-          className="min-w-64"
+          className="w-full min-w-0 sm:max-w-64"
         >
           {environments.map((environment) => (
             <SelectItem key={String(environment.id)}>{environment.name}</SelectItem>

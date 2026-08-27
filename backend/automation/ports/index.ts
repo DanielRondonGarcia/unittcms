@@ -12,11 +12,26 @@ export type ExecutorInput = {
   snapshot: string | CanonicalSnapshot;
   environment?: ResolvedEnvironment;
 };
-export type ExecutorResult = { outcome: ExecutorOutcome; summary?: string; error?: string };
+export type ExecutorInvocation = ExecutorInput & {
+  artifactSink?: (artifacts: ExecutorArtifact[]) => Promise<void>;
+};
+export type ExecutorArtifact = {
+  kind: string;
+  content: Uint8Array;
+  mimeType: string;
+  filename?: string;
+  expiresAt?: Date;
+};
+export type ExecutorResult = {
+  outcome: ExecutorOutcome;
+  summary?: string;
+  error?: string;
+  artifacts?: ExecutorArtifact[];
+};
 export type ExecutorHealth = { key?: string; ready: boolean; status: string };
 
 export interface AutomationExecutor {
-  execute(input: ExecutorInput): Promise<ExecutorResult>;
+  execute(input: ExecutorInvocation): Promise<ExecutorResult>;
   cancel(executionId: string): Promise<void>;
   health(): Promise<ExecutorHealth>;
 }
@@ -93,6 +108,8 @@ export interface AutomationStore {
   findExecutionByIdempotencyKey(input: { projectId: number; idempotencyKey: string }): Promise<StoredExecution | null>;
   createDefinition(value: Record<string, unknown>): Promise<Record<string, unknown>>;
   createExecution(value: Record<string, unknown>): Promise<StoredExecution>;
+  createArtifact(value: Record<string, unknown>): Promise<Record<string, unknown>>;
+  deleteArtifacts(storageKeys: readonly string[]): Promise<void>;
   findExecution(executionId: string): Promise<StoredExecution | null>;
   updateExecution(executionId: string, value: Record<string, unknown>): Promise<StoredExecution>;
   cancelExecution?(executionId: string): Promise<StoredExecution>;

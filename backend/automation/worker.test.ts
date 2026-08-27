@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { NeutralExecutorRegistry } from './ports/registry.js';
 import type {
   AutomationStore,
+  ExecutorInvocation,
   ExecutorResult,
   RunCaseStatusUpdate,
   RunCaseStatusUpdater,
@@ -428,6 +430,186 @@ describe('automation queue and worker boundary', () => {
     await expect(worker.process({ ...job, executorKey: 'injected' })).resolves.toMatchObject({ status: 'passed' });
     expect(executor.execute).toHaveBeenCalledWith({ executionId: 'e1', snapshot: 'Feature: Login' });
     expect(runCase.read()).toMatchObject({ status: 1, history: [{ status: 3, source: 'manual' }] });
+  });
+
+  it('persists executor artifacts before emitting a metadata-only terminal event', async () => {
+    const artifactContent = Buffer.from('video bytes');
+    const artifactHash = createHash('sha256').update(artifactContent).digest('hex');
+    const data = makeStore();
+    const artifactStorage = {
+      put: vi.fn(async () => ({ storageKey: 'execution/e1/attempt/1/video.webm', hash: artifactHash })),
+      get: vi.fn(),
+      delete: vi.fn(async () => undefined),
+    };
+    const artifactStore = {
+      createArtifact: vi.fn(async (value: Record<string, unknown>) => {
+        expect(data.updateExecution).toHaveBeenCalledTimes(1);
+        return value;
+      }),
+      deleteArtifacts: vi.fn(async () => undefined),
+    };
+    const artifacts = [
+      {
+        kind: 'video',
+        filename: 'step.webm',
+        mimeType: 'video/webm; codecs=vp9',
+        content: artifactContent,
+      },
+    ];
+    const executor = {
+      execute: vi.fn(async (input: ExecutorInvocation) => {
+        await input.artifactSink?.(artifacts);
+        return { outcome: 'passed' as const, artifacts };
+      }),
+      cancel: vi.fn(async () => undefined),
+      health: vi.fn(async () => ({ ready: true, status: 'test' })),
+    };
+    const registry = new NeutralExecutorRegistry();
+    registry.register('injected', executor);
+    const worker = new ExecutionWorker(registry, new WorkerResultUpdater(data.store, 'server-secret'), {
+      secret: 'server-secret',
+      phase0Ready: true,
+      artifactStorage,
+      artifactStore,
+    });
+
+    await expect(
+      worker.process({
+        ...job,
+        executorKey: 'injected',
+        environment: { baseUrl: 'https://qa.example.test', allowedHosts: ['qa.example.test'], secretRefs: [] },
+      })
+    ).resolves.toMatchObject({ status: 'passed' });
+    expect(executor.execute).toHaveBeenCalledWith({
+      executionId: 'e1',
+      snapshot: 'Feature: Login',
+      environment: { baseUrl: 'https://qa.example.test', allowedHosts: ['qa.example.test'], secretRefs: [] },
+      artifactSink: expect.any(Function),
+    });
+    expect(artifactStorage.put).toHaveBeenCalledWith(
+      expect.objectContaining({ executionId: 'e1', attempt: 1, kind: 'video', mimeType: 'video/webm' })
+    );
+    expect(artifactStore.createArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionId: 'e1',
+        projectId: 10,
+        attempt: 1,
+        kind: 'video',
+        storageKey: 'execution/e1/attempt/1/video.webm',
+        size: 11,
+        sha256: artifactHash,
+        expiresAt: expect.any(Date),
+      })
+    );
+    expect(artifactStore.deleteArtifacts).not.toHaveBeenCalled();
+    expect(data.updateExecution).toHaveBeenCalledTimes(2);
+    expect(data.updateExecution.mock.calls.every(([, patch]) => !JSON.stringify(patch).includes('video bytes'))).toBe(
+      true
+    );
+  });
+
+  it('removes partial artifact metadata before deleting stored files', async () => {
+    const content = Buffer.from('evidence');
+    const hash = createHash('sha256').update(content).digest('hex');
+    const storageKeys = ['execution/e1/attempt/1/one.xml', 'execution/e1/attempt/1/two.xml'];
+    let storageIndex = 0;
+    const deletedStorageKeys: string[] = [];
+    const artifactStorage = {
+      rootDir: 'receiver-dependent-root',
+      put: vi.fn(async () => ({ storageKey: storageKeys[storageIndex++], hash })),
+      get: vi.fn(),
+      delete: vi.fn(async function (this: { rootDir: string }, storageKey: string) {
+        if (this.rootDir !== 'receiver-dependent-root') throw new Error('receiver_missing');
+        deletedStorageKeys.push(storageKey);
+      }),
+    };
+    const artifactStore = {
+      createArtifact: vi.fn().mockResolvedValueOnce({ id: 'a1' }).mockRejectedValueOnce(new Error('database failure')),
+      deleteArtifacts: vi.fn(async () => undefined),
+    };
+    const executor = {
+      execute: vi.fn(async () => ({
+        outcome: 'passed' as const,
+        artifacts: [
+          { kind: 'junit', filename: 'one.xml', mimeType: 'application/xml', content },
+          { kind: 'junit', filename: 'two.xml', mimeType: 'application/xml', content },
+        ],
+      })),
+      cancel: vi.fn(async () => undefined),
+      health: vi.fn(async () => ({ ready: true, status: 'test' })),
+    };
+    const registry = new NeutralExecutorRegistry();
+    registry.register('injected', executor);
+    const data = makeStore();
+    const worker = new ExecutionWorker(registry, new WorkerResultUpdater(data.store, 'server-secret'), {
+      secret: 'server-secret',
+      phase0Ready: true,
+      artifactStorage,
+      artifactStore,
+    });
+
+    const result = await worker.process({ ...job, executorKey: 'injected' });
+    expect(result).toMatchObject({
+      status: 'error',
+      error: 'artifact_persistence_failed',
+      errorKind: 'technical',
+    });
+    expect(JSON.stringify(result)).not.toContain('database failure');
+    expect(artifactStore.deleteArtifacts).toHaveBeenCalledWith(storageKeys);
+    expect(artifactStorage.delete).toHaveBeenCalledTimes(2);
+    expect(artifactStorage.delete).toHaveBeenNthCalledWith(1, storageKeys[0]);
+    expect(artifactStorage.delete).toHaveBeenNthCalledWith(2, storageKeys[1]);
+    expect(deletedStorageKeys).toEqual(storageKeys);
+  });
+
+  it('emits only safe artifact persistence diagnostics for raw database failures', async () => {
+    const content = Buffer.from('evidence');
+    const hash = createHash('sha256').update(content).digest('hex');
+    const rawDatabaseError = 'SQLITE_BUSY: database is locked; INSERT INTO ExecutionArtifact(secret=top-secret)';
+    const databaseError = Object.assign(new Error(rawDatabaseError), {
+      code: 'SQLITE_BUSY',
+      sql: 'INSERT INTO ExecutionArtifact(secret=top-secret)',
+    });
+    const diagnostics: unknown[] = [];
+    const artifactStorage = {
+      put: vi.fn(async () => ({ storageKey: 'execution/e1/attempt/1/one.xml', hash })),
+      get: vi.fn(),
+      delete: vi.fn(async () => undefined),
+    };
+    const artifactStore = {
+      createArtifact: vi.fn().mockRejectedValue(databaseError),
+      deleteArtifacts: vi.fn(async () => undefined),
+    };
+    const executor = {
+      execute: vi.fn(async () => ({
+        outcome: 'passed' as const,
+        artifacts: [{ kind: 'junit', filename: 'one.xml', mimeType: 'application/xml', content }],
+      })),
+      cancel: vi.fn(async () => undefined),
+      health: vi.fn(async () => ({ ready: true, status: 'test' })),
+    };
+    const registry = new NeutralExecutorRegistry();
+    registry.register('injected', executor);
+    const data = makeStore();
+    const worker = new ExecutionWorker(registry, new WorkerResultUpdater(data.store, 'server-secret'), {
+      secret: 'server-secret',
+      phase0Ready: true,
+      artifactStorage,
+      artifactStore,
+      hooks: { log: (event) => diagnostics.push(event) },
+    });
+
+    const result = await worker.process({ ...job, executorKey: 'injected' });
+
+    expect(result).toMatchObject({ status: 'error', error: 'artifact_persistence_failed' });
+    expect(JSON.stringify(result)).not.toContain(rawDatabaseError);
+    expect(JSON.stringify(diagnostics)).not.toContain(rawDatabaseError);
+    expect(diagnostics).toContainEqual({
+      executionId: 'e1',
+      attempt: 1,
+      stage: 'metadata_create',
+      errorCategory: 'database_busy',
+    });
   });
 
   it('rejects invalid or replayed signed results without allowing client approval fields', async () => {

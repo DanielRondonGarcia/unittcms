@@ -48,15 +48,6 @@ function readWorkerSecret() {
   return secret;
 }
 
-function workerAllowedHosts() {
-  const value = process.env.HERCULES_ALLOWED_HOSTS?.trim();
-  if (!value) return undefined;
-  return value
-    .split(',')
-    .map((host) => host.trim())
-    .filter(Boolean);
-}
-
 async function runMigrations() {
   try {
     console.log('Running database migrations...');
@@ -149,7 +140,6 @@ async function startWorker() {
     workdir: process.env.AUTOMATION_HERCULES_WORKDIR,
     image: process.env.AUTOMATION_HERCULES_IMAGE,
     workVolume: process.env.AUTOMATION_HERCULES_VOLUME,
-    allowedHosts: workerAllowedHosts(),
     phase0Ready: process.env.AUTOMATION_PHASE0_READY === 'true',
     workerSecret: readWorkerSecret(),
   });

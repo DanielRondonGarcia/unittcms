@@ -21,6 +21,7 @@ function model(overrides: Record<string, unknown> = {}) {
     count: vi.fn(async () => 0),
     create: vi.fn(async (value: Record<string, unknown>) => record(value)),
     update: vi.fn(async () => [1]),
+    destroy: vi.fn(async () => 0),
     ...overrides,
   };
 }
@@ -79,7 +80,9 @@ describe('Sequelize automation store', () => {
     const findProject = vi.fn(async () => project);
     const data = models({
       Project: { findByPk: findProject },
-      Member: { findOne: vi.fn(async ({ where }: { where: { userId: number } }) => (where.userId === 1 ? member : null)) },
+      Member: {
+        findOne: vi.fn(async ({ where }: { where: { userId: number } }) => (where.userId === 1 ? member : null)),
+      },
     });
     const store = new SequelizeAutomationStore(data);
 
@@ -163,8 +166,12 @@ describe('Sequelize automation store', () => {
     });
     const store = new SequelizeAutomationStore(data);
 
-    await expect(store.findExecutionByIdempotencyKey({ projectId: 10, idempotencyKey: 'key-1' })).resolves.toMatchObject({ id: '12' });
-    await expect(store.listExecutions({ projectId: 10, caseId: 7, runCaseId: 3, offset: 20, limit: 10 })).resolves.toMatchObject({
+    await expect(
+      store.findExecutionByIdempotencyKey({ projectId: 10, idempotencyKey: 'key-1' })
+    ).resolves.toMatchObject({ id: '12' });
+    await expect(
+      store.listExecutions({ projectId: 10, caseId: 7, runCaseId: 3, offset: 20, limit: 10 })
+    ).resolves.toMatchObject({
       total: 1,
       items: [expect.objectContaining({ id: '12' })],
     });
@@ -172,5 +179,29 @@ describe('Sequelize automation store', () => {
     const artifacts = await store.listArtifacts('12');
     expect(artifacts[0]).toMatchObject({ id: '5', projectId: 10, storageKey: 'execution/12/result.xml' });
     expect(JSON.stringify(artifacts)).not.toContain('must-not-leak');
+
+    await store.createArtifact({
+      executionId: 12,
+      projectId: 10,
+      attempt: 1,
+      kind: 'video',
+      storageKey: 'execution/12/attempt/1/video.webm',
+      mimeType: 'video/webm',
+      size: 12,
+      sha256: 'b'.repeat(64),
+      expiresAt: new Date('2030-01-01T00:00:00.000Z'),
+    });
+    expect(data.ExecutionArtifact.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionId: 12,
+        kind: 'video',
+        storageKey: 'execution/12/attempt/1/video.webm',
+        sha256: 'b'.repeat(64),
+      })
+    );
+    await store.deleteArtifacts(['execution/12/attempt/1/video.webm']);
+    expect(data.ExecutionArtifact.destroy).toHaveBeenCalledWith({
+      where: { storageKey: ['execution/12/attempt/1/video.webm'] },
+    });
   });
 });

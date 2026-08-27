@@ -12,10 +12,11 @@ import {
 } from './infrastructure/bullmq.js';
 import { SequelizeAutomationStore, type AutomationModels } from './infrastructure/sequelize-store.js';
 import { loadWorkerLlmConfig, type WorkerLlmConfig } from './infrastructure/llm-config.js';
+import { FileArtifactStorage } from './infrastructure/artifacts.js';
 import { resolveHerculesVolume } from './compatibility/hercules.js';
 import { NeutralExecutorRegistry } from './ports/registry.js';
 import type { RunCaseStatusUpdate } from './ports/index.js';
-import { BullMqExecutionQueue, ExecutionWorker, WorkerResultUpdater } from './worker.js';
+import { BullMqExecutionQueue, ExecutionWorker, WorkerResultUpdater, type WorkerLog } from './worker.js';
 
 export class AutomationWorkerBootstrapError extends Error {
   readonly code: string;
@@ -39,7 +40,6 @@ export type WorkerBootstrapOptions = {
   workVolume?: string;
   models?: AutomationModels;
   phase0Ready?: boolean;
-  allowedHosts?: string[];
   concurrency?: number;
   deadlineMs?: number;
   backoffMs?: number;
@@ -50,6 +50,42 @@ export type AutomationWorkerHandle = {
   health: RedisWorkerHealth;
   shutdown(): Promise<void>;
 };
+
+const ARTIFACT_DIAGNOSTIC_STAGES = new Set([
+  'validation',
+  'storage_put',
+  'metadata_create',
+  'metadata_cleanup',
+  'storage_cleanup',
+]);
+const ARTIFACT_DIAGNOSTIC_CATEGORIES = new Set([
+  'database_busy',
+  'database_constraint',
+  'database_readonly',
+  'storage_missing',
+  'storage_invalid',
+  'unknown',
+]);
+
+function logWorkerDiagnostic(event: WorkerLog): void {
+  const executionId = event.executionId;
+  const attempt = event.attempt;
+  const stage = event.stage;
+  const errorCategory = event.errorCategory;
+  if (
+    typeof executionId !== 'string' ||
+    !/^[A-Za-z0-9_-]+$/.test(executionId) ||
+    typeof attempt !== 'number' ||
+    !Number.isSafeInteger(attempt) ||
+    attempt < 1 ||
+    typeof stage !== 'string' ||
+    !ARTIFACT_DIAGNOSTIC_STAGES.has(stage) ||
+    typeof errorCategory !== 'string' ||
+    !ARTIFACT_DIAGNOSTIC_CATEGORIES.has(errorCategory)
+  )
+    return;
+  console.error(JSON.stringify({ executionId, attempt, stage, errorCategory }));
+}
 
 function envText(value: string | undefined, code: string): string {
   const result = value?.trim();
@@ -79,13 +115,6 @@ export function loadWorkerSecret(
   return envText(environment.AUTOMATION_WORKER_SECRET, 'automation_worker_secret_required');
 }
 
-function environmentHosts(value: string | undefined): string[] {
-  return (value ?? '')
-    .split(',')
-    .map((item) => item.trim().toLowerCase().replace(/\.$/, ''))
-    .filter(Boolean);
-}
-
 export function loadWorkerHerculesVolume(
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): string | undefined {
@@ -113,7 +142,6 @@ export async function start(options: WorkerBootstrapOptions = {}): Promise<Autom
   const artifactRoot = options.artifactRoot ?? process.env.AUTOMATION_ARTIFACT_ROOT;
   const workdir =
     options.workdir ?? process.env.AUTOMATION_HERCULES_WORKDIR ?? join(artifactRoot ?? process.cwd(), 'hercules-work');
-  const allowedHosts = options.allowedHosts ?? environmentHosts(process.env.HERCULES_ALLOWED_HOSTS);
   const phase0Ready = options.phase0Ready ?? process.env.AUTOMATION_PHASE0_READY === 'true';
   const models = options.models ?? ((await import('../models/index.js')).default as unknown as AutomationModels);
 
@@ -134,12 +162,15 @@ export async function start(options: WorkerBootstrapOptions = {}): Promise<Autom
       deadlineMs: options.deadlineMs,
     });
     const store = new SequelizeAutomationStore(models);
+    const artifactStorage = new FileArtifactStorage({
+      rootDir: artifactRoot,
+      secretValues: llmConfig.apiKey ? [llmConfig.apiKey] : [],
+    });
     const registry = new NeutralExecutorRegistry();
     registry.register(
       'hercules',
       new HerculesAutomationExecutor({
         workdir,
-        allowedHosts,
         llmConfig,
         image: options.image ?? process.env.AUTOMATION_HERCULES_IMAGE,
         workVolume,
@@ -158,13 +189,15 @@ export async function start(options: WorkerBootstrapOptions = {}): Promise<Autom
         concurrency: options.concurrency,
         deadlineMs: options.deadlineMs,
         backoffMs: options.backoffMs,
+        artifactStorage,
+        artifactStore: store,
+        hooks: { log: logWorkerDiagnostic },
       }
     );
     const runtime = new BullMqWorkerRuntime(connection, subscriber);
     const health = new RedisWorkerHealth(connection);
     await executionWorker.start(runtime);
     let closed = false;
-    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
     const publishHeartbeat = async () => {
       try {
         await health.publish(await executionWorker.health(), AUTOMATION_HEALTH_TTL_MS);
@@ -173,7 +206,7 @@ export async function start(options: WorkerBootstrapOptions = {}): Promise<Autom
       }
     };
     await publishHeartbeat();
-    heartbeatTimer = setInterval(() => void publishHeartbeat(), Math.floor(AUTOMATION_HEALTH_TTL_MS / 3));
+    const heartbeatTimer = setInterval(() => void publishHeartbeat(), Math.floor(AUTOMATION_HEALTH_TTL_MS / 3));
     heartbeatTimer.unref?.();
     const signalHandler = () => void shutdown();
     process.once('SIGTERM', signalHandler);
@@ -181,7 +214,7 @@ export async function start(options: WorkerBootstrapOptions = {}): Promise<Autom
     async function shutdown(): Promise<void> {
       if (closed) return;
       closed = true;
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      clearInterval(heartbeatTimer);
       process.off('SIGTERM', signalHandler);
       process.off('SIGINT', signalHandler);
       await health

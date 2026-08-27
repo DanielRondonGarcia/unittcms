@@ -17,6 +17,12 @@ export const HERCULES_LLM_ENV_NAMES = Object.freeze([
   'LLM_MODEL_API_TYPE',
 ]);
 export const HERCULES_TARGET_ENV_NAMES = Object.freeze(['HERCULES_BASE_URL', 'HERCULES_ALLOWED_HOSTS']);
+export const HERCULES_PATH_ENV_NAMES = Object.freeze([
+  'PROJECT_SOURCE_ROOT',
+  'INPUT_GHERKIN_FILE_PATH',
+  'JUNIT_XML_BASE_PATH',
+  'TEST_DATA_PATH',
+]);
 const FIXED_DOCKER_ARGS = [
   'run',
   '--rm',
@@ -40,6 +46,7 @@ const FIXED_DOCKER_ARGS = [
   'CAPTURE_NETWORK=true',
   ...HERCULES_LLM_ENV_NAMES.flatMap((name) => ['--env', name]),
   ...HERCULES_TARGET_ENV_NAMES.flatMap((name) => ['--env', name]),
+  ...HERCULES_PATH_ENV_NAMES.flatMap((name) => ['--env', name]),
 ];
 
 function dockerArgs(includeApiKey = true) {
@@ -64,8 +71,24 @@ const EVIDENCE_PATTERNS = {
   network: /^proofs\/[^/]+\/run_[^/]+\/network_logs\.json$/i,
   planner: /^log_files\/[^/]+\/run_[^/]+\/agent_inner_thoughts\.json$/i,
 };
+const EXECUTION_ARTIFACTS = [
+  { kind: 'junit', mimeType: 'application/xml', pattern: EVIDENCE_PATTERNS.junit },
+  { kind: 'html', mimeType: 'text/html', pattern: EVIDENCE_PATTERNS.html },
+  { kind: 'screenshot', mimeType: 'image/png', pattern: EVIDENCE_PATTERNS.screenshots },
+  { kind: 'video', mimeType: 'video/webm', pattern: EVIDENCE_PATTERNS.videos },
+  { kind: 'network', mimeType: 'application/json', pattern: EVIDENCE_PATTERNS.network },
+  { kind: 'planner', mimeType: 'application/json', pattern: EVIDENCE_PATTERNS.planner },
+  { kind: 'log', mimeType: 'text/plain', pattern: EVIDENCE_PATTERNS.logs },
+];
+const LOG_MIME_TYPES = Object.freeze({
+  '.json': 'application/json',
+  '.log': 'text/plain',
+  '.txt': 'text/plain',
+});
 const TEXT_EVIDENCE = /\.(?:xml|html|json|log|txt)$/i;
 const MAX_BINARY_SCAN_BYTES = 1024 * 1024;
+const HERCULES_CONTAINER_ROOT = '/testzeus-hercules/opt';
+const SAFE_CONTAINER_PATH_PART = /^[A-Za-z0-9._-]+$/;
 const LOCAL_HOSTNAMES = new Set([
   'local',
   'localhost',
@@ -88,9 +111,20 @@ export const HERCULES_CONTRACT = Object.freeze({
     llm: Object.freeze({ maxRequests: 10, maxTokens: 4096 }),
   }),
 });
+function hasControlCharacter(value) {
+  return [...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+}
 export function resolveHerculesImage(value) {
   if (value === undefined || value === '') return HERCULES_IMAGE;
-  if (typeof value !== 'string' || /[\s\u0000-\u001f\u007f]/.test(value) || !HERCULES_IMAGE_PATTERN.test(value))
+  if (
+    typeof value !== 'string' ||
+    /\s/.test(value) ||
+    hasControlCharacter(value) ||
+    !HERCULES_IMAGE_PATTERN.test(value)
+  )
     throw new Error('hercules_image_invalid');
   return value;
 }
@@ -100,7 +134,8 @@ export function resolveHerculesVolume(value) {
     typeof value !== 'string' ||
     value.length < 2 ||
     value.length > 255 ||
-    /[\s\u0000-\u001f\u007f]/.test(value) ||
+    /\s/.test(value) ||
+    hasControlCharacter(value) ||
     !HERCULES_VOLUME_PATTERN.test(value)
   )
     throw new Error('hercules_volume_invalid');
@@ -129,7 +164,50 @@ export function validateCanonicalFeature(feature) {
       : ['feature must contain English Feature, Scenario or Scenario Outline, Given, When, and Then keywords'],
   };
 }
-export function buildHerculesInvocation(workdir, image, workVolume, { includeApiKey = true } = {}) {
+function volumeProjectRoot(workspace, volumeRoot) {
+  if (typeof volumeRoot !== 'string' || !volumeRoot.trim()) throw new Error('hercules_workspace_invalid');
+  const relativeWorkspace = relative(resolve(volumeRoot), workspace).replaceAll('\\', '/');
+  const parts = relativeWorkspace.split('/');
+  if (
+    !relativeWorkspace ||
+    relativeWorkspace === '.' ||
+    relativeWorkspace === '..' ||
+    relativeWorkspace.startsWith('../') ||
+    relativeWorkspace.startsWith('/') ||
+    parts.some((part) => part === '.' || part === '..' || !SAFE_CONTAINER_PATH_PART.test(part))
+  )
+    throw new Error('hercules_workspace_invalid');
+  return `${HERCULES_CONTAINER_ROOT}/${relativeWorkspace}`;
+}
+
+function resolveHerculesProjectRoot(workspace, workVolume, volumeRoot) {
+  return workVolume === undefined ? HERCULES_CONTAINER_ROOT : volumeProjectRoot(resolve(workspace), volumeRoot);
+}
+
+/**
+ * @param {string} workdir
+ * @param {string | undefined} workVolume
+ * @param {string | undefined} volumeRoot
+ */
+export function buildHerculesPathEnvironment(workdir, workVolume, volumeRoot) {
+  const selectedVolume = workVolume === undefined ? undefined : resolveHerculesVolume(workVolume);
+  const projectRoot = resolveHerculesProjectRoot(workdir, selectedVolume, volumeRoot);
+  return Object.freeze({
+    PROJECT_SOURCE_ROOT: projectRoot,
+    INPUT_GHERKIN_FILE_PATH: `${projectRoot}/input/test.feature`,
+    JUNIT_XML_BASE_PATH: `${projectRoot}/output`,
+    TEST_DATA_PATH: `${projectRoot}/test-data`,
+  });
+}
+
+/**
+ * @param {string} workdir
+ * @param {string | undefined} image
+ * @param {string | undefined} workVolume
+ * @param {{ includeApiKey?: boolean, volumeRoot?: string }} [options]
+ */
+export function buildHerculesInvocation(workdir, image, workVolume, options = {}) {
+  const { includeApiKey = true, volumeRoot } = options;
   const cwd = resolve(workdir);
   if (/[\r\n,]/.test(cwd)) {
     throw new Error('compatibility workspace path contains unsafe mount characters');
@@ -137,8 +215,9 @@ export function buildHerculesInvocation(workdir, image, workVolume, { includeApi
   const selectedImage = resolveHerculesImage(image);
   const selectedVolume = workVolume === undefined ? undefined : resolveHerculesVolume(workVolume);
   const mount = selectedVolume
-    ? `type=volume,src=${selectedVolume},dst=/testzeus-hercules/opt`
-    : `type=bind,src=${cwd},dst=/testzeus-hercules/opt`;
+    ? `type=volume,src=${selectedVolume},dst=${HERCULES_CONTAINER_ROOT}`
+    : `type=bind,src=${cwd},dst=${HERCULES_CONTAINER_ROOT}`;
+  resolveHerculesProjectRoot(cwd, selectedVolume, volumeRoot);
   return {
     file: 'docker',
     cwd,
@@ -220,8 +299,12 @@ function containsSecretMaterial(text) {
     /\bsk-[A-Za-z0-9_-]{12,}\b/.test(text)
   );
 }
-function containsSecretBytes(bytes) {
-  return containsSecretMaterial(Buffer.from(bytes).toString('latin1'));
+function containsSecretBytes(bytes, secretValues = []) {
+  const value = Buffer.from(bytes);
+  return (
+    containsSecretMaterial(value.toString('latin1')) ||
+    secretValues.some((secret) => typeof secret === 'string' && secret && value.includes(Buffer.from(secret, 'utf8')))
+  );
 }
 function isUnsafeLiteralTarget(hostname) {
   const address = hostname.replace(/^\[|\]$/g, '');
@@ -237,7 +320,12 @@ function isUnsafeLiteralTarget(hostname) {
   }
   return family === 6 && /^(?:::|fc|fd|fe[89ab])/i.test(address);
 }
-export function collectCompatibilityEvidence(root) {
+/**
+ * @param {string} root
+ * @param {{ allowLargeVideos?: boolean, secretValues?: string[] }} [options]
+ */
+export function collectCompatibilityEvidence(root, options = {}) {
+  const { allowLargeVideos = false, secretValues = [] } = options;
   const files = listFiles(root);
   const missing = Object.entries(EVIDENCE_PATTERNS)
     .filter(([, pattern]) => !files.some((file) => pattern.test(file)))
@@ -260,9 +348,9 @@ export function collectCompatibilityEvidence(root) {
       continue;
     }
     binaryScan.scannedFiles.push(file);
-    if (containsSecretBytes(readFileSync(path))) binaryScan.suspiciousFiles.push(file);
+    if (containsSecretBytes(readFileSync(path), secretValues)) binaryScan.suspiciousFiles.push(file);
   }
-  return {
+  const evidence = {
     files,
     missing,
     textFiles,
@@ -270,6 +358,38 @@ export function collectCompatibilityEvidence(root) {
     binaryScan,
     secretFree: !containsSecretMaterial(text) && binaryScan.complete && binaryScan.suspiciousFiles.length === 0,
   };
+  if (allowLargeVideos || secretValues.length > 0) {
+    evidence.executionSafe =
+      !containsSecretMaterial(text) &&
+      binaryScan.suspiciousFiles.length === 0 &&
+      binaryScan.unscannedFiles.every((file) => allowLargeVideos && EVIDENCE_PATTERNS.videos.test(file));
+  }
+  return evidence;
+}
+export function collectExecutionArtifacts(root, { includeVideo = true } = {}) {
+  return listFiles(root)
+    .sort()
+    .flatMap((file) => {
+      const descriptor = EXECUTION_ARTIFACTS.find(({ pattern }) => pattern.test(file));
+      if (!descriptor || (descriptor.kind === 'video' && !includeVideo)) return [];
+      const extension = file.slice(file.lastIndexOf('.')).toLowerCase();
+      const mimeType =
+        descriptor.kind === 'log'
+          ? LOG_MIME_TYPES[extension]
+          : descriptor.kind === 'video'
+            ? extension === '.mp4'
+              ? 'video/mp4'
+              : descriptor.mimeType
+            : descriptor.kind === 'screenshot' && ['.jpg', '.jpeg'].includes(extension)
+              ? 'image/jpeg'
+              : descriptor.mimeType;
+      if (!mimeType) return [];
+      try {
+        return [{ kind: descriptor.kind, filename: file, mimeType, content: readFileSync(join(root, file)) }];
+      } catch {
+        return [];
+      }
+    });
 }
 export function validateHostAllowlist(urls, allowedHosts) {
   const allowed = new Set(allowedHosts.map((host) => host.toLowerCase().replace(/\.$/, '')));
@@ -332,6 +452,7 @@ export function evaluateCompatibility({ feature, result, evidence, proof = {} })
     proof.llmLimits?.maxTokens !== HERCULES_CONTRACT.resourceLimits.llm.maxTokens
   )
     errors.push('LLM limit proof is required');
+  if (!proof.pathEnvironmentVerified) errors.push('path-environment proof is required');
   if (!proof.telemetryDisabled) errors.push('telemetry-disabled proof is required');
   if (!proof.hostAllowlistVerified) errors.push('host-allowlist proof is required');
   if (!proof.secretAbsenceVerified) errors.push('secret-absence proof is required');
@@ -386,6 +507,7 @@ function diagnosticProof(proof) {
       maxRequests: Number.isSafeInteger(value.llmLimits?.maxRequests) ? value.llmLimits.maxRequests : 0,
       maxTokens: Number.isSafeInteger(value.llmLimits?.maxTokens) ? value.llmLimits.maxTokens : 0,
     },
+    pathEnvironmentVerified: value.pathEnvironmentVerified === true,
     telemetryDisabled: value.telemetryDisabled === true,
     hostAllowlistVerified: value.hostAllowlistVerified === true,
     secretAbsenceVerified: value.secretAbsenceVerified === true,
@@ -395,7 +517,7 @@ function diagnosticProof(proof) {
 }
 
 /**
- * @param {{ workdir?: string, evidenceRoot?: string, feature?: string, allowedHosts?: string[], runner?: Function, runtimeEnv?: Record<string, string>, image?: string, workVolume?: string, proofFactory?: Function }} options
+ * @param {{ workdir?: string, evidenceRoot?: string, feature?: string, allowedHosts?: string[], runner?: Function, runtimeEnv?: Record<string, string>, image?: string, workVolume?: string, volumeRoot?: string, proofFactory?: Function }} options
  */
 export async function runCompatibilityGate({
   workdir,
@@ -406,6 +528,7 @@ export async function runCompatibilityGate({
   runtimeEnv = {},
   image,
   workVolume,
+  volumeRoot,
   proofFactory,
 } = {}) {
   const selectedVolume = workVolume === undefined ? undefined : resolveHerculesVolume(workVolume);
@@ -423,11 +546,17 @@ export async function runCompatibilityGate({
     };
   const input = join(workdir, 'input', 'test.feature');
   mkdirSync(dirname(input), { recursive: true });
+  mkdirSync(join(workdir, 'test-data'), { recursive: true });
   writeFileSync(input, feature, 'utf8');
+  const pathEnvironment = buildHerculesPathEnvironment(workdir, selectedVolume, volumeRoot);
+  const executionEnvironment = Object.freeze({ ...runtimeEnv, ...pathEnvironment });
   const invocation = buildHerculesInvocation(workdir, image, selectedVolume, {
     includeApiKey: shouldIncludeApiKey(runtimeEnv),
+    volumeRoot,
   });
-  const execution = await (runner ? runner(invocation) : runHerculesProcess(invocation, { env: runtimeEnv }));
+  const execution = await (runner
+    ? runner(invocation, { env: executionEnvironment })
+    : runHerculesProcess(invocation, { env: executionEnvironment }));
   const evidence = collectCompatibilityEvidence(evidenceRoot);
   let factoryOutput;
   if (proofFactory) {
@@ -435,7 +564,7 @@ export async function runCompatibilityGate({
       factoryOutput = await proofFactory({
         feature,
         allowedHosts,
-        runtimeEnv,
+        runtimeEnv: executionEnvironment,
         invocation,
         execution,
         evidence,

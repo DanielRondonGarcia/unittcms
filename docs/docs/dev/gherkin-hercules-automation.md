@@ -86,7 +86,7 @@ sequenceDiagram
     API->>Q: Enqueue immutable snapshot
     API-->>UI: 202 queued
     Q->>E: Execute canonical English feature
-    E->>S: Store validated evidence privately
+    E->>S: Persist validated evidence privately
     E-->>Q: Signed terminal result
     Q->>API: Idempotent result update
     UI->>API: Poll execution and history
@@ -124,16 +124,16 @@ All endpoints require the existing JWT security scheme and project
 authorization. TSOA generates the route and Swagger files during the backend
 build; generated files are intentionally ignored by `backend/.gitignore`.
 
-| Method | Endpoint                                                               | Purpose                                 |
-| ------ | ---------------------------------------------------------------------- | --------------------------------------- |
-| `GET`  | `/automation/projects/{projectId}/environments`                        | List safe, enabled environment metadata |
-| `POST` | `/automation/executions`                                               | Validate, snapshot, and queue (`202`)   |
-| `GET`  | `/automation/executions/{executionId}`                                 | Poll one execution                      |
+| Method | Endpoint                                                                         | Purpose                                 |
+| ------ | -------------------------------------------------------------------------------- | --------------------------------------- |
+| `GET`  | `/automation/projects/{projectId}/environments`                                  | List safe, enabled environment metadata |
+| `POST` | `/automation/executions`                                                         | Validate, snapshot, and queue (`202`)   |
+| `GET`  | `/automation/executions/{executionId}`                                           | Poll one execution                      |
 | `GET`  | `/automation/projects/{projectId}/executions?page&limit&status&caseId&runCaseId` | Page/filter history                     |
-| `POST` | `/automation/executions/{executionId}/cancel`                          | Idempotent cancellation                 |
-| `GET`  | `/automation/executions/{executionId}/artifacts`                       | List authorized evidence metadata       |
-| `GET`  | `/automation/artifacts/{artifactId}/download`                          | Return authorized private content       |
-| `GET`  | `/automation/health`                                                   | Report executor readiness               |
+| `POST` | `/automation/executions/{executionId}/cancel`                                    | Idempotent cancellation                 |
+| `GET`  | `/automation/executions/{executionId}/artifacts`                                 | List authorized evidence metadata       |
+| `GET`  | `/automation/artifacts/{artifactId}/download`                                    | Return authorized private content       |
+| `GET`  | `/automation/health`                                                             | Report executor readiness               |
 
 Errors use `{ "error": "code", "correlationId": "safe-id" }`. Validation
 failures may also include bounded `{ "fields": [{ "field", "code", "message" }] }`
@@ -155,6 +155,30 @@ Binary content is never placed in a Gherkin snapshot, log, frontend metadata,
 or public upload directory. Download responses use an authenticated, private
 base64 payload at the current API boundary so the UI can create a local
 download without exposing storage.
+
+Each real Hercules invocation receives the four container-only path variables
+through Docker's fixed `--env` contract: `PROJECT_SOURCE_ROOT`,
+`INPUT_GHERKIN_FILE_PATH`, `JUNIT_XML_BASE_PATH`, and `TEST_DATA_PATH`. A
+bind-mounted run uses `/testzeus-hercules/opt` as its project root. A
+named-volume run uses the run directory below `AUTOMATION_HERCULES_WORKDIR`,
+mapped to the corresponding safe subdirectory under
+`/testzeus-hercules/opt`; host paths are never passed as Hercules paths. The
+worker creates the run-local `test-data` directory before starting Hercules,
+and collection happens before the run workspace is removed. The pinned image's
+entrypoint does not forward arguments after the image, so the invocation does
+not use the ignored path CLI arguments.
+
+Compatibility proof also requires the path variables to be present at the
+process boundary. This keeps a missing or incorrectly wired per-run path from
+being treated as readiness evidence.
+
+Compatibility evidence remains fail-closed: `binaryScan.complete` is false
+when any binary exceeds the bounded scan window. Execution artifact collection
+has one explicit exception for a known Hercules video path so normal videos
+can be persisted, while unknown large binaries and suspicious small binaries
+still reject the execution. Private artifact storage independently validates
+the MIME/extension pair, size, SHA-256, and configured secret values before
+writing bytes.
 
 ## Configuration and isolated verification
 
@@ -193,12 +217,13 @@ The compiled module is `/app/backend/automation/worker-bootstrap.js`, loaded as
 | `AUTOMATION_WORKER_SECRET_FILE` | `/run/secrets/automation_worker_secret`    | Mandatory worker-only HMAC secret file                                                                   |
 | `AUTOMATION_SECRETS_DIR_HOST`   | `./.secrets`                               | Read-only host directory mounted only into the worker                                                    |
 | `AUTOMATION_HERCULES_WORKDIR`   | private volume path                        | Ephemeral Hercules work directory                                                                        |
+| `AUTOMATION_HERCULES_VOLUME`    | `unittcms_hercules-work`                   | Worker-only named volume; each run targets its own workdir-relative container subdirectory               |
 | `HERCULES_LLM_PROVIDER`         | `ollama`                                   | `ollama` for the host daemon, `ollama-cloud` for direct Cloud, or `openai-compatible` for keyed gateways |
 | `HERCULES_LLM_MODEL`            | exact installed Ollama tag                 | Required local tag or available Cloud model/deployment identifier                                        |
 | `LITELLM_BASE_URL`              | `http://host.docker.internal:11434`        | Local daemon/LiteLLM endpoint, or exactly `https://ollama.com/api` for Cloud                             |
 | `LITELLM_API_KEY_FILE`          | `/run/secrets/litellm_api_key`             | Required and non-empty for keyed LiteLLM production routes                                               |
 | `OLLAMA_API_KEY_FILE`           | `/run/secrets/ollama_api_key`              | Required and non-empty only for the authenticated `ollama-cloud` route                                   |
-| `HERCULES_ALLOWED_HOSTS`        | unset                                      | Explicit target allowlist; `example.com` is required by the canonical fixture                            |
+| `HERCULES_ALLOWED_HOSTS`        | unset                                      | Phase-0 compatibility allowlist; product executions derive the host from the saved project environment   |
 
 The API service and project `TestEnvironment` contain none of the global LLM
 credentials. The worker reads and validates this contract only when it starts.
@@ -355,8 +380,10 @@ npm run hercules:compatibility:real
 ```
 
 The GitHub workflow requires a manual boolean approval, pinned image contract,
-LLM/LiteLLM variables from Actions secrets, and the target allowlist from an
-Actions variable. No real browser or LLM run is part of normal CI.
+LLM/LiteLLM variables from Actions secrets, and the Phase-0 target allowlist
+from an Actions variable. Product executions do not consume this global value;
+they derive the host from the saved project environment. No real browser or LLM
+run is part of normal CI.
 
 ## Adding a second executor
 

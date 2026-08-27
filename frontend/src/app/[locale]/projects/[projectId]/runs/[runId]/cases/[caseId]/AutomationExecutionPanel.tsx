@@ -205,8 +205,11 @@ export default function AutomationExecutionPanel({ projectId, runId, caseId, run
   };
 
   return (
-    <div className="mt-6 min-w-0 rounded-md border p-4" aria-labelledby="automation-heading">
-      <div className="flex items-center justify-between gap-3">
+    <div
+      className="mt-6 min-w-0 max-w-full overflow-x-hidden rounded-md border p-4"
+      aria-labelledby="automation-heading"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h6 id="automation-heading" className="font-bold">
           {messages.automation}
         </h6>
@@ -228,7 +231,7 @@ export default function AutomationExecutionPanel({ projectId, runId, caseId, run
             if (selection !== 'all' && selection.size > 0) setSelectedEnvironment(String(Array.from(selection)[0]));
           }}
           isDisabled={!isAuthorized || isEnvironmentLoading || environments.length === 0}
-          className="min-w-64"
+          className="w-full min-w-0 sm:max-w-64"
         >
           {environments.map((environment) => (
             <SelectItem key={String(environment.id)}>{environment.name}</SelectItem>
@@ -310,7 +313,7 @@ export default function AutomationExecutionPanel({ projectId, runId, caseId, run
             ) : (
               <ul className="mt-1 space-y-1">
                 {artifacts.map((artifact) => (
-                  <li key={String(artifact.id)} className="flex min-w-0 items-center gap-2">
+                  <li key={String(artifact.id)} className="flex min-w-0 flex-wrap items-center gap-2">
                     <span className="min-w-0 break-all">{artifact.filename ?? artifact.kind}</span>
                     <Button
                       size="sm"

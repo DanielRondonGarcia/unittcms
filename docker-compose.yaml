@@ -90,7 +90,6 @@ services:
       - LITELLM_BASE_URL=${LITELLM_BASE_URL:-}
       - LITELLM_API_KEY_FILE=/run/secrets/litellm_api_key
       - OLLAMA_API_KEY_FILE=/run/secrets/ollama_api_key
-      - HERCULES_ALLOWED_HOSTS=${HERCULES_ALLOWED_HOSTS:-}
     volumes:
       - db-data:/app/backend/database
       - automation-artifacts:/app/backend/private/automation-artifacts

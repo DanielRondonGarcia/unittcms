@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ const proof = {
   timeoutHardKill: true,
   browserLimits: { headless: true, maxConcurrentPages: 1 },
   llmLimits: { maxRequests: 10, maxTokens: 4096 },
+  pathEnvironmentVerified: true,
   telemetryDisabled: true,
   hostAllowlistVerified: true,
   secretAbsenceVerified: true,
@@ -78,8 +79,20 @@ describe('Hercules compatibility contract', () => {
         'HERCULES_BASE_URL',
         '--env',
         'HERCULES_ALLOWED_HOSTS',
+        '--env',
+        'PROJECT_SOURCE_ROOT',
+        '--env',
+        'INPUT_GHERKIN_FILE_PATH',
+        '--env',
+        'JUNIT_XML_BASE_PATH',
+        '--env',
+        'TEST_DATA_PATH',
       ])
     );
+    expect(invocation.argv).not.toContain('--input-file');
+    expect(invocation.argv).not.toContain('--output-path');
+    expect(invocation.argv).not.toContain('--test-data-path');
+    expect(invocation.argv).not.toContain('--project-base');
     expect(invocation.argv).not.toContain('HERCULES_LLM_PROVIDER');
     expect(invocation.argv).not.toContain('HERCULES_LLM_MODEL');
     expect(invocation.argv).not.toContain('LITELLM_BASE_URL');
@@ -90,8 +103,9 @@ describe('Hercules compatibility contract', () => {
   });
   it('uses the supplied named volume instead of a host bind mount', () => {
     const root = makeRoot();
+    const workspace = join(root, 'run-123');
     const volume = 'unittcms_hercules-work';
-    const invocation = hercules.buildHerculesInvocation(root, undefined, volume);
+    const invocation = hercules.buildHerculesInvocation(workspace, undefined, volume, { volumeRoot: root });
 
     expect(invocation.argv).toEqual([
       ...hercules.HERCULES_CONTRACT.argv,
@@ -99,7 +113,21 @@ describe('Hercules compatibility contract', () => {
       `type=volume,src=${volume},dst=/testzeus-hercules/opt`,
       hercules.HERCULES_CONTRACT.image,
     ]);
-    expect(invocation.argv.join(' ')).not.toContain(`src=${root}`);
+    expect(invocation.argv.join(' ')).not.toContain(root);
+    expect(hercules.buildHerculesPathEnvironment(workspace, volume, root)).toEqual({
+      PROJECT_SOURCE_ROOT: '/testzeus-hercules/opt/run-123',
+      INPUT_GHERKIN_FILE_PATH: '/testzeus-hercules/opt/run-123/input/test.feature',
+      JUNIT_XML_BASE_PATH: '/testzeus-hercules/opt/run-123/output',
+      TEST_DATA_PATH: '/testzeus-hercules/opt/run-123/test-data',
+    });
+  });
+  it('rejects a named-volume workspace outside the configured worker workdir', () => {
+    const root = makeRoot();
+    expect(() =>
+      hercules.buildHerculesInvocation(join(root, 'run-123'), undefined, 'unittcms_hercules-work', {
+        volumeRoot: join(root, 'other'),
+      })
+    ).toThrow('hercules_workspace_invalid');
   });
   it('omits the inherited API key marker for local Ollama but keeps it for Cloud', async () => {
     const localRoot = makeRoot();
@@ -197,16 +225,25 @@ describe('Hercules compatibility contract', () => {
     const skipped = await hercules.runCompatibilityGate({ workdir: root, evidenceRoot: root });
     expect(skipped).toMatchObject({ ready: false, skipped: true });
 
+    const workspace = join(root, 'run-compatibility');
     const result = await hercules.runCompatibilityGate({
-      workdir: root,
-      evidenceRoot: root,
+      workdir: workspace,
+      evidenceRoot: workspace,
       feature: hercules.CANONICAL_FEATURE,
       allowedHosts: ['example.com'],
       image: 'testzeus/hercules:0.1.2-amd64',
       workVolume: 'unittcms_hercules-work',
-      runner: async (invocation) => {
-        writeEvidence(root);
+      volumeRoot: root,
+      runner: async (invocation, options) => {
+        writeEvidence(workspace);
         expect(invocation.argv).toContain('type=volume,src=unittcms_hercules-work,dst=/testzeus-hercules/opt');
+        expect(existsSync(join(workspace, 'test-data'))).toBe(true);
+        expect(options.env).toMatchObject({
+          PROJECT_SOURCE_ROOT: '/testzeus-hercules/opt/run-compatibility',
+          INPUT_GHERKIN_FILE_PATH: '/testzeus-hercules/opt/run-compatibility/input/test.feature',
+          JUNIT_XML_BASE_PATH: '/testzeus-hercules/opt/run-compatibility/output',
+          TEST_DATA_PATH: '/testzeus-hercules/opt/run-compatibility/test-data',
+        });
         return { exitCode: 0, result: 'passed' };
       },
     });
@@ -247,6 +284,48 @@ describe('Hercules compatibility contract', () => {
       }).ready
     ).toBe(false);
   });
+  it('returns allowlisted execution artifacts with their original bytes before cleanup', () => {
+    const root = makeRoot();
+    writeEvidence(root);
+
+    const artifacts = hercules.collectExecutionArtifacts(root);
+
+    expect(artifacts.map(({ kind }) => kind)).toEqual([
+      'planner',
+      'log',
+      'html',
+      'junit',
+      'network',
+      'screenshot',
+      'video',
+    ]);
+    expect(artifacts.find(({ kind }) => kind === 'video')).toMatchObject({
+      filename: 'proofs/Scenario/run_1/videos/step.webm',
+      mimeType: 'video/webm',
+      content: Buffer.from('safe fixture'),
+    });
+  });
+  it('derives log MIME types from recognized extensions and excludes unknown extensions', () => {
+    const root = makeRoot();
+    const files = [
+      ['log_files/Scenario/run_1/events.json', 'application/json'],
+      ['log_files/Scenario/run_1/events.log', 'text/plain'],
+      ['log_files/Scenario/run_1/events.txt', 'text/plain'],
+    ];
+    files.forEach(([file]) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), '{}');
+    });
+    const unknownFile = 'log_files/Scenario/run_1/events.yaml';
+    writeFileSync(join(root, unknownFile), '{}');
+
+    const artifacts = hercules.collectExecutionArtifacts(root);
+
+    expect(artifacts.map(({ filename, mimeType }) => ({ filename, mimeType }))).toEqual(
+      files.map(([filename, mimeType]) => ({ filename, mimeType }))
+    );
+    expect(artifacts.some(({ filename }) => filename === unknownFile)).toBe(false);
+  });
   it('fails closed when a binary artifact exceeds the bounded scan window', () => {
     const root = makeRoot();
     writeEvidence(root);
@@ -257,6 +336,29 @@ describe('Hercules compatibility contract', () => {
 
     expect(evidence.binaryScan).toMatchObject({ complete: false, unscannedFiles: [binaryPath] });
     expect(evidence.secretFree).toBe(false);
+
+    const executionEvidence = hercules.collectCompatibilityEvidence(root, { allowLargeVideos: true });
+    expect(executionEvidence.binaryScan).toMatchObject({ complete: false, unscannedFiles: [binaryPath] });
+    expect(executionEvidence.executionSafe).toBe(true);
+    expect(
+      hercules.evaluateCompatibility({
+        feature: hercules.CANONICAL_FEATURE,
+        result: { exitCode: 0, result: 'passed' },
+        evidence: executionEvidence,
+        proof,
+      }).ready
+    ).toBe(false);
+  });
+  it('keeps unknown large binaries unsafe for execution artifact collection', () => {
+    const root = makeRoot();
+    writeEvidence(root);
+    const unknownPath = 'unknown.bin';
+    writeFileSync(join(root, unknownPath), Buffer.alloc(1024 * 1024 + 1, 0));
+
+    const evidence = hercules.collectCompatibilityEvidence(root, { allowLargeVideos: true });
+
+    expect(evidence.executionSafe).toBe(false);
+    expect(evidence.binaryScan.unscannedFiles).toContain(unknownPath);
   });
   it.each([
     ['non-HTTP protocol', 'ftp://example.test/resource', 'example.test'],

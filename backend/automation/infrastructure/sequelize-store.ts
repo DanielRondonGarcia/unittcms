@@ -15,6 +15,7 @@ type ModelLike = {
   count(options?: PlainRecord): Promise<number>;
   create(values: PlainRecord): Promise<unknown>;
   update(values: PlainRecord, options?: PlainRecord): Promise<unknown>;
+  destroy?(options?: PlainRecord): Promise<unknown>;
 };
 
 export type AutomationModels = {
@@ -88,6 +89,10 @@ function positiveId(value: unknown): number {
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) throw new Error('automation_id_invalid');
   return id;
+}
+
+function safeArtifactStorageKey(value: string): boolean {
+  return !value.startsWith('/') && value.split('/').every((part) => part && part !== '.' && part !== '..');
 }
 
 function parseArray(value: unknown): unknown[] {
@@ -362,6 +367,55 @@ export class SequelizeAutomationStore implements AutomationStore {
       if (!existing) throw error;
       return existing;
     }
+  }
+
+  async createArtifact(value: PlainRecord): Promise<Record<string, unknown>> {
+    const executionId = positiveId(value.executionId);
+    const projectId = positiveId(value.projectId);
+    const attempt = Number(value.attempt);
+    const kind = String(value.kind ?? '').trim();
+    const storageKey = String(value.storageKey ?? '').trim();
+    const mimeType = String(value.mimeType ?? '')
+      .trim()
+      .toLowerCase();
+    const size = Number(value.size);
+    const sha256 = String(value.sha256 ?? '')
+      .trim()
+      .toLowerCase();
+    if (
+      !Number.isSafeInteger(attempt) ||
+      attempt < 1 ||
+      !kind ||
+      !storageKey ||
+      storageKey.includes('\\') ||
+      storageKey.includes('\0') ||
+      !safeArtifactStorageKey(storageKey) ||
+      !mimeType ||
+      !Number.isSafeInteger(size) ||
+      size < 0 ||
+      !/^[a-f0-9]{64}$/.test(sha256)
+    )
+      throw new Error('automation_artifact_invalid');
+    const record = await this.models.ExecutionArtifact.create({
+      executionId,
+      attempt,
+      kind,
+      storageKey,
+      mimeType,
+      size,
+      sha256,
+      expiresAt: value.expiresAt ?? null,
+    });
+    return this.safeArtifact(record, projectId);
+  }
+
+  async deleteArtifacts(storageKeys: readonly string[]): Promise<void> {
+    const keys = [...new Set(storageKeys.map((value) => String(value).trim()).filter(Boolean))];
+    if (keys.length === 0) return;
+    if (keys.some((key) => !safeArtifactStorageKey(key))) throw new Error('automation_artifact_invalid');
+    if (typeof this.models.ExecutionArtifact.destroy !== 'function')
+      throw new Error('automation_artifact_delete_unavailable');
+    await this.models.ExecutionArtifact.destroy({ where: { storageKey: keys } });
   }
 
   async findExecution(executionId: string): Promise<StoredExecution | null> {

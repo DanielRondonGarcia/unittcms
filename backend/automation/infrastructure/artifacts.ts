@@ -33,6 +33,18 @@ const MIME_EXTENSIONS: Record<string, string[]> = {
   'video/mp4': ['.mp4'],
   'video/webm': ['.webm'],
 };
+const TEXT_MIME_TYPES = new Set(['application/json', 'application/xml', 'text/xml', 'text/html', 'text/plain']);
+
+function containsSecretMaterial(text: string): boolean {
+  return (
+    /\b(?:password|api[_ -]?key|authorization|token)\s*[:=]\s*(?!<[^>]+>|redacted|placeholder|replace-me)[^\s"',;]+/i.test(
+      text
+    ) ||
+    /\bBearer\s+(?!<[^>]+>|redacted)[A-Za-z0-9._~-]{12,}/i.test(text) ||
+    /\bsk-[A-Za-z0-9_-]{12,}\b/.test(text)
+  );
+}
+
 export function redactSecretValues(value: string, secrets: readonly string[]): string {
   return [...secrets]
     .filter(Boolean)
@@ -72,7 +84,12 @@ function prepare(input: ArtifactInput, options: Options): { bytes: Buffer; ref: 
   const bytes = Buffer.from(input.content);
   const maxBytes = options.maxBytes ?? 50 * 1024 * 1024;
   if (bytes.byteLength > maxBytes) throw new Error('artifact_size_exceeded');
-  if (options.secretValues?.some((secret) => secret && bytes.toString('utf8').includes(secret)))
+  const text = TEXT_MIME_TYPES.has(mimeType) ? bytes.toString('utf8') : bytes.toString('latin1');
+  if (TEXT_MIME_TYPES.has(mimeType) && text.includes('\ufffd')) throw new Error('artifact_unscannable');
+  if (
+    containsSecretMaterial(text) ||
+    options.secretValues?.some((secret) => secret && bytes.includes(Buffer.from(secret, 'utf8')))
+  )
     throw new Error('artifact_contains_secret');
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const expiresAt = input.expiresAt ?? new Date(Date.now() + (options.retentionMs ?? 7 * 24 * 60 * 60 * 1000));

@@ -14,6 +14,10 @@ const runtimeEnv = {
   LLM_MODEL_API_TYPE: 'openai',
   LLM_MODEL_API_KEY: 'fixture-key',
   LLM_MODEL_CLIENT_HOST: 'https://llm.example.test/v1',
+  PROJECT_SOURCE_ROOT: '/testzeus-hercules/opt',
+  INPUT_GHERKIN_FILE_PATH: '/testzeus-hercules/opt/input/test.feature',
+  JUNIT_XML_BASE_PATH: '/testzeus-hercules/opt/output',
+  TEST_DATA_PATH: '/testzeus-hercules/opt/test-data',
 };
 const cloudKey = 'fixture-cloud-key';
 const cloudRuntimeEnv = {
@@ -22,6 +26,10 @@ const cloudRuntimeEnv = {
   LLM_MODEL_API_TYPE: 'ollama',
   LLM_MODEL_API_KEY: cloudKey,
   LLM_MODEL_CLIENT_HOST: 'https://ollama.com/api',
+  PROJECT_SOURCE_ROOT: '/testzeus-hercules/opt',
+  INPUT_GHERKIN_FILE_PATH: '/testzeus-hercules/opt/input/test.feature',
+  JUNIT_XML_BASE_PATH: '/testzeus-hercules/opt/output',
+  TEST_DATA_PATH: '/testzeus-hercules/opt/test-data',
 };
 const evidence = {
   missing: [],
@@ -68,6 +76,7 @@ describe('Hercules compatibility proof harness', () => {
       timeoutHardKill: true,
       browserLimits: { headless: true, maxConcurrentPages: 1 },
       llmLimits: { maxRequests: 10, maxTokens: 4096 },
+      pathEnvironmentVerified: true,
       telemetryDisabled: true,
       hostAllowlistVerified: true,
       secretAbsenceVerified: true,
@@ -152,6 +161,17 @@ describe('Hercules compatibility proof harness', () => {
     const built = buildCompatibilityProof(context({ invocation: badInvocation }));
 
     expect(built.proof.browserLimits).toEqual({ headless: false, maxConcurrentPages: 0 });
+    expect(evaluate(built).ready).toBe(false);
+  });
+
+  it('fails closed when a per-run path is missing from the process environment', () => {
+    const built = buildCompatibilityProof(
+      context({
+        runtimeEnv: { ...runtimeEnv, TEST_DATA_PATH: undefined },
+      })
+    );
+
+    expect(built.proof.pathEnvironmentVerified).toBe(false);
     expect(evaluate(built).ready).toBe(false);
   });
 

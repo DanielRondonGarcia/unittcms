@@ -58,7 +58,7 @@ model, project target, and Phase 0 compatibility evidence are ready.
 3. Create `.secrets/automation_worker_secret` with a locally generated random value. The worker requires this secret even when Ollama does not require provider authentication.
 4. For direct Ollama Cloud, set `HERCULES_LLM_PROVIDER=ollama-cloud`, use `LITELLM_BASE_URL=https://ollama.com/api`, set `HERCULES_LLM_MODEL` to the Cloud model name, and create `.secrets/ollama_api_key`. The worker reads the key file only for this provider; never put a key in `.env`, this README, or chat.
 5. Create `.secrets/litellm_api_key` only when a keyed LiteLLM gateway/provider route requires it. Local keyless Ollama does not need either provider key file.
-6. In the project settings, configure the default Automation Environment base URL. Set `HERCULES_ALLOWED_HOSTS` to the target host or hosts allowed for that project.
+6. In the project settings, configure the default Automation Environment base URL. The product worker derives and validates its target allowlist from that saved URL.
 7. With `AUTOMATION_EXECUTION_MODE=real`, recreate the API stack with `docker compose --env-file .env up -d --build`. This makes the configured environment available to the API; it does not start the worker, and execution remains not ready without the worker heartbeat.
 8. Run the separate Phase 0 compatibility check for the selected provider and project target while the worker is still off. Set `AUTOMATION_PHASE0_READY=true` only after its evidence has been reviewed and approved.
 9. Start the complete explicit worker profile with `docker compose --env-file .env --profile automation-worker up -d --build`.

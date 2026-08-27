@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as compatibility from '../compatibility/hercules.js';
 import { CANONICAL_FEATURE, HERCULES_CONTRACT } from '../compatibility/hercules.js';
 import { NeutralExecutorRegistry } from '../ports/registry.js';
+import { FileArtifactStorage } from './artifacts.js';
 import type { HerculesProcessResult, HerculesProcessRunner } from './hercules.js';
 import { HerculesAutomationExecutor } from './hercules.js';
 import type { WorkerLlmConfig } from './llm-config.js';
@@ -55,6 +56,7 @@ describe('Hercules automation executor', () => {
     const processRunner = vi.fn(async (invocation, options) => {
       observed = { invocation, env: options.env, timeoutMs: options.timeoutMs };
       expect(readFileSync(join(invocation.cwd, 'input', 'test.feature'), 'utf8')).toBe(CANONICAL_FEATURE);
+      expect(existsSync(join(invocation.cwd, 'test-data'))).toBe(true);
       options.registerCancellation(vi.fn());
       junit(invocation.cwd);
       return { exitCode: 0 };
@@ -92,6 +94,10 @@ describe('Hercules automation executor', () => {
       HERCULES_BASE_URL: 'https://example.com/',
       HERCULES_ALLOWED_HOSTS: 'example.com',
       RECORD_VIDEO: 'false',
+      PROJECT_SOURCE_ROOT: '/testzeus-hercules/opt',
+      INPUT_GHERKIN_FILE_PATH: '/testzeus-hercules/opt/input/test.feature',
+      JUNIT_XML_BASE_PATH: '/testzeus-hercules/opt/output',
+      TEST_DATA_PATH: '/testzeus-hercules/opt/test-data',
     });
     expect(observed.env).not.toHaveProperty('HERCULES_LLM_PROVIDER');
     expect(observed.env).not.toHaveProperty('HERCULES_LLM_MODEL');
@@ -120,12 +126,115 @@ describe('Hercules automation executor', () => {
     expect(observedVideo).toBe('true');
   });
 
+  it('returns validated video evidence before removing the execution workspace', async () => {
+    let executionWorkspace = '';
+    const processRunner = vi.fn(async (invocation, options) => {
+      executionWorkspace = invocation.cwd;
+      junit(invocation.cwd);
+      mkdirSync(join(invocation.cwd, 'proofs', 'Scenario', 'run_1', 'videos'), { recursive: true });
+      writeFileSync(join(invocation.cwd, 'proofs', 'Scenario', 'run_1', 'videos', 'step.webm'), Buffer.from('video'));
+      options.registerCancellation(vi.fn());
+      return { exitCode: 0 };
+    });
+    const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
+
+    const result = await executor.execute({
+      executionId: 'video-artifact',
+      snapshot: CANONICAL_FEATURE,
+      environment: { ...compatibilityEnvironment, captureVideo: true },
+    });
+
+    expect(result.outcome).toBe('passed');
+    const video = result.artifacts?.find((artifact) => artifact.kind === 'video');
+    expect(video).toMatchObject({
+      filename: 'proofs/Scenario/run_1/videos/step.webm',
+      mimeType: 'video/webm',
+    });
+    expect(video?.content).toEqual(Buffer.from('video'));
+    expect(existsSync(executionWorkspace)).toBe(false);
+  });
+
+  it('sends evidence to the persistence sink before removing the execution workspace', async () => {
+    let executionWorkspace = '';
+    const persisted = vi.fn(async (artifacts) => {
+      expect(executionWorkspace).not.toBe('');
+      expect(existsSync(executionWorkspace)).toBe(true);
+      expect(artifacts).toHaveLength(2);
+      expect(artifacts.find((artifact) => artifact.kind === 'video')?.content).toEqual(Buffer.from('video'));
+    });
+    const processRunner = vi.fn(async (invocation, options) => {
+      executionWorkspace = invocation.cwd;
+      junit(invocation.cwd);
+      mkdirSync(join(invocation.cwd, 'proofs', 'Scenario', 'run_1', 'videos'), { recursive: true });
+      writeFileSync(join(invocation.cwd, 'proofs', 'Scenario', 'run_1', 'videos', 'step.webm'), Buffer.from('video'));
+      options.registerCancellation(vi.fn());
+      return { exitCode: 0 };
+    });
+    const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
+
+    const result = await executor.execute({
+      executionId: 'sink-artifact',
+      snapshot: CANONICAL_FEATURE,
+      environment: { ...compatibilityEnvironment, captureVideo: true },
+      artifactSink: persisted,
+    });
+
+    expect(result).toEqual({ outcome: 'passed' });
+    expect(persisted).toHaveBeenCalledOnce();
+    expect(existsSync(executionWorkspace)).toBe(false);
+  });
+
+  it('allows a known large Hercules video through execution collection without weakening compatibility evidence', async () => {
+    const largeVideo = Buffer.alloc(1024 * 1024 + 1, 0);
+    let compatibilityGateReady = true;
+    const storage = new FileArtifactStorage({ rootDir: root() });
+    const persisted = vi.fn(async (artifacts) => {
+      const video = artifacts.find((artifact) => artifact.kind === 'video');
+      expect(video?.content.byteLength).toBe(largeVideo.byteLength);
+      if (!video) throw new Error('video_artifact_missing');
+      const ref = await storage.put({
+        executionId: 'large-video',
+        attempt: 1,
+        content: video.content,
+        mimeType: video.mimeType,
+        filename: video.filename,
+        kind: video.kind,
+      });
+      expect(ref.size).toBe(largeVideo.byteLength);
+      await expect(storage.get(ref.storageKey, ref.sha256)).resolves.toEqual(largeVideo);
+    });
+    const processRunner = vi.fn(async (invocation, options) => {
+      junit(invocation.cwd);
+      mkdirSync(join(invocation.cwd, 'proofs', 'Scenario', 'run_1', 'videos'), { recursive: true });
+      writeFileSync(join(invocation.cwd, 'proofs', 'Scenario', 'run_1', 'videos', 'large.webm'), largeVideo);
+      compatibilityGateReady = compatibility.evaluateCompatibility({
+        feature: CANONICAL_FEATURE,
+        result: { exitCode: 0, result: 'passed' },
+        evidence: compatibility.collectCompatibilityEvidence(invocation.cwd),
+      }).ready;
+      options.registerCancellation(vi.fn());
+      return { exitCode: 0 };
+    });
+    const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
+
+    await expect(
+      executor.execute({
+        executionId: 'large-video',
+        snapshot: CANONICAL_FEATURE,
+        environment: { ...compatibilityEnvironment, captureVideo: true },
+        artifactSink: persisted,
+      })
+    ).resolves.toEqual({ outcome: 'passed' });
+    expect(persisted).toHaveBeenCalledOnce();
+    expect(compatibilityGateReady).toBe(false);
+  });
+
   it('uses the explicit local image override and maps Ollama at the process boundary', async () => {
     const localImage = 'testzeus/hercules:0.1.2-amd64';
     let observedEnv!: Record<string, string>;
     let observedImage = '';
     const processRunner = vi.fn(async (invocation, options) => {
-      observedImage = invocation.argv[invocation.argv.length - 1];
+      observedImage = invocation.argv[invocation.argv.indexOf('--mount') + 2];
       observedEnv = options.env;
       options.registerCancellation(vi.fn());
       junit(invocation.cwd);
@@ -192,8 +301,17 @@ describe('Hercules automation executor', () => {
   it('propagates a named volume to execution and compatibility health', async () => {
     const volume = 'unittcms_hercules-work';
     let observedMount = '';
+    const observedPathEnvironments: Readonly<Record<string, string>>[] = [];
     const processRunner = vi.fn(async (invocation, options) => {
       observedMount = invocation.argv[invocation.argv.indexOf('--mount') + 1];
+      observedPathEnvironments.push(options.env);
+      const projectBase = `/testzeus-hercules/opt/${basename(invocation.cwd)}`;
+      expect(options.env).toMatchObject({
+        PROJECT_SOURCE_ROOT: projectBase,
+        INPUT_GHERKIN_FILE_PATH: `${projectBase}/input/test.feature`,
+        JUNIT_XML_BASE_PATH: `${projectBase}/output`,
+        TEST_DATA_PATH: `${projectBase}/test-data`,
+      });
       options.registerCancellation(vi.fn());
       junit(invocation.cwd);
       return { exitCode: 0 };
@@ -212,7 +330,16 @@ describe('Hercules automation executor', () => {
         environment: compatibilityEnvironment,
       })
     ).resolves.toMatchObject({ outcome: 'passed' });
+    await expect(
+      executor.execute({
+        executionId: 'volume-run-2',
+        snapshot: CANONICAL_FEATURE,
+        environment: compatibilityEnvironment,
+      })
+    ).resolves.toMatchObject({ outcome: 'passed' });
     expect(observedMount).toBe(`type=volume,src=${volume},dst=/testzeus-hercules/opt`);
+    expect(observedPathEnvironments).toHaveLength(2);
+    expect(new Set(observedPathEnvironments.map((environment) => environment.PROJECT_SOURCE_ROOT)).size).toBe(2);
 
     await expect(executor.health()).resolves.toEqual({ key: 'hercules', ready: true, status: 'ready' });
   });
