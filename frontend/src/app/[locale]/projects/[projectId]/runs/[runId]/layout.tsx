@@ -15,6 +15,7 @@ export default function RunLayout({
 }) {
   const t = useTranslations('Run');
   const ui = useTranslations('UI');
+  const gherkin = useTranslations('Gherkin');
   const messages: RunMessages = {
     backToRuns: t('back_to_runs'),
     updating: t('updating'),
@@ -43,12 +44,14 @@ export default function RunLayout({
     runGherkinCasesSkipped: t('run_gherkin_cases_skipped'),
     runGherkinCasesComplete: t('run_gherkin_cases_complete'),
     runGherkinCasesError: t('run_gherkin_cases_error'),
+    examples: gherkin('examples'),
     automationEnvironment: t('automation_environment'),
     automationQueued: t('automation_queued'),
     automationRunning: t('automation_running'),
     automationPassed: t('automation_passed'),
     automationFailed: t('automation_failed'),
     automationError: t('automation_error'),
+    automationEvidenceInsufficient: t('automation_evidence_insufficient'),
     automationCancelled: t('automation_cancelled'),
     noCasesFound: t('no_cases_found'),
     areYouSureLeave: t('are_you_sure_leave'),

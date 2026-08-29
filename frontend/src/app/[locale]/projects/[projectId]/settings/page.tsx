@@ -48,6 +48,8 @@ export default function Page({ params }: { params: { projectId: string; locale: 
     automationEnvironment: t('automation_environment'),
     automationEnvironmentDescription: t('automation_environment_description'),
     automationBaseUrl: t('automation_base_url'),
+    automationAllowedHosts: t('automation_allowed_hosts'),
+    automationAllowedHostsDescription: t('automation_allowed_hosts_description'),
     automationEnabled: t('automation_enabled'),
     automationCaptureVideo: t('automation_capture_video'),
     automationSave: t('automation_save'),

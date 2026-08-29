@@ -1,15 +1,34 @@
 'use client';
 
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Chip, Select, SelectItem } from '@heroui/react';
 import { Play } from 'lucide-react';
 import { getPersistedRunCase } from '../runsControl';
 import { gherkinTemplate } from '@/config/selection';
 import type { CaseType } from '@/types/case';
 import type { RunMessages } from '@/types/run';
-import type { AutomationBatchResult, AutomationEnvironment, AutomationStatus } from '@/types/automation';
+import type {
+  AutomationBatchCase,
+  AutomationBatchResult,
+  AutomationEnvironment,
+  AutomationExecution,
+  AutomationStatus,
+} from '@/types/automation';
 import { TokenContext } from '@/utils/TokenProvider';
-import { fetchAutomationEnvironments, runAutomationBatch } from '@/utils/automationControl';
+import {
+  fetchAutomationEnvironments,
+  fetchAutomationHistory,
+  formatAutomationExampleLabel,
+  isAutomationActive,
+  runAutomationBatch,
+} from '@/utils/automationControl';
+import {
+  automationBatchCaseKey,
+  mergeAutomationBatchResults,
+  rehydrateAutomationBatchResults,
+  tryAcquireAutomationRun,
+} from '@/utils/automationBatchState';
+import { useAutomationPolling } from '@/utils/useAutomationPolling';
 
 type Props = {
   projectId: string;
@@ -33,6 +52,25 @@ function statusLabel(status: AutomationStatus, messages: RunMessages): string {
   )[status];
 }
 
+function executionStatusLabel(execution: AutomationExecution, messages: RunMessages): string {
+  return execution.errorKind === 'evidence'
+    ? messages.automationEvidenceInsufficient
+    : statusLabel(execution.status, messages);
+}
+
+function batchCaseLabel(testCase: AutomationBatchCase, messages: RunMessages): string {
+  return testCase.exampleIndex === undefined || testCase.exampleIndex === null
+    ? testCase.title
+    : `${testCase.title} · ${formatAutomationExampleLabel(messages.examples, testCase.exampleIndex, testCase.exampleValues)}`;
+}
+
+function resultLabel(result: AutomationBatchResult, messages: RunMessages): string {
+  if (result.execution) return executionStatusLabel(result.execution, messages);
+  if (result.error === 'evidence_junit_missing' || result.error === 'evidence_junit_invalid' || result.error === 'evidence_secret_detected')
+    return messages.automationEvidenceInsufficient;
+  return result.error ?? messages.automationError;
+}
+
 export default function AutomationBatchPanel({
   projectId,
   runId,
@@ -48,19 +86,75 @@ export default function AutomationBatchPanel({
   const [runningTitle, setRunningTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pollError, setPollError] = useState('');
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const runInFlight = useRef(false);
+  const accessToken = tokenContext.token.access_token;
 
-  const eligibleCases = useMemo(
+  const eligibleCases = useMemo<AutomationBatchCase[]>(
     () =>
-      cases.flatMap((testCase) => {
+      cases.flatMap((testCase): AutomationBatchCase[] => {
         const runCase = getPersistedRunCase(testCase);
-        return runCase && testCase.template === gherkinTemplate
-          ? [{ caseId: testCase.id, runCaseId: runCase.id, title: testCase.title }]
-          : [];
+        if (!runCase || testCase.template !== gherkinTemplate) return [];
+        const rows = testCase.gherkinExamples?.rows ?? [];
+        return rows.length > 0
+          ? rows.map((_, exampleIndex) => ({
+              caseId: testCase.id,
+              runCaseId: runCase.id,
+              title: testCase.title,
+              exampleIndex,
+              exampleValues: [...rows[exampleIndex]],
+            }))
+          : [{ caseId: testCase.id, runCaseId: runCase.id, title: testCase.title, exampleIndex: null }];
       }),
     [cases]
   );
   const includedCases = useMemo(() => cases.filter((testCase) => getPersistedRunCase(testCase)), [cases]);
-  const skippedCases = includedCases.length - eligibleCases.length;
+  const eligibleCaseCount = useMemo(
+    () => cases.filter((testCase) => getPersistedRunCase(testCase) && testCase.template === gherkinTemplate).length,
+    [cases]
+  );
+  const skippedCases = includedCases.length - eligibleCaseCount;
+
+  const loadBatchHistory = useCallback(async () => {
+    if (!accessToken || !isAuthorized || eligibleCases.length === 0) return [];
+    const runCaseIds = Array.from(new Set(eligibleCases.map((testCase) => testCase.runCaseId)));
+    const histories = await Promise.all(
+      runCaseIds.map((runCaseId) => fetchAutomationHistory(accessToken, Number(projectId), undefined, runCaseId, 100))
+    );
+    return histories.flat();
+  }, [accessToken, eligibleCases, isAuthorized, projectId]);
+
+  const batchPollingActive = Boolean(accessToken && isAuthorized && eligibleCases.length > 0);
+  const batchPollingKey = eligibleCases.map(automationBatchCaseKey).join('|');
+  const hasActiveBatchExecution = results.some(
+    (result) => Boolean(result.execution && isAutomationActive(result.execution.status))
+  );
+
+  useEffect(() => {
+    setIsHistoryLoading(batchPollingActive);
+    setResults([]);
+    setPollError('');
+    if (!batchPollingActive) {
+      setIsLoading(false);
+    }
+  }, [batchPollingActive, batchPollingKey]);
+
+  useAutomationPolling({
+    active: batchPollingActive,
+    poll: loadBatchHistory,
+    restartKey: `${projectId}:${runId}:${batchPollingKey}`,
+    onValue: (executions) => {
+      const nextResults = rehydrateAutomationBatchResults(eligibleCases, executions);
+      setIsHistoryLoading(false);
+      setPollError('');
+      setResults((current) => (isLoading ? mergeAutomationBatchResults(current, nextResults) : nextResults));
+    },
+    onError: () => {
+      setIsHistoryLoading(false);
+      setPollError(messages.runGherkinCasesError);
+    },
+  });
 
   useEffect(() => {
     if (!tokenContext.isSignedIn() || !tokenContext.token.access_token) return;
@@ -81,35 +175,45 @@ export default function AutomationBatchPanel({
   }, [messages.runGherkinCasesError, projectId, tokenContext]);
 
   const handleRun = async () => {
+    if (!tryAcquireAutomationRun(runInFlight)) return;
     if (
       !isAuthorized ||
       !selectedEnvironment ||
-      !tokenContext.token.access_token ||
+      !accessToken ||
       eligibleCases.length === 0 ||
-      hasPendingRunCaseChanges
-    )
+      hasPendingRunCaseChanges ||
+      isHistoryLoading ||
+      Boolean(pollError) ||
+      hasActiveBatchExecution
+    ) {
+      runInFlight.current = false;
       return;
+    }
     setIsLoading(true);
     setError('');
     setResults([]);
     setRunningTitle('');
     const batchId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try {
-      await runAutomationBatch(tokenContext.token.access_token, {
+      await runAutomationBatch(accessToken, {
         projectId: Number(projectId),
         runId: Number(runId),
         environmentId: Number(selectedEnvironment),
         cases: eligibleCases,
         batchId,
-        onStart: (testCase) => setRunningTitle(testCase.title),
+        onStart: (testCase) => setRunningTitle(batchCaseLabel(testCase, messages)),
         onResult: (result) => {
           setRunningTitle('');
-          setResults((current) => [...current.filter((item) => item.runCaseId !== result.runCaseId), result]);
+          setResults((current) => [
+            ...current.filter((item) => automationBatchCaseKey(item) !== automationBatchCaseKey(result)),
+            result,
+          ]);
         },
       });
     } catch {
       setError(messages.runGherkinCasesError);
     } finally {
+      runInFlight.current = false;
       setRunningTitle('');
       setIsLoading(false);
     }
@@ -156,7 +260,14 @@ export default function AutomationBatchPanel({
           size="sm"
           startContent={<Play size={15} />}
           isDisabled={
-            !isAuthorized || !selectedEnvironment || eligibleCases.length === 0 || isLoading || hasPendingRunCaseChanges
+            !isAuthorized ||
+            !selectedEnvironment ||
+            eligibleCases.length === 0 ||
+            isLoading ||
+            isHistoryLoading ||
+            Boolean(pollError) ||
+            hasActiveBatchExecution ||
+            hasPendingRunCaseChanges
           }
           isLoading={isLoading}
           onPress={handleRun}
@@ -174,9 +285,9 @@ export default function AutomationBatchPanel({
           {messages.automationRunning}: {runningTitle}
         </p>
       )}
-      {error && (
+      {(error || pollError) && (
         <p className="mt-3 text-sm text-danger" role="alert">
-          {error}
+          {error || pollError}
         </p>
       )}
       {results.length > 0 && (
@@ -184,17 +295,31 @@ export default function AutomationBatchPanel({
           <p className="text-sm font-semibold">{messages.runGherkinCasesComplete}</p>
           <ul className="space-y-1 text-sm">
             {results.map((result) => (
-              <li key={result.runCaseId} className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="min-w-0 break-words">{result.title}</span>
+              <li key={automationBatchCaseKey(result)} className="flex min-w-0 flex-wrap items-center gap-2">
+                <span
+                  className="min-w-0 max-w-full flex-1 truncate"
+                  title={batchCaseLabel(result, messages)}
+                  aria-label={batchCaseLabel(result, messages)}
+                >
+                  {batchCaseLabel(result, messages)}
+                </span>
                 <div className="min-w-0">
                   <Chip
                     size="sm"
                     className="max-w-full"
-                    color={result.error ? 'danger' : result.execution?.status === 'passed' ? 'success' : 'warning'}
+                    color={
+                      result.error ||
+                      result.execution?.status === 'failed' ||
+                      result.execution?.status === 'error' ||
+                      result.execution?.errorKind === 'evidence'
+                        ? 'danger'
+                        : result.execution?.status === 'passed'
+                          ? 'success'
+                          : 'warning'
+                    }
                   >
                     <span className="break-words">
-                      {result.error ??
-                        (result.execution ? statusLabel(result.execution.status, messages) : messages.automationError)}
+                      {resultLabel(result, messages)}
                     </span>
                   </Chip>
                   {result.errorFields && result.errorFields.length > 0 && (

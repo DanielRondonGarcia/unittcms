@@ -97,6 +97,7 @@ describe('Sequelize automation store', () => {
       id: 12,
       projectId: 10,
       caseId: 7,
+      exampleIndex: 1,
       status: 'queued',
       attempt: 1,
       correlationId: 'corr-1',
@@ -122,6 +123,7 @@ describe('Sequelize automation store', () => {
       definitionId: 2,
       projectId: 10,
       caseId: 7,
+      exampleIndex: 1,
       environmentId: 3,
       status: 'queued',
       attempt: 1,
@@ -130,12 +132,84 @@ describe('Sequelize automation store', () => {
     });
     const resolved = await store.findEnvironment(3);
 
-    expect(created).toMatchObject({ id: '12', projectId: 10, attemptHistory: [] });
+    expect(created).toMatchObject({ id: '12', projectId: 10, exampleIndex: 1, attemptHistory: [] });
     expect(createExecution).toHaveBeenCalledWith(
-      expect.objectContaining({ attemptHistory: '[]', idempotencyKey: 'key-1' })
+      expect.objectContaining({
+        attemptHistory: '[]',
+        exampleIndex: 1,
+        idempotencyKey: 'key-1',
+        activeExecutionKey: null,
+      })
     );
     expect(resolved).toMatchObject({ allowedHosts: ['qa.example.test'], secretRefs: ['secret://qa'] });
     expect(JSON.stringify(resolved)).not.toContain('must-not-leak');
+  });
+
+  it('finds legacy active RunCase executions without a backfilled key and clears the key when terminal', async () => {
+    const execution = record({
+      id: 'e1',
+      projectId: 10,
+      caseId: 7,
+      runCaseId: 3,
+      exampleIndex: 1,
+      status: 'running',
+      attempt: 1,
+      activeExecutionKey: null,
+    });
+    const findActive = vi.fn(async () => execution);
+    const data = models({
+      AutomationExecution: {
+        findOne: findActive,
+        findByPk: vi.fn(async () => execution),
+      },
+    });
+    const store = new SequelizeAutomationStore(data);
+
+    await expect(store.findActiveExecution?.({ runCaseId: 3, exampleIndex: 1 })).resolves.toMatchObject({ id: 'e1' });
+    expect(findActive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ runCaseId: 3, exampleIndex: 1 }),
+        order: [['id', 'ASC']],
+      })
+    );
+    await store.updateExecution('e1', { status: 'passed' });
+    expect(execution.update).toHaveBeenCalledWith(expect.objectContaining({ activeExecutionKey: null }));
+  });
+
+  it('turns a unique-key race into the active execution error while checking legacy rows', async () => {
+    const active = record({
+      id: 'e1',
+      projectId: 10,
+      caseId: 7,
+      runCaseId: 3,
+      exampleIndex: 1,
+      status: 'queued',
+      attempt: 1,
+      activeExecutionKey: null,
+    });
+    const findOne = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(active);
+    const data = models({
+      AutomationExecution: {
+        create: vi.fn(async () => {
+          throw { name: 'SequelizeUniqueConstraintError' };
+        }),
+        findOne,
+      },
+    });
+    const store = new SequelizeAutomationStore(data);
+
+    await expect(
+      store.createExecution({
+        projectId: 10,
+        caseId: 7,
+        runCaseId: 3,
+        exampleIndex: 1,
+        status: 'queued',
+        attempt: 1,
+        idempotencyKey: 'race-key',
+      })
+    ).rejects.toThrow('automation_execution_active');
+    expect(findOne).toHaveBeenCalledTimes(2);
   });
 
   it('supports idempotency, filtered pagination, RunCase ownership, and private artifact metadata', async () => {
@@ -203,5 +277,148 @@ describe('Sequelize automation store', () => {
     expect(data.ExecutionArtifact.destroy).toHaveBeenCalledWith({
       where: { storageKey: ['execution/12/attempt/1/video.webm'] },
     });
+  });
+
+  it.each([
+    ['failed then passed', ['failed', 'passed']],
+    ['passed then failed', ['passed', 'failed']],
+  ] as const)('keeps a failed Examples aggregate dominant when rows finish %s', async (_label, statuses) => {
+    const executions = statuses.map((status, index) =>
+      record({
+        id: `e${index + 1}`,
+        projectId: 10,
+        caseId: 7,
+        runCaseId: 3,
+        exampleIndex: index,
+        status,
+        attempt: 1,
+      })
+    );
+    const updateRunCase = vi.fn(async () => [1]);
+    const data = models({
+      AutomationExecution: {
+        findByPk: vi.fn(async () => executions[1]),
+        findAll: vi.fn(async () => executions),
+      },
+      RunCase: {
+        findByPk: vi.fn(async () => record({ id: 3, caseId: 7, runId: 20 })),
+        update: updateRunCase,
+      },
+      Run: { findByPk: vi.fn(async () => record({ id: 20, projectId: 10 })) },
+    });
+
+    await new SequelizeAutomationStore(data).updateRunCaseStatus({
+      runCaseId: 3,
+      projectId: 10,
+      status: statuses[1] === 'passed' ? 1 : 2,
+      executionId: 'e2',
+      attempt: 1,
+      correlationId: 'corr-2',
+    });
+
+    expect(data.AutomationExecution.findAll).toHaveBeenCalledWith({
+      where: { runCaseId: 3, projectId: 10 },
+    });
+    expect(updateRunCase).toHaveBeenCalledWith({ status: 2 }, { where: { id: 3 } });
+  });
+
+  it('does not mark an Examples RunCase passed from individual passed rows', async () => {
+    const executions = [0, 1].map((index) =>
+      record({
+        id: `e${index + 1}`,
+        projectId: 10,
+        caseId: 7,
+        runCaseId: 3,
+        exampleIndex: index,
+        status: 'passed',
+        attempt: 1,
+      })
+    );
+    const updateRunCase = vi.fn(async () => [1]);
+    const data = models({
+      AutomationExecution: {
+        findByPk: vi.fn(async () => executions[1]),
+        findAll: vi.fn(async () => executions),
+      },
+      RunCase: {
+        findByPk: vi.fn(async () => record({ id: 3, caseId: 7, runId: 20 })),
+        update: updateRunCase,
+      },
+      Run: { findByPk: vi.fn(async () => record({ id: 20, projectId: 10 })) },
+    });
+
+    await new SequelizeAutomationStore(data).updateRunCaseStatus({
+      runCaseId: 3,
+      projectId: 10,
+      status: 1,
+      executionId: 'e2',
+      attempt: 1,
+      correlationId: 'corr-2',
+    });
+
+    expect(updateRunCase).not.toHaveBeenCalled();
+  });
+
+  it('uses the persisted terminal status directly for a non-Examples execution', async () => {
+    const updateRunCase = vi.fn(async () => [1]);
+    const data = models({
+      AutomationExecution: {
+        findByPk: vi.fn(async () =>
+          record({ id: 'e1', projectId: 10, caseId: 7, runCaseId: 3, exampleIndex: null, status: 'passed', attempt: 1 })
+        ),
+      },
+      RunCase: {
+        findByPk: vi.fn(async () => record({ id: 3, caseId: 7, runId: 20 })),
+        update: updateRunCase,
+      },
+      Run: { findByPk: vi.fn(async () => record({ id: 20, projectId: 10 })) },
+    });
+
+    await new SequelizeAutomationStore(data).updateRunCaseStatus({
+      runCaseId: 3,
+      projectId: 10,
+      status: 2,
+      executionId: 'e1',
+      attempt: 1,
+      correlationId: 'corr-1',
+    });
+
+    expect(data.AutomationExecution.findAll).not.toHaveBeenCalled();
+    expect(updateRunCase).toHaveBeenCalledWith({ status: 1 }, { where: { id: 3 } });
+  });
+
+  it('marks a previously passed RunCase failed when its execution lacks verifiable evidence', async () => {
+    const updateRunCase = vi.fn(async () => [1]);
+    const runCase = record({ id: 3, caseId: 7, runId: 20, status: 1 });
+    const data = models({
+      AutomationExecution: {
+        findByPk: vi.fn(async () =>
+          record({
+            id: 'evidence-error',
+            projectId: 10,
+            caseId: 7,
+            runCaseId: 3,
+            exampleIndex: null,
+            status: 'error',
+            errorKind: 'evidence',
+            attempt: 1,
+          })
+        ),
+      },
+      RunCase: { findByPk: vi.fn(async () => runCase), update: updateRunCase },
+      Run: { findByPk: vi.fn(async () => record({ id: 20, projectId: 10 })) },
+    });
+
+    await new SequelizeAutomationStore(data).updateRunCaseStatus({
+      runCaseId: 3,
+      projectId: 10,
+      status: 2,
+      executionId: 'evidence-error',
+      attempt: 1,
+      correlationId: 'corr-evidence',
+    });
+
+    expect(runCase.get?.()).toMatchObject({ status: 1 });
+    expect(updateRunCase).toHaveBeenCalledWith({ status: 2 }, { where: { id: 3 } });
   });
 });

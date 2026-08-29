@@ -91,12 +91,14 @@ type RunMessages = {
   runGherkinCasesSkipped: string;
   runGherkinCasesComplete: string;
   runGherkinCasesError: string;
+  examples: string;
   automationEnvironment: string;
   automationQueued: string;
   automationRunning: string;
   automationPassed: string;
   automationFailed: string;
   automationError: string;
+  automationEvidenceInsufficient: string;
   automationCancelled: string;
   noCasesFound: string;
   areYouSureLeave: string;
@@ -180,6 +182,7 @@ type RunDetailMessages = {
   automationPassed: string;
   automationFailed: string;
   automationError: string;
+  automationEvidenceInsufficient: string;
   automationCancelled: string;
   automationSummary: string;
   automationErrorDetail: string;
@@ -198,6 +201,14 @@ type RunDetailMessages = {
   automationStartedAt: string;
   automationFinishedAt: string;
   automationAttempt: string;
+  automationAttemptHistory: string;
+  automationExample: string;
+  automationEngine: string;
+  automationModel: string;
+  automationEnvironmentId: string;
+  automationCorrelationId: string;
+  automationSnapshotHash: string;
+  automationWorkerStatus: string;
   automationSnapshot: string;
   automationVideo: string;
   automationBackToHistory: string;

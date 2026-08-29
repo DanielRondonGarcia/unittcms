@@ -39,7 +39,7 @@ describe('secure environment boundary', () => {
     const result = await resolver.resolve(7);
     expect(result).toEqual({
       baseUrl: 'https://example.test/app',
-      allowedHosts: ['example.test'],
+      allowedHosts: ['example.test', 'other.example.test'],
       secretRefs: ['secret://llm'],
       captureVideo: false,
     });
@@ -53,6 +53,9 @@ describe('secure environment boundary', () => {
     'http://169.254.169.254',
     'http://[::1]',
     'http://[::ffff:127.0.0.1]',
+    'http://example.test:80',
+    'https://example.test:443',
+    'https://example.test:8443',
     'https://not-allowed.test',
   ])(
     'rejects unsafe or disallowed targets: %s',
@@ -62,14 +65,36 @@ describe('secure environment boundary', () => {
       ).rejects.toThrow()
   );
 
-  it.each(['file:///tmp/evidence', 'https://evil.test/redirect', 'http://192.168.1.1/'])(
-    'rejects unsafe redirects: %s',
-    (target) => {
-      const resolver = new EnvironmentResolver(async () => null);
-      expect(() => resolver.validateRedirect('https://example.test/start', '/next')).not.toThrow();
-      expect(() => resolver.validateRedirect('https://example.test/start', target)).toThrow();
-    }
-  );
+  it.each([
+    'file:///tmp/evidence',
+    'https://evil.test/redirect',
+    'http://192.168.1.1/',
+    'http://example.test:80/redirect',
+    'https://example.test:443/redirect',
+    'https://example.test:8443/redirect',
+  ])('rejects unsafe redirects: %s', (target) => {
+    const resolver = new EnvironmentResolver(async () => null);
+    expect(() => resolver.validateRedirect('https://example.test/start', '/next')).not.toThrow();
+    expect(() => resolver.validateRedirect('https://example.test/start', target)).toThrow();
+  });
+
+  it('accepts an approved gateway redirect and rejects another domain', () => {
+    const resolver = new EnvironmentResolver(async () => null);
+    const hosts = ['example.test', 'gateway.example.test'];
+
+    expect(resolver.validateRedirect('https://example.test/start', 'https://gateway.example.test/login', hosts)).toBe(
+      'https://gateway.example.test/login'
+    );
+    expect(() => resolver.validateRedirect('https://example.test/start', 'https://evil.test/login', hosts)).toThrow(
+      'environment_target_rejected'
+    );
+    expect(() =>
+      resolver.validateRedirect('https://example.test/start', 'https://gateway.example.test:443/login', hosts)
+    ).toThrow('environment_target_rejected');
+    expect(() => resolver.validateRedirect('https://example.test:443/start', '/next', hosts)).toThrow(
+      'environment_target_rejected'
+    );
+  });
 });
 
 describe('private artifact storage', () => {

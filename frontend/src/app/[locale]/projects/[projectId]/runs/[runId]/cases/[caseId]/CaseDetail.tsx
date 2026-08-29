@@ -129,7 +129,7 @@ export default function CaseDetail({
               {testCase.gherkinExamples && (
                 <div className="mt-5 min-w-0 overflow-x-auto rounded-lg border p-3">
                   <h4 className="mb-2 font-semibold text-foreground">{messages.examples}</h4>
-                  <table className="min-w-max border-collapse text-sm" aria-label={messages.examples}>
+                  <table className="w-full min-w-max border-collapse text-sm" aria-label={messages.examples}>
                     <thead>
                       <tr className="border-b">
                         {testCase.gherkinExamples.headers.map((header, index) => (

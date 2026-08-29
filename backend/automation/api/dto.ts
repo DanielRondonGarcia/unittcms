@@ -3,6 +3,7 @@ export interface CreateAutomationExecutionRequest {
   caseId: number;
   environmentId: number;
   runCaseId?: number;
+  exampleIndex?: number | null;
   executorKey?: string;
   idempotencyKey?: string;
 }

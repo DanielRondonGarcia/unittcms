@@ -305,6 +305,7 @@ describe('automation queue and worker boundary', () => {
   it.each([
     ['passed', 'passed', 1],
     ['functional_failure', 'failed', 2],
+    ['evidence_error', 'error', 2],
   ] as const)('maps only terminal %s to the linked RunCase', async (outcome, status, runCaseStatus) => {
     const data = makeStore({
       ...initial,
@@ -313,7 +314,10 @@ describe('automation queue and worker boundary', () => {
     });
     const runCase = makeRunCaseStatus();
     const updater = new WorkerResultUpdater(data.store, 'server-secret', runCase.update);
-    const signed = signWorkerEvent(event({ outcome }), 'server-secret');
+    const signed = signWorkerEvent(
+      event({ outcome, ...(outcome === 'evidence_error' ? { outcome: 'technical_error', errorKind: 'evidence' } : {}) }),
+      'server-secret'
+    );
 
     const result = await updater.record(signed);
 

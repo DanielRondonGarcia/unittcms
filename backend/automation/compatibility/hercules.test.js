@@ -63,6 +63,10 @@ describe('Hercules compatibility contract', () => {
       `type=bind,src=${root},dst=/testzeus-hercules/opt`,
       hercules.HERCULES_CONTRACT.image,
     ]);
+    expect(invocation.argv).toContain('RECORD_VIDEO=false');
+    expect(hercules.buildHerculesInvocation(root, undefined, undefined, { captureVideo: true }).argv).toContain(
+      'RECORD_VIDEO=true'
+    );
     expect(invocation.argv).toEqual(
       expect.arrayContaining([
         '--env',
@@ -374,6 +378,84 @@ describe('Hercules compatibility contract', () => {
     ['private IPv6', 'http://[fd00::10]/resource', '[fd00::10]'],
   ])('rejects %s targets even when their host is allowlisted', (_label, url, allowedHost) => {
     expect(hercules.validateHostAllowlist([url], [allowedHost])).toEqual({ allowed: false, rejected: [url] });
+  });
+  it('normalizes the base host and preserves additional exact hosts', () => {
+    expect(
+      hercules.normalizeEnvironmentTarget('https://APP.example.test/app', [
+        ' https://Gateway.Example.Test/ ',
+        'app.example.test',
+      ])
+    ).toEqual({
+      baseUrl: 'https://app.example.test/app',
+      allowedHosts: ['app.example.test', 'gateway.example.test'],
+    });
+  });
+  it.each([
+    'gateway.example.test/path',
+    'gateway.example.test:80',
+    'gateway.example.test:443',
+    '*.example.test',
+    'localhost',
+    'gateway.example.test\u0000',
+    'not a hostname',
+  ])('rejects unsafe additional host entries: %s', (host) => {
+    expect(() => hercules.normalizeEnvironmentTarget('https://app.example.test', [host])).toThrow();
+  });
+  it.each([
+    'https://gateway.example.test/path',
+    'https://gateway.example.test:80',
+    'https://gateway.example.test:443',
+    'https://gateway.example.test:8443/',
+    'https://gateway.example.test?next=/login',
+    'https://gateway.example.test#login',
+    'https://user:password@gateway.example.test/',
+    'ftp://gateway.example.test/',
+  ])('rejects non-origin additional URL entries: %s', (value) => {
+    expect(() => hercules.normalizeEnvironmentTarget('https://app.example.test', [value])).toThrow(
+      'environment_host_invalid'
+    );
+  });
+  it.each([
+    ['https://gateway.example.test', 'gateway.example.test'],
+    ['http://gateway.example.test/', 'gateway.example.test'],
+    ['HTTPS://Gateway.Example.Test/', 'gateway.example.test'],
+  ])('canonicalizes an additional origin to its exact host: %s', (value, host) => {
+    expect(hercules.normalizeEnvironmentTarget('https://app.example.test', [value])).toMatchObject({
+      allowedHosts: ['app.example.test', host],
+    });
+  });
+  it.each(['http://app.example.test:80', 'https://app.example.test:443', 'https://app.example.test:8443'])(
+    'rejects an explicit base URL port: %s',
+    (value) => {
+      expect(() => hercules.normalizeEnvironmentTarget(value)).toThrow('environment_target_rejected');
+    }
+  );
+  it('allows a public IPv6 literal without an explicit port', () => {
+    expect(hercules.normalizeEnvironmentTarget('https://[2001:db8::10]/app')).toEqual({
+      baseUrl: 'https://[2001:db8::10]/app',
+      allowedHosts: ['2001:db8::10'],
+    });
+    expect(() => hercules.normalizeEnvironmentTarget('https://[2001:db8::10]:443/app')).toThrow(
+      'environment_target_rejected'
+    );
+  });
+  it.each([
+    'https://gateway.example.test:80/login',
+    'https://gateway.example.test:443/login',
+    'https://gateway.example.test:8443/login',
+  ])('rejects explicit ports during allowlist validation: %s', (value) => {
+    expect(hercules.validateHostAllowlist([value], ['gateway.example.test'])).toEqual({
+      allowed: false,
+      rejected: [value],
+    });
+  });
+  it('rejects a malformed host list without exposing its values', () => {
+    expect(() => hercules.normalizeEnvironmentTarget('https://app.example.test', 'gateway.example.test')).toThrow(
+      'environment_hosts_invalid'
+    );
+    expect(() =>
+      hercules.normalizeEnvironmentTarget('https://app.example.test', ['https://secret.example.test/path'])
+    ).toThrow('environment_host_invalid');
   });
 });
 describe('Hercules process boundary', () => {

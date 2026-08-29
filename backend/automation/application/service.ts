@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { composeCanonicalSnapshot, transitionExecution } from '../domain/index.js';
+import { composeCanonicalSnapshot, presentExampleSnapshot, transitionExecution } from '../domain/index.js';
 // prettier-ignore
 import type {
   ArtifactStorage,
@@ -37,6 +37,7 @@ type CreateInput = {
   environmentId: number;
   idempotencyKey: string;
   runCaseId?: number;
+  exampleIndex?: number | null;
   executorKey?: string;
   correlationId?: string;
 };
@@ -52,6 +53,42 @@ type HistoryInput = {
 
 function unavailable(): never {
   throw new AutomationError(503, 'automation_not_ready');
+}
+
+function resolveExampleIndex(
+  snapshot: {
+    examples: { rows: readonly (readonly string[])[] } | null;
+  },
+  value: number | null | undefined
+): number | null {
+  if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) {
+    throw new AutomationError(400, 'invalid_example_index', [
+      { field: 'exampleIndex', code: 'invalid', message: 'example index must be a non-negative integer' },
+    ]);
+  }
+  if (!snapshot.examples) {
+    if (value !== undefined && value !== null) {
+      throw new AutomationError(400, 'invalid_example_index', [
+        {
+          field: 'exampleIndex',
+          code: 'unsupported',
+          message: 'example index is only valid for Scenario Outline rows',
+        },
+      ]);
+    }
+    return null;
+  }
+  if (value === undefined || value === null) {
+    throw new AutomationError(400, 'example_index_required', [
+      { field: 'exampleIndex', code: 'required', message: 'an example row must be selected for a Scenario Outline' },
+    ]);
+  }
+  if (value >= snapshot.examples.rows.length) {
+    throw new AutomationError(400, 'invalid_example_index', [
+      { field: 'exampleIndex', code: 'out_of_range', message: 'example index is outside the available rows' },
+    ]);
+  }
+  return value;
 }
 
 export function createAutomationApplication({
@@ -120,6 +157,19 @@ export function createAutomationApplication({
       }
       const snapshot = composeCanonicalSnapshot(source);
       if (!snapshot.ok) throw new AutomationError(400, 'invalid_source', snapshot.errors);
+      const exampleIndex = resolveExampleIndex(snapshot.snapshot, input.exampleIndex);
+      if (input.runCaseId !== undefined && store.findActiveExecution) {
+        const active = await store.findActiveExecution({ runCaseId: input.runCaseId, exampleIndex });
+        if (active) {
+          throw new AutomationError(409, 'automation_execution_active', [
+            {
+              field: 'runCaseId',
+              code: 'active',
+              message: 'an execution for this RunCase and Example is already queued or running',
+            },
+          ]);
+        }
+      }
       const definition = await store.createDefinition({
         projectId: input.projectId,
         caseId: input.caseId,
@@ -127,22 +177,38 @@ export function createAutomationApplication({
         snapshot: JSON.stringify(snapshot.snapshot),
         snapshotHash: snapshot.snapshot.hash,
       });
-      const execution = await store.createExecution({
-        definitionId: definition.id,
-        projectId: input.projectId,
-        caseId: input.caseId,
-        environmentId: input.environmentId,
-        captureVideo: resolvedEnvironment.captureVideo === true,
-        runCaseId: input.runCaseId,
-        idempotencyKey: input.idempotencyKey,
-        correlationId: input.correlationId ?? randomUUID(),
-        status: 'queued',
-        attempt: 1,
-      });
+      let execution: StoredExecution;
+      try {
+        execution = await store.createExecution({
+          definitionId: definition.id,
+          projectId: input.projectId,
+          caseId: input.caseId,
+          environmentId: input.environmentId,
+          captureVideo: resolvedEnvironment.captureVideo === true,
+          runCaseId: input.runCaseId,
+          exampleIndex,
+          idempotencyKey: input.idempotencyKey,
+          correlationId: input.correlationId ?? randomUUID(),
+          status: 'queued',
+          attempt: 1,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message === 'automation_execution_active') {
+          throw new AutomationError(409, 'automation_execution_active', [
+            {
+              field: 'runCaseId',
+              code: 'active',
+              message: 'an execution for this RunCase and Example is already queued or running',
+            },
+          ]);
+        }
+        throw error;
+      }
       const jobId = await queue.enqueue({
         executionId: execution.id,
         attempt: execution.attempt,
-        snapshot: snapshot.snapshot.feature,
+        snapshot:
+          exampleIndex === null ? snapshot.snapshot.feature : presentExampleSnapshot(snapshot.snapshot, exampleIndex),
         environment: resolvedEnvironment,
         ...(input.executorKey ? { executorKey: input.executorKey } : {}),
       });
@@ -259,7 +325,19 @@ export function createAutomationApplication({
 }
 
 // prettier-ignore
-const ARTIFACT_FIELDS = ['id', 'executionId', 'projectId', 'attempt', 'kind', 'storageKey', 'mimeType', 'size', 'sha256', 'expiresAt'];
+const ARTIFACT_FIELDS = [
+  'id',
+  'executionId',
+  'projectId',
+  'attempt',
+  'kind',
+  'filename',
+  'storageKey',
+  'mimeType',
+  'size',
+  'sha256',
+  'expiresAt',
+];
 function safeArtifact(value: unknown): Record<string, unknown> {
   const source = value as Record<string, unknown>;
   // prettier-ignore

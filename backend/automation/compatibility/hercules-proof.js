@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { create } from 'xmlbuilder2';
 import {
   HERCULES_CONTRACT,
   HERCULES_LLM_ENV_NAMES,
@@ -13,6 +14,7 @@ export const HERCULES_PROOF_SOURCE = 'unittcms-hercules-proof/v1';
 
 const JUNIT_FILE_PATTERN = /^output\/(?:[^/\\]+\.xml|(?:run_[^/\\]+\/)+[^/\\]+\.xml)$/i;
 const URL_PATTERN = /\b[a-z][a-z\d+.-]*:(?:\/\/)?[^\s"')]+/gi;
+const RECORD_VIDEO_ARG_PATTERN = /^RECORD_VIDEO=(true|false)$/;
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -26,6 +28,78 @@ function parseJunitArguments(first, second) {
   return { exitCode: second, xml: first };
 }
 
+function nonNegativeCount(element, attribute) {
+  const value = element.getAttribute(attribute);
+  if (value === null || !/^\d+$/.test(value.trim())) return null;
+  const count = Number(value);
+  return Number.isSafeInteger(count) ? count : null;
+}
+
+function optionalNonNegativeCount(element, attribute) {
+  return element.getAttribute(attribute) === null ? 0 : nonNegativeCount(element, attribute);
+}
+
+function junitElements(root) {
+  const elements = [];
+  const visit = (element) => {
+    elements.push(element);
+    for (const child of Array.from(element.childNodes)) {
+      if (child.nodeType === 1) visit(child);
+    }
+  };
+  visit(root);
+  return elements;
+}
+
+function inspectCanonicalJUnit(xml) {
+  if (!isNonEmptyString(xml) || /<!DOCTYPE\b/i.test(xml)) return null;
+
+  try {
+    const document = create(xml).node;
+    const root = document.documentElement;
+    if (!root) return null;
+
+    const rootName = root.localName.toLowerCase();
+    if (rootName !== 'testsuite' && rootName !== 'testsuites') return null;
+
+    const elements = junitElements(root);
+    const suites = elements.filter((element) => element.localName.toLowerCase() === 'testsuite');
+    const testcases = elements.filter((element) => element.localName.toLowerCase() === 'testcase');
+    if (suites.length === 0 || testcases.length === 0) return null;
+    if (testcases.some((testcase) => testcase.parentElement?.localName.toLowerCase() !== 'testsuite')) return null;
+
+    const rootTests = rootName === 'testsuite' ? nonNegativeCount(root, 'tests') : optionalNonNegativeCount(root, 'tests');
+    const rootFailures =
+      rootName === 'testsuite' ? nonNegativeCount(root, 'failures') : optionalNonNegativeCount(root, 'failures');
+    const rootErrors = rootName === 'testsuite' ? nonNegativeCount(root, 'errors') : optionalNonNegativeCount(root, 'errors');
+    if (rootTests === null || rootFailures === null || rootErrors === null) return null;
+
+    const suiteCounts = suites.map((suite) => ({
+      tests: nonNegativeCount(suite, 'tests'),
+      failures: nonNegativeCount(suite, 'failures'),
+      errors: nonNegativeCount(suite, 'errors'),
+    }));
+    if (suiteCounts.some((counts) => Object.values(counts).some((count) => count === null))) return null;
+
+    const declaredSuiteTests = suiteCounts.reduce((total, counts) => total + counts.tests, 0);
+    if (declaredSuiteTests !== testcases.length || (root.getAttribute('tests') !== null && rootTests !== testcases.length))
+      return null;
+
+    return {
+      failures:
+        rootFailures + suiteCounts.reduce((total, counts) => total + counts.failures, 0) > 0 ||
+        elements.some((element) => element.localName.toLowerCase() === 'failure'),
+      errors:
+        rootErrors + suiteCounts.reduce((total, counts) => total + counts.errors, 0) > 0 ||
+        elements.some((element) => element.localName.toLowerCase() === 'error'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export { inspectCanonicalJUnit };
+
 /**
  * Parse a canonical JUnit document without treating an exit code alone as a pass.
  * The object-form input is useful at the process/evidence boundary; the positional
@@ -34,17 +108,9 @@ function parseJunitArguments(first, second) {
 export function parseCanonicalJUnit(first, second) {
   const { exitCode, xml } = parseJunitArguments(first, second);
   if (exitCode !== 0 || !isNonEmptyString(xml)) return null;
-  if (!/<testsuites?\b/i.test(xml)) return null;
 
-  const trimmed = xml.trim();
-  if (!/<\/testsuites?>\s*$/i.test(trimmed) && !/<testsuites?\b[^>]*\/>\s*$/i.test(trimmed)) return null;
-  const counts = { failures: [], errors: [] };
-  for (const match of xml.matchAll(/\b(failures|errors)\s*=\s*(['"])(\d+)\2/gi)) {
-    counts[match[1].toLowerCase()].push(Number(match[3]));
-  }
-  if (!counts.failures.length || !counts.errors.length) return null;
-  if (counts.failures.some((count) => count !== 0) || counts.errors.some((count) => count !== 0)) return null;
-  if (/<(?:failure|error)\b/i.test(xml)) return null;
+  const inspected = inspectCanonicalJUnit(xml);
+  if (!inspected || inspected.failures || inspected.errors) return null;
 
   return { exitCode: 0, result: 'passed' };
 }
@@ -63,8 +129,29 @@ function expectedContractArgv(includeApiKey) {
   return args;
 }
 
-function hasFixedInvocationArgs(argv, includeApiKey = true) {
-  return expectedContractArgv(includeApiKey).every((value, index) => argv[index] === value);
+function hasFixedInvocationArgs(argv, includeApiKey = true, runtimeEnv = {}) {
+  const expected = expectedContractArgv(includeApiKey);
+  const recordVideoIndex = expected.indexOf('RECORD_VIDEO=false');
+  if (recordVideoIndex < 0) return false;
+
+  const observedRecordVideo = argv[recordVideoIndex];
+  const recordVideoMatch =
+    typeof observedRecordVideo === 'string' ? RECORD_VIDEO_ARG_PATTERN.exec(observedRecordVideo) : null;
+  if (!recordVideoMatch) return false;
+
+  const recordVideoArgs = argv.flatMap((value, index) => {
+    const next = value === '--env' ? argv[index + 1] : undefined;
+    return typeof next === 'string' && (next === 'RECORD_VIDEO' || next.startsWith('RECORD_VIDEO=')) ? [next] : [];
+  });
+  if (recordVideoArgs.length !== 1 || recordVideoArgs[0] !== observedRecordVideo) return false;
+
+  if (
+    Object.prototype.hasOwnProperty.call(runtimeEnv, 'RECORD_VIDEO') &&
+    runtimeEnv.RECORD_VIDEO !== recordVideoMatch[1]
+  )
+    return false;
+
+  return expected.every((value, index) => index === recordVideoIndex || argv[index] === value);
 }
 
 function hasInvocationEnv(argv, name, expectedValue) {
@@ -184,7 +271,7 @@ export function buildCompatibilityProof(context = {}) {
   const argv = invocationArgv(context);
   const runtimeEnv = context.runtimeEnv ?? {};
   const keyless = keylessOllama(runtimeEnv);
-  const fixedArgsVerified = hasFixedInvocationArgs(argv, !keyless);
+  const fixedArgsVerified = hasFixedInvocationArgs(argv, !keyless, runtimeEnv);
   const browserArgsVerified =
     fixedArgsVerified &&
     hasInvocationEnv(argv, 'HEADLESS', 'true') &&

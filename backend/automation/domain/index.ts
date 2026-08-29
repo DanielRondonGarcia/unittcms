@@ -85,11 +85,15 @@ function normalizeExamples(value: unknown): { examples: GherkinExamples | null; 
   const headers = source.headers;
   const rows = source.rows;
   const errors: FieldError[] = [];
+  const normalizedHeaders =
+    Array.isArray(headers) && headers.every((header): header is string => typeof header === 'string')
+      ? headers.map((header) => header.trim())
+      : [];
   if (!Array.isArray(headers) || headers.length === 0 || headers.some((header) => typeof header !== 'string')) {
     errors.push(field('gherkinExamples.headers', 'invalid', 'examples need one or more string headers'));
-  } else if (headers.some((header) => header.trim() === '')) {
+  } else if (normalizedHeaders.some((header) => header === '')) {
     errors.push(field('gherkinExamples.headers', 'invalid', 'example headers cannot be empty'));
-  } else if (new Set(headers).size !== headers.length) {
+  } else if (new Set(normalizedHeaders).size !== normalizedHeaders.length) {
     errors.push(field('gherkinExamples.headers', 'invalid', 'example headers must be unique'));
   }
 
@@ -108,7 +112,7 @@ function normalizeExamples(value: unknown): { examples: GherkinExamples | null; 
   if (errors.length) return { examples: null, errors };
   return {
     examples: {
-      headers: [...(headers as string[])],
+      headers: normalizedHeaders,
       rows: (rows as string[][]).map((row) => [...row]),
     },
     errors: [],
@@ -243,6 +247,25 @@ export function presentSnapshot(
   return lines.join('\n');
 }
 
+export function presentExampleSnapshot(snapshot: CanonicalSnapshot, exampleIndex: number): string {
+  const examples = snapshot.examples;
+  if (!examples || !Number.isInteger(exampleIndex) || exampleIndex < 0 || exampleIndex >= examples.rows.length) {
+    throw new Error('example_index_invalid');
+  }
+
+  const values = new Map(examples.headers.map((header, index) => [header.trim(), examples.rows[exampleIndex][index]]));
+  const substitute = (text: string) =>
+    text.replace(/<([^>]+)>/g, (placeholder, header: string) => values.get(header.trim()) ?? placeholder);
+  const line = ({ keyword, text }: CanonicalStep) =>
+    `    ${keyword[0].toUpperCase()}${keyword.slice(1)} ${substitute(text)}`;
+  const backgroundSteps = snapshot.steps.filter((step) => step.section === 'background');
+  const scenarioSteps = snapshot.steps.filter((step) => step.section === 'scenario');
+  const lines = [`Feature: ${snapshot.title}`, ''];
+  if (backgroundSteps.length > 0) lines.push('  Background:', ...backgroundSteps.map(line), '');
+  lines.push('  Scenario: ' + snapshot.title, ...scenarioSteps.map(line), '');
+  return lines.join('\n');
+}
+
 type ExecutionRecord = {
   id: string;
   status: ExecutionState;
@@ -251,8 +274,10 @@ type ExecutionRecord = {
   startedAt?: string;
   finishedAt?: string;
   durationMs?: number;
-  errorKind?: 'technical' | 'functional' | 'cancelled';
+  errorKind?: ExecutorErrorKind;
 };
+
+export type ExecutorErrorKind = 'technical' | 'functional' | 'cancelled' | 'evidence';
 
 const transitions: Record<ExecutionState, readonly ExecutionState[]> = {
   queued: ['running', 'error', 'cancelled'],
@@ -298,7 +323,12 @@ export type ExecutorOutcome =
   | 'abandoned'
   | 'cancelled';
 
-export function mapExecutorResult(result: { outcome: ExecutorOutcome; summary?: string; error?: string }) {
+export function mapExecutorResult(result: {
+  outcome: ExecutorOutcome;
+  summary?: string;
+  error?: string;
+  errorKind?: ExecutorErrorKind;
+}) {
   const status: ExecutionState =
     result.outcome === 'passed'
       ? 'passed'
@@ -312,12 +342,13 @@ export function mapExecutorResult(result: { outcome: ExecutorOutcome; summary?: 
     summary: result.summary,
     error: result.error,
     errorKind:
-      status === 'failed'
+      result.errorKind ??
+      (status === 'failed'
         ? 'functional'
         : status === 'cancelled'
           ? 'cancelled'
           : status === 'error'
             ? 'technical'
-            : undefined,
+            : undefined),
   };
 }

@@ -23,6 +23,16 @@ const sampleTestCase: CaseType = {
   folderId: 1,
 };
 
+function getFirstRunCase(testCase: CaseType) {
+  const runCase = testCase.RunCases?.[0];
+
+  if (!runCase) {
+    assert.fail("RunCases isn't exist");
+  }
+
+  return runCase;
+}
+
 const initialTestCases: CaseType[] = [
   {
     ...sampleTestCase,
@@ -34,6 +44,7 @@ const initialTestCases: CaseType[] = [
         caseId: 1,
         status: 0,
         editState: 'notChanged',
+        assigneeUserId: null,
       },
     ],
   },
@@ -47,6 +58,7 @@ const initialTestCases: CaseType[] = [
         caseId: 2,
         status: 0,
         editState: 'notChanged',
+        assigneeUserId: null,
       },
     ],
   },
@@ -60,6 +72,7 @@ const initialTestCases: CaseType[] = [
         caseId: 3,
         status: 0,
         editState: 'new',
+        assigneeUserId: null,
       },
     ],
   },
@@ -73,6 +86,7 @@ const initialTestCases: CaseType[] = [
         caseId: 4,
         status: 0,
         editState: 'deleted',
+        assigneeUserId: null,
       },
     ],
   },
@@ -189,7 +203,7 @@ describe('runsControl', () => {
   test('distinguishes included RunCases from deleted or unsaved memberships', () => {
     const included = {
       ...initialTestCases[0],
-      RunCases: [{ ...initialTestCases[0].RunCases![0], editState: 'notChanged' as const }],
+      RunCases: [{ ...getFirstRunCase(initialTestCases[0]), editState: 'notChanged' as const }],
     };
     expect(isRunCaseIncluded(included)).toBe(true);
     expect(isRunCaseIncluded(initialTestCases[3])).toBe(false);
@@ -203,17 +217,17 @@ describe('runsControl', () => {
     const currentCases = [
       {
         ...initialTestCases[0],
-        RunCases: [{ ...initialTestCases[0].RunCases![0], editState: 'changed' as const }],
+        RunCases: [{ ...getFirstRunCase(initialTestCases[0]), editState: 'changed' as const }],
       },
       {
         ...initialTestCases[1],
-        RunCases: [{ ...initialTestCases[1].RunCases![0], editState: 'changed' as const }],
+        RunCases: [{ ...getFirstRunCase(initialTestCases[1]), editState: 'changed' as const }],
       },
     ];
     const filteredChanges = [
       {
         ...currentCases[0],
-        RunCases: [{ ...currentCases[0].RunCases![0], editState: 'deleted' as const }],
+        RunCases: [{ ...getFirstRunCase(currentCases[0]), editState: 'deleted' as const }],
       },
     ];
 

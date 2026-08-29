@@ -95,7 +95,7 @@ export default function ScenarioExamplesEditor({ value, isDisabled, messages, on
         <p className="rounded-md border border-dashed p-3 text-sm text-default-500">{messages.noExamples}</p>
       ) : (
         <div className="min-w-0 overflow-x-auto">
-          <table className="min-w-max border-collapse text-sm" aria-label={messages.examples}>
+          <table className="w-full min-w-max border-collapse text-sm" aria-label={messages.examples}>
             <thead>
               <tr className="border-b">
                 {value.headers.map((header, columnIndex) => (

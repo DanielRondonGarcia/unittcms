@@ -7,12 +7,15 @@ import {
   collectCompatibilityEvidence,
   collectExecutionArtifacts,
   HERCULES_CONTRACT,
+  normalizeEnvironmentTarget,
+  normalizeHostList,
   validateHostAllowlist,
   runHerculesProcess,
   validateCanonicalFeature,
   resolveHerculesImage,
   resolveHerculesVolume,
 } from '../compatibility/hercules.js';
+import { inspectCanonicalJUnit } from '../compatibility/hercules-proof.js';
 import type {
   AutomationExecutor,
   ExecutorHealth,
@@ -72,17 +75,6 @@ function safeEnvironment(llmConfig: WorkerLlmConfig): Record<string, string> {
 const URL_PATTERN = /\b[a-z][a-z\d+.-]*:(?:\/\/)?[^\s"')]+/gi;
 const FEATURE_TARGET_PLACEHOLDER_HOSTS = new Set(['example.com', 'example.test']);
 
-function normalizedHosts(values: unknown): string[] {
-  if (!Array.isArray(values)) return [];
-  return [
-    ...new Set(
-      values
-        .filter((value): value is string => typeof value === 'string')
-        .map((value) => value.trim().toLowerCase().replace(/\.$/, ''))
-    ),
-  ].filter(Boolean);
-}
-
 function bindUrl(baseUrl: URL, sourceUrl: URL): string {
   const basePath = baseUrl.pathname.replace(/^\/+|\/+$/g, '');
   const sourcePath = sourceUrl.pathname.replace(/^\/+|\/+$/g, '');
@@ -94,27 +86,44 @@ function bindUrl(baseUrl: URL, sourceUrl: URL): string {
   return baseUrl.toString();
 }
 
+function injectInitialTarget(feature: string, baseUrl: string): string {
+  const scenarioHeader = /(^[ \t]*Scenario(?: Outline)?:[^\r\n]*)(\r?\n)/m.exec(feature);
+  if (!scenarioHeader || scenarioHeader.index === undefined) return feature;
+  const insertionPoint = scenarioHeader.index + scenarioHeader[0].length;
+  return `${feature.slice(0, insertionPoint)}    Given I open the page "${baseUrl}"${scenarioHeader[2]}${feature.slice(
+    insertionPoint
+  )}`;
+}
+
 export function bindEnvironmentTarget(feature: string, environment?: ResolvedEnvironment): BoundHerculesTarget {
   if (!environment || typeof environment.baseUrl !== 'string') throw new Error('environment_required');
+
+  const configuredHosts = normalizeHostList(environment.allowedHosts);
+  const normalizedBase = normalizeEnvironmentTarget(environment.baseUrl);
+  const environmentHost = normalizedBase.allowedHosts[0];
+  if (!configuredHosts.length || !configuredHosts.includes(environmentHost))
+    throw new Error('environment_target_rejected');
+
+  const target = normalizeEnvironmentTarget(environment.baseUrl, configuredHosts);
   let baseUrl: URL;
   try {
-    baseUrl = new URL(environment.baseUrl);
+    baseUrl = new URL(target.baseUrl);
   } catch {
     throw new Error('environment_url_invalid');
   }
-  const allowedHosts = normalizedHosts(environment.allowedHosts);
-  if (!allowedHosts.length || !['http:', 'https:'].includes(baseUrl.protocol) || baseUrl.username || baseUrl.password)
-    throw new Error('environment_target_rejected');
-  if (!validateHostAllowlist([baseUrl.toString()], allowedHosts).allowed)
-    throw new Error('environment_target_rejected');
-
+  const allowedHosts = target.allowedHosts;
   const urls = [...feature.matchAll(URL_PATTERN)].map(([value]) => value);
   const unsafeCaseUrls = urls.filter((value) => {
     try {
       const source = new URL(value);
+      const sourceHost = normalizeHostList([source.hostname])[0];
+      const placeholder = FEATURE_TARGET_PLACEHOLDER_HOSTS.has(sourceHost);
       return (
         !['http:', 'https:'].includes(source.protocol) ||
-        !FEATURE_TARGET_PLACEHOLDER_HOSTS.has(source.hostname.toLowerCase())
+        source.username ||
+        source.password ||
+        (!placeholder && !allowedHosts.includes(sourceHost)) ||
+        !validateHostAllowlist([value], placeholder ? [sourceHost] : allowedHosts).allowed
       );
     } catch {
       return true;
@@ -122,14 +131,20 @@ export function bindEnvironmentTarget(feature: string, environment?: ResolvedEnv
   });
   if (unsafeCaseUrls.length > 0) throw new Error('environment_target_rejected');
 
+  const boundFeature = feature.replace(URL_PATTERN, (value) => {
+    try {
+      const source = new URL(value);
+      const sourceHost = normalizeHostList([source.hostname])[0];
+      if (FEATURE_TARGET_PLACEHOLDER_HOSTS.has(sourceHost) || sourceHost === environmentHost)
+        return bindUrl(new URL(baseUrl.toString()), source);
+      return source.toString();
+    } catch {
+      return value;
+    }
+  });
+
   return Object.freeze({
-    feature: feature.replace(URL_PATTERN, (value) => {
-      try {
-        return bindUrl(new URL(baseUrl.toString()), new URL(value));
-      } catch {
-        return value;
-      }
-    }),
+    feature: urls.length > 0 ? boundFeature : injectInitialTarget(feature, baseUrl.toString()),
     baseUrl: baseUrl.toString(),
     allowedHosts,
   });
@@ -161,18 +176,43 @@ const defaultProcessRunner: HerculesProcessRunner = (invocation, options) =>
     },
   });
 
-function junitFlags(
-  workdir: string,
-  evidence = collectCompatibilityEvidence(workdir)
-): { failures: boolean; errors: boolean; safe: boolean } {
-  const file = evidence.files.find((value: string) => /^output\/[^/]+\.xml$/i.test(value));
-  const safe = evidence.executionSafe ?? evidence.secretFree;
-  if (!file) return { failures: false, errors: false, safe };
-  const text = readFileSync(join(workdir, file), 'utf8');
+const JUNIT_FILE_PATTERN = /^output\/(?:[^/\\]+\.xml|(?:run_[^/\\]+\/)+[^/\\]+\.xml)$/i;
+
+type JunitFlags = {
+  failures: boolean;
+  errors: boolean;
+  safe: boolean;
+  valid: boolean;
+  missing: boolean;
+};
+
+function junitDocumentFlags(text: string): { failures: boolean; errors: boolean; valid: boolean } {
+  const inspected = inspectCanonicalJUnit(text);
   return {
-    failures: /<failure\b/i.test(text) || /failures\s*=\s*["'][1-9]\d*/i.test(text),
-    errors: /<error\b/i.test(text) || /errors\s*=\s*["'][1-9]\d*/i.test(text),
+    failures: inspected?.failures ?? false,
+    errors: inspected?.errors ?? false,
+    valid: inspected !== null,
+  };
+}
+
+function junitFlags(workdir: string, evidence = collectCompatibilityEvidence(workdir)): JunitFlags {
+  const files = evidence.files.filter((value: string) => JUNIT_FILE_PATTERN.test(value));
+  const safe = evidence.executionSafe ?? evidence.secretFree;
+  if (files.length === 0) return { failures: false, errors: false, safe, valid: false, missing: true };
+
+  const documents = files.map((file: string) => {
+    try {
+      return junitDocumentFlags(readFileSync(join(workdir, file), 'utf8'));
+    } catch {
+      return { failures: false, errors: false, valid: false };
+    }
+  });
+  return {
+    failures: documents.some((document) => document.failures),
+    errors: documents.some((document) => document.errors),
     safe,
+    valid: documents.every((document) => document.valid),
+    missing: false,
   };
 }
 
@@ -185,7 +225,11 @@ function mapProcessResult(
   if (cancelled) return { outcome: 'cancelled', error: 'hercules_cancelled' };
   if (result.timedOut) return { outcome: 'timeout', error: 'hercules_timeout' };
   const junit = junitFlags(workdir, evidence);
-  if (!junit.safe) return { outcome: 'technical_error', error: 'evidence_secret_detected' };
+  if (!junit.safe) return { outcome: 'technical_error', error: 'evidence_secret_detected', errorKind: 'evidence' };
+  if (result.exitCode === 0 && junit.missing)
+    return { outcome: 'technical_error', error: 'evidence_junit_missing', errorKind: 'evidence' };
+  if (result.exitCode === 0 && !junit.valid)
+    return { outcome: 'technical_error', error: 'evidence_junit_invalid', errorKind: 'evidence' };
   if (junit.errors) return { outcome: 'technical_error', error: 'hercules_result_error' };
   if (result.exitCode === 0) return { outcome: junit.failures ? 'functional_failure' : 'passed' };
   if (result.exitCode === 1) return { outcome: 'functional_failure' };
@@ -215,6 +259,7 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
 
   async execute(input: ExecutorInvocation): Promise<ExecutorResult> {
     const feature = typeof input.snapshot === 'string' ? input.snapshot : input.snapshot.feature;
+    const captureVideo = input.environment?.captureVideo === true;
     if (!validateCanonicalFeature(feature).valid)
       return { outcome: 'technical_error', error: 'invalid_canonical_feature' };
     let target: BoundHerculesTarget;
@@ -249,12 +294,13 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
             this.environment.LLM_MODEL_API_TYPE !== 'ollama' ||
             Object.prototype.hasOwnProperty.call(this.environment, 'LLM_MODEL_API_KEY'),
           volumeRoot: this.workdir,
+          captureVideo,
         }),
         {
           env: Object.freeze({
             ...this.environment,
             ...buildHerculesPathEnvironment(workspace, this.workVolume, this.workdir),
-            RECORD_VIDEO: input.environment?.captureVideo === true ? 'true' : 'false',
+            RECORD_VIDEO: captureVideo ? 'true' : 'false',
             HERCULES_BASE_URL: target.baseUrl,
             HERCULES_ALLOWED_HOSTS: target.allowedHosts.join(','),
           }),
@@ -262,7 +308,7 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
           registerCancellation,
         }
       );
-      const allowLargeVideos = input.environment?.captureVideo === true;
+      const allowLargeVideos = captureVideo;
       const secretValues = this.environment.LLM_MODEL_API_KEY ? [this.environment.LLM_MODEL_API_KEY] : [];
       const evidence = collectCompatibilityEvidence(workspace, { allowLargeVideos, secretValues });
       const mapped = mapProcessResult(result, workspace, run.cancelled, evidence);

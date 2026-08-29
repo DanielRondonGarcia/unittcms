@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { mapExecutorResult, transitionExecution } from './domain/index.js';
-import type { ExecutorOutcome } from './domain/index.js';
+import type { ExecutorErrorKind, ExecutorOutcome } from './domain/index.js';
 /* prettier-ignore */
 import { RUN_CASE_STATUS } from './ports/index.js';
 /* prettier-ignore */
@@ -229,6 +229,7 @@ function resultEvent(
     outcome: outcome.outcome,
     ...(outcome.summary !== undefined ? { summary: outcome.summary } : {}),
     ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+    ...(outcome.errorKind !== undefined ? { errorKind: outcome.errorKind } : {}),
   };
 }
 
@@ -244,12 +245,21 @@ export class BullMqExecutionQueue implements ExecutionQueue {
 }
 
 /* prettier-ignore */
-type WorkerEventBase = { executionId: string; attempt: number; correlationId: string; jobId: string; error?: string; errorCategory?: string; recoverable?: boolean };
+type WorkerEventBase = {
+  executionId: string;
+  attempt: number;
+  correlationId: string;
+  jobId: string;
+  error?: string;
+  errorKind?: ExecutorErrorKind;
+  errorCategory?: string;
+  recoverable?: boolean;
+};
 /* prettier-ignore */
 export type WorkerEvent = WorkerEventBase & ({ phase: 'running' } | { phase: 'result'; outcome: ExecutorOutcome; summary?: string });
 export type SignedWorkerEvent = WorkerEvent & { signature: string };
 /* prettier-ignore */
-function payload(event: WorkerEvent): string { return JSON.stringify([event.phase, event.executionId, event.attempt, event.correlationId, event.jobId, 'outcome' in event ? event.outcome : undefined, 'summary' in event ? event.summary : undefined, event.error, event.errorCategory, event.recoverable]); }
+function payload(event: WorkerEvent): string { return JSON.stringify([event.phase, event.executionId, event.attempt, event.correlationId, event.jobId, 'outcome' in event ? event.outcome : undefined, 'summary' in event ? event.summary : undefined, event.error, event.errorKind, event.errorCategory, event.recoverable]); }
 /* prettier-ignore */
 export function signWorkerEvent(event: WorkerEvent, secret: string): SignedWorkerEvent { if (!secret) throw new WorkerBoundaryError('worker_secret_required'); return { ...event, signature: createHmac('sha256', secret).update(payload(event)).digest('hex') }; }
 /* prettier-ignore */
@@ -279,9 +289,16 @@ export class WorkerResultUpdater {
     if (shouldRetry(event) && event.attempt < MAX_ATTEMPTS) Object.assign(patch, { status: 'queued', attempt: event.attempt + 1, queuedAt: new Date().toISOString(), startedAt: undefined, finishedAt: undefined, durationMs: undefined, lastAttemptStatus: mapped.status });
     const runCaseId = Number(current.runCaseId);
     const projectId = Number(current.projectId);
+    const updated = await this.store.updateExecution(event.executionId, patch);
+    const runCaseStatus =
+      mapped.errorKind === 'evidence'
+        ? RUN_CASE_STATUS.failed
+        : mapped.status === 'passed' || mapped.status === 'failed'
+          ? RUN_CASE_STATUS[mapped.status]
+          : undefined;
     if (
       this.runCaseStatusUpdater &&
-      (mapped.status === 'passed' || mapped.status === 'failed') &&
+      runCaseStatus !== undefined &&
       Number.isInteger(runCaseId) &&
       runCaseId > 0 &&
       Number.isInteger(projectId) &&
@@ -290,13 +307,13 @@ export class WorkerResultUpdater {
       await this.runCaseStatusUpdater({
         runCaseId,
         projectId,
-        status: RUN_CASE_STATUS[mapped.status],
+        status: runCaseStatus,
         executionId: current.id,
         attempt: event.attempt,
         correlationId: String(current.correlationId),
       });
     }
-    return this.store.updateExecution(event.executionId, patch);
+    return updated;
   }
 }
 

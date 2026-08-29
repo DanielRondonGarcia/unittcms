@@ -1,4 +1,10 @@
-import type { CanonicalSnapshot, CaseSource, ExecutionState, ExecutorOutcome } from '../domain/index.js';
+import type {
+  CanonicalSnapshot,
+  CaseSource,
+  ExecutionState,
+  ExecutorErrorKind,
+  ExecutorOutcome,
+} from '../domain/index.js';
 
 export type ResolvedEnvironment = {
   baseUrl: string;
@@ -26,6 +32,7 @@ export type ExecutorResult = {
   outcome: ExecutorOutcome;
   summary?: string;
   error?: string;
+  errorKind?: ExecutorErrorKind;
   artifacts?: ExecutorArtifact[];
 };
 export type ExecutorHealth = { key?: string; ready: boolean; status: string };
@@ -83,6 +90,7 @@ export type StoredExecution = {
   id: string;
   projectId: number;
   caseId: number;
+  exampleIndex?: number | null;
   status: ExecutionState;
   attempt: number;
   idempotencyKey?: string;
@@ -106,6 +114,7 @@ export interface AutomationStore {
   findCase(caseId: number): Promise<CaseSource | null>;
   canAccessProject(userId: number, projectId: number): Promise<boolean>;
   findExecutionByIdempotencyKey(input: { projectId: number; idempotencyKey: string }): Promise<StoredExecution | null>;
+  findActiveExecution?(input: { runCaseId: number; exampleIndex: number | null }): Promise<StoredExecution | null>;
   createDefinition(value: Record<string, unknown>): Promise<Record<string, unknown>>;
   createExecution(value: Record<string, unknown>): Promise<StoredExecution>;
   createArtifact(value: Record<string, unknown>): Promise<Record<string, unknown>>;

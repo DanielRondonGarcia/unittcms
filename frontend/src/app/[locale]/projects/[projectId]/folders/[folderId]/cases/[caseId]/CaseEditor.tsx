@@ -5,7 +5,6 @@ import { Save, Plus, ArrowLeft, Circle } from 'lucide-react';
 import CaseStepsEditor from './CaseStepsEditor';
 import ScenarioExamplesEditor from './ScenarioExamplesEditor';
 import CaseAttachmentsEditor from './CaseAttachmentsEditor';
-import { updateSteps } from './stepControl';
 import { fetchCreateAttachments, fetchDownloadAttachment, fetchDeleteAttachment } from './attachmentControl';
 import CaseTagsEditor from './CaseTagsEditor';
 import {
@@ -15,6 +14,7 @@ import {
   normalizeGherkinCaseSteps,
   validateGherkinCase,
   updateCase,
+  CaseRequestError,
 } from '@/utils/caseControl';
 import { gherkinTemplate, priorities, testTypes, templates } from '@/config/selection';
 import { useRouter } from '@/src/i18n/routing';
@@ -81,6 +81,11 @@ function describeGherkinIssue(issue: GherkinValidationIssue, messages: CaseMessa
                         ? messages.gherkinValidationDetailsKeyword
                         : messages.gherkinValidationExamples;
   return `${location}: ${reason}`;
+}
+
+function describeCaseSaveError(error: unknown, fallback: string): string {
+  if (!(error instanceof CaseRequestError) || error.fields.length === 0) return fallback;
+  return error.fields.map(({ field, code, message }) => `${field} [${code}]: ${message}`).join(' ');
 }
 
 type Props = {
@@ -369,9 +374,6 @@ export default function CaseEditor({
               setIsUpdating(true);
               try {
                 await updateCase(tokenContext.token.access_token, testCase);
-                if (testCase.Steps) {
-                  await updateSteps(tokenContext.token.access_token, Number(caseId), testCase.Steps);
-                }
 
                 const tagIds = selectedTags.map((tag) => tag.id);
                 await updateCaseTags(tokenContext.token.access_token, Number(caseId), tagIds, projectId);
@@ -386,7 +388,7 @@ export default function CaseEditor({
                 logError('Error updating test case', error);
                 addToast({
                   title: messages.errorTitle,
-                  description: messages.errorUpdatingTestCase,
+                  description: describeCaseSaveError(error, messages.errorUpdatingTestCase),
                   color: 'danger',
                 });
               } finally {

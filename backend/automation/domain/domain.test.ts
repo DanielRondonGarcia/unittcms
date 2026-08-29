@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   composeCanonicalSnapshot,
   mapExecutorResult,
+  presentExampleSnapshot,
   presentSnapshot,
   prepareRetry,
   transitionExecution,
@@ -132,6 +133,68 @@ describe('automation domain', () => {
       headers: ['user|name', 'note'],
       rows: [['Ada', 'line one\nline two | ok']],
     });
+  });
+
+  it('materializes one row as an independent Scenario without leaking the Examples table', () => {
+    const result = composeCanonicalSnapshot({
+      ...source,
+      gherkinExamples: {
+        headers: [' user ', ' role '],
+        rows: [
+          ['Ada', 'admin'],
+          ['Lin', 'viewer'],
+        ],
+      },
+      Steps: [
+        { id: 1, step: '< user > exists', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 2, step: '<user> has the < role > role', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 3, step: 'the dashboard is shown', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ],
+    });
+
+    if (!result.ok) throw new Error('expected valid source');
+    expect(result.snapshot.examples).toEqual({
+      headers: ['user', 'role'],
+      rows: [
+        ['Ada', 'admin'],
+        ['Lin', 'viewer'],
+      ],
+    });
+    expect(presentExampleSnapshot(result.snapshot, 1)).toBe(
+      [
+        'Feature: Login',
+        '',
+        '  Scenario: Login',
+        '    Given Lin exists',
+        '    When Lin has the viewer role',
+        '    Then the dashboard is shown',
+        '',
+      ].join('\n')
+    );
+    expect(() => presentExampleSnapshot(result.snapshot, -1)).toThrow('example_index_invalid');
+    expect(() => presentExampleSnapshot(result.snapshot, 2)).toThrow('example_index_invalid');
+  });
+
+  it('rejects empty and duplicate example headers after trimming', () => {
+    const empty = composeCanonicalSnapshot({
+      ...source,
+      gherkinExamples: { headers: [' user ', '   '], rows: [['Ada', 'admin']] },
+    });
+    const duplicate = composeCanonicalSnapshot({
+      ...source,
+      gherkinExamples: { headers: [' user ', 'user'], rows: [['Ada', 'admin']] },
+    });
+
+    expect(empty.ok).toBe(false);
+    expect(duplicate.ok).toBe(false);
+    if (!empty.ok)
+      expect(empty.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'gherkinExamples.headers' })])
+      );
+    if (!duplicate.ok)
+      expect(duplicate.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'gherkinExamples.headers' })])
+      );
   });
 
   it('rejects unknown sections without producing a snapshot', () => {

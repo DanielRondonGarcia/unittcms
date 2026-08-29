@@ -1,12 +1,38 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
-import { Sequelize } from 'sequelize';
 import stepsEditRoute from '../steps/edit.js';
 import casesCloneRoute from './clone.js';
 import casesEditRoute from './edit.js';
 import casesNewRoute from './new.js';
 import casesShowRoute from './show.js';
+const mockLintGherkinFeature = vi.hoisted(() => vi.fn(async () => []));
+vi.mock('../../automation/domain/index.js', () => ({
+  composeCanonicalSnapshot: vi.fn(({ id, title, automationVersion, gherkinExamples, Steps }) => {
+    const examplesValid =
+      gherkinExamples === null ||
+      gherkinExamples === undefined ||
+      (Array.isArray(gherkinExamples.headers) &&
+        Array.isArray(gherkinExamples.rows) &&
+        gherkinExamples.rows.every((row) => Array.isArray(row) && row.length === gherkinExamples.headers.length));
+    if (!examplesValid) {
+      return { ok: false, errors: [{ field: 'gherkinExamples', code: 'invalid', message: 'invalid examples' }] };
+    }
+    return {
+      ok: true,
+      snapshot: {
+        caseId: Number(id),
+        title,
+        version: Number(automationVersion ?? 1),
+        feature: `Feature: ${title}\n\n  Scenario: ${title}\n${Steps.map((step) => `    ${step.caseSteps.keyword} ${step.step}`).join('\n')}\n`,
+        steps: Steps,
+        examples: gherkinExamples ?? null,
+        hash: 'test-hash',
+      },
+    };
+  }),
+}));
+vi.mock('../../automation/infrastructure/gherkin-lint.js', () => ({ lintGherkinFeature: mockLintGherkinFeature }));
 vi.mock('../../middleware/auth.js', () => ({
   default: () => ({
     verifySignedIn: (req, res, next) => next(),
@@ -52,13 +78,14 @@ vi.mock('../../models/attachments.js', () => ({ default: () => mockAttachment })
 const mockRunCase = { belongsTo: vi.fn() };
 vi.mock('../../models/runCases.js', () => ({ default: () => mockRunCase }));
 const transaction = { commit: vi.fn(), rollback: vi.fn() };
-const sequelize = new Sequelize({ dialect: 'sqlite', logging: false });
-sequelize.transaction = vi.fn(async (callback) => {
-  if (!callback) return transaction;
-  const result = await callback(transaction);
-  await transaction.commit();
-  return result;
-});
+const sequelize = {
+  transaction: vi.fn(async (callback) => {
+    if (!callback) return transaction;
+    const result = await callback(transaction);
+    await transaction.commit();
+    return result;
+  }),
+};
 const app = express();
 app.use(express.json());
 let nextStepId = 100;
@@ -71,8 +98,9 @@ beforeAll(() => {
 });
 beforeEach(() => {
   vi.clearAllMocks();
+  mockLintGherkinFeature.mockResolvedValue([]);
   nextStepId = 100;
-  mockCase.findByPk.mockResolvedValue({ id: 42, template: 1, update: vi.fn() });
+  mockCase.findByPk.mockResolvedValue({ id: 42, template: 1, title: 'Login', automationVersion: 1, update: vi.fn() });
   mockCase.create.mockResolvedValue({ id: 42, template: 2 });
   mockStep.create.mockImplementation(async (attributes) => ({ id: nextStepId++, ...attributes }));
   mockStep.bulkCreate.mockResolvedValue([{ id: 101 }, { id: 102 }]);
@@ -92,7 +120,7 @@ describe('Gherkin case persistence', () => {
     ]);
   });
   it('persists reordered and repeated keywords on save', async () => {
-    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
     const steps = [
       {
         id: 10,
@@ -142,7 +170,7 @@ describe('Gherkin case persistence', () => {
     expect(transaction.commit).toHaveBeenCalledOnce();
   });
   it('persists And and But as row keywords without changing their step text', async () => {
-    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
     const response = await request(app)
       .post('/steps/update?caseId=42')
       .send([
@@ -182,7 +210,7 @@ describe('Gherkin case persistence', () => {
     );
   });
   it('preserves background rows without discarding them', async () => {
-    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
     const response = await request(app)
       .post('/steps/update?caseId=42')
       .send([
@@ -219,7 +247,7 @@ describe('Gherkin case persistence', () => {
   });
   it('bumps the automation revision after saving gherkin steps', async () => {
     const update = vi.fn();
-    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, automationVersion: 4, update });
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 4, update });
     const response = await request(app)
       .post('/steps/update?caseId=42')
       .send([
@@ -232,15 +260,66 @@ describe('Gherkin case persistence', () => {
   });
   it('bumps the automation revision when a gherkin case changes', async () => {
     const update = vi.fn();
-    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, automationVersion: 2, update });
+    mockCase.findByPk.mockResolvedValue({
+      id: 42,
+      template: 2,
+      title: 'Login',
+      automationVersion: 2,
+      Steps: [
+        { id: 10, step: 'Given text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'When text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'Then text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ],
+      update,
+    });
     const response = await request(app).put('/cases/42').send({ title: 'Renamed', template: 2 });
 
     expect(response.status).toBe(200);
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ automationVersion: 3 }));
   });
+  it('updates case metadata and steps in the same transaction', async () => {
+    const update = vi.fn();
+    mockCase.findByPk.mockResolvedValue({
+      id: 42,
+      template: 2,
+      title: 'Login',
+      automationVersion: 1,
+      update,
+    });
+    const response = await request(app)
+      .put('/cases/42')
+      .send({
+        title: 'Renamed',
+        template: 2,
+        Steps: [
+          { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+          { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+          { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+        ],
+      });
+
+    expect(response.status).toBe(200);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ title: 'Renamed', automationVersion: 2 }), {
+      transaction,
+    });
+    expect(mockStep.update).toHaveBeenCalled();
+    expect(mockCaseStep.update).toHaveBeenCalled();
+    expect(transaction.commit).toHaveBeenCalledOnce();
+  });
   it('persists Scenario Outline examples and rejects incomplete tables', async () => {
     const update = vi.fn();
-    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, update });
+    mockCase.findByPk.mockResolvedValue({
+      id: 42,
+      template: 2,
+      title: 'Login',
+      automationVersion: 1,
+      Steps: [
+        { id: 10, step: 'Given text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'When text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'Then text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ],
+      update,
+    });
     const examples = { headers: ['user', 'role'], rows: [['Ada', 'admin']] };
 
     const saved = await request(app).put('/cases/42').send({ template: 2, gherkinExamples: examples });
@@ -248,7 +327,18 @@ describe('Gherkin case persistence', () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ gherkinExamples: examples, automationVersion: 2 }));
 
     vi.clearAllMocks();
-    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, update });
+    mockCase.findByPk.mockResolvedValue({
+      id: 42,
+      template: 2,
+      title: 'Login',
+      automationVersion: 1,
+      Steps: [
+        { id: 10, step: 'Given text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'When text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'Then text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ],
+      update,
+    });
     const invalid = await request(app)
       .put('/cases/42')
       .send({ template: 2, gherkinExamples: { headers: ['user', 'role'], rows: [['Ada']] } });
@@ -459,5 +549,68 @@ describe('Gherkin case persistence', () => {
       .send([{ id: 10, step: 'legacy', result: '', editState: 'new', caseSteps: { stepNo: 1 } }]);
     expect(response.status).toBe(200);
     expect(mockCaseStep.create.mock.calls[0][0]).toMatchObject({ keyword: null, section: 'scenario' });
+  });
+  it('returns structured server lint failures without opening a transaction', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
+    mockLintGherkinFeature.mockResolvedValue([
+      { line: 4, rule: 'no-trailing-spaces', message: 'Trailing spaces are not allowed' },
+    ]);
+
+    const response = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ]);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: 'Gherkin lint failed',
+      code: 'gherkin_lint_failed',
+      fields: [{ field: 'line 4', code: 'no-trailing-spaces', message: 'Trailing spaces are not allowed' }],
+    });
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+  });
+  it('returns service unavailable when server lint cannot run', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
+    mockLintGherkinFeature.mockRejectedValue(
+      Object.assign(new Error('module unavailable'), { code: 'gherkin_lint_unavailable' })
+    );
+
+    const response = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ]);
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ error: 'Gherkin lint is unavailable', code: 'gherkin_lint_unavailable' });
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+  });
+
+  it('returns parser failures as structured lint fields without opening a transaction', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
+    mockLintGherkinFeature.mockResolvedValue([
+      { line: 8, rule: 'unexpected-error', message: 'Expected a Scenario near the end' },
+    ]);
+
+    const response = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ]);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: 'Gherkin lint failed',
+      code: 'gherkin_lint_failed',
+      fields: [{ field: 'line 8', code: 'unexpected-error', message: 'Expected a Scenario near the end' }],
+    });
+    expect(sequelize.transaction).not.toHaveBeenCalled();
   });
 });

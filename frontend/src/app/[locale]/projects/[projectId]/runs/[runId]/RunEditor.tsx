@@ -341,7 +341,7 @@ export default function RunEditor({
   };
 
   return (
-    <div className="min-w-0 max-w-full overflow-x-hidden">
+    <div className="h-full min-h-0 min-w-0 max-w-full overflow-auto">
       <div className="flex w-full flex-wrap items-center justify-between gap-2 border-b-1 p-3 dark:border-neutral-700">
         <div className="flex min-w-0 items-center">
           <Tooltip content={messages.backToRuns}>

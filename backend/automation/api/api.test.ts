@@ -139,6 +139,109 @@ describe('automation API application boundary', () => {
     expect(data.findCase).toHaveBeenCalledWith(7);
   });
 
+  it('creates one queued execution for the selected Examples row and sends a row-only snapshot', async () => {
+    const data = store({
+      ...source,
+      gherkinExamples: { headers: ['user'], rows: [['Ada'], ['Lin']] },
+      Steps: [
+        { step: '<user> is signed out', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { step: '<user> opens the login form', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { step: '<user> sees the dashboard', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ],
+    });
+    const queue = { enqueue: vi.fn(async () => 'job-1'), cancel: vi.fn() };
+
+    const created = await makeApplication(data, queue).create({
+      userId: 1,
+      projectId: 10,
+      caseId: 7,
+      environmentId: 3,
+      exampleIndex: 1,
+      idempotencyKey: 'example-row-1',
+    });
+
+    expect(data.createExecution).toHaveBeenCalledWith(expect.objectContaining({ exampleIndex: 1 }));
+    expect(queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: expect.stringContaining('Given Lin is signed out'),
+      })
+    );
+    expect((queue.enqueue.mock.calls[0][0] as { snapshot: string }).snapshot).not.toContain('Examples:');
+    expect(created).toMatchObject({ exampleIndex: 1 });
+  });
+
+  it('requires a valid row index for Scenario Outline executions', async () => {
+    const data = store({
+      ...source,
+      gherkinExamples: { headers: ['user'], rows: [['Ada']] },
+    });
+    const queue = { enqueue: vi.fn(async () => 'job-1'), cancel: vi.fn() };
+    const app = makeApplication(data, queue);
+
+    await expect(
+      app.create({ userId: 1, projectId: 10, caseId: 7, environmentId: 3, idempotencyKey: 'missing-row' })
+    ).rejects.toMatchObject({ status: 400, code: 'example_index_required' });
+    await expect(
+      app.create({
+        userId: 1,
+        projectId: 10,
+        caseId: 7,
+        environmentId: 3,
+        exampleIndex: 1,
+        idempotencyKey: 'unknown-row',
+      })
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_example_index' });
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('rejects another active execution for the same RunCase and Example', async () => {
+    const data = store({
+      ...source,
+      gherkinExamples: { headers: ['user'], rows: [['Ada']] },
+      Steps: [
+        { step: '<user> is signed out', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { step: '<user> opens the login form', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { step: '<user> sees the dashboard', caseSteps: { stepNo: 3, keyword: 'then' } },
+      ],
+    });
+    const active = { id: 'active', status: 'running', runCaseId: 3, exampleIndex: 0 };
+    const findActiveExecution = vi.fn(async () => active);
+    Object.assign(data, { findActiveExecution });
+    const queue = { enqueue: vi.fn(async () => 'job-1'), cancel: vi.fn() };
+
+    await expect(
+      makeApplication(data, queue).create({
+        userId: 1,
+        projectId: 10,
+        caseId: 7,
+        runCaseId: 3,
+        exampleIndex: 0,
+        environmentId: 3,
+        idempotencyKey: 'another-example-run',
+      })
+    ).rejects.toMatchObject({ status: 409, code: 'automation_execution_active' });
+    expect(findActiveExecution).toHaveBeenCalledWith({ runCaseId: 3, exampleIndex: 0 });
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('rejects an example row on a regular Scenario', async () => {
+    const data = store();
+    const queue = { enqueue: vi.fn(async () => 'job-1'), cancel: vi.fn() };
+
+    await expect(
+      makeApplication(data, queue).create({
+        userId: 1,
+        projectId: 10,
+        caseId: 7,
+        environmentId: 3,
+        exampleIndex: 0,
+        idempotencyKey: 'unexpected-row',
+      })
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_example_index' });
+    expect(data.createDefinition).not.toHaveBeenCalled();
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
   it('rejects a RunCase that does not belong to the requested case and project', async () => {
     const data = store();
     data.findRunCase.mockResolvedValue({ id: 3, caseId: 99, runId: 20, projectId: 10 });

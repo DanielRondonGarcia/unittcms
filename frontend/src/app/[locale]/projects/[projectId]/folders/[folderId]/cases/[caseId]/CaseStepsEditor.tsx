@@ -29,8 +29,6 @@ export default function StepsEditor({
   const displaySteps = isGherkin ? normalizeGherkinCaseSteps(steps).steps : steps;
   const sortedSteps = displaySteps.slice().sort((a, b) => a.caseSteps.stepNo - b.caseSteps.stepNo);
   const activeSteps = sortedSteps.filter((entry) => entry.editState !== 'deleted');
-  const backgroundSteps = activeSteps.filter((step) => step.caseSteps.section === 'background');
-  const scenarioSteps = activeSteps.filter((step) => step.caseSteps.section !== 'background');
 
   const renderStep = (step: StepType, section?: GherkinSection) => {
     const keyword = step.caseSteps.keyword;
@@ -134,29 +132,9 @@ export default function StepsEditor({
   if (!isGherkin) return <>{activeSteps.map((step) => renderStep(step))}</>;
 
   const newStepNo = activeSteps.length + 1;
-  const newBackgroundStepNo =
-    backgroundSteps.length > 0 ? Math.max(...backgroundSteps.map((step) => step.caseSteps.stepNo)) + 1 : 1;
 
   return (
     <div className="space-y-4">
-      <section aria-labelledby="background-steps-heading">
-        <div className="mb-2 flex flex-wrap items-center gap-3">
-          <h6 id="background-steps-heading" className="font-bold">
-            {messages.background}
-          </h6>
-          <Button
-            startContent={<Plus size={16} aria-hidden="true" />}
-            aria-label={`${messages.newStep}: ${messages.background}`}
-            size="sm"
-            isDisabled={isDisabled}
-            color="primary"
-            onPress={() => onStepPlus(newBackgroundStepNo, 'background')}
-          >
-            {messages.newStep}
-          </Button>
-        </div>
-        {backgroundSteps.map((step) => renderStep(step, 'background'))}
-      </section>
       <section aria-labelledby="scenario-steps-heading">
         <div className="mb-2 flex flex-wrap items-center gap-3">
           <h6 id="scenario-steps-heading" className="font-bold">
@@ -173,10 +151,10 @@ export default function StepsEditor({
             {messages.newStep}
           </Button>
         </div>
-        {scenarioSteps.length === 0 ? (
+        {activeSteps.length === 0 ? (
           <p className="rounded-md border border-dashed p-4 text-sm text-default-500">{messages.noScenarioSteps}</p>
         ) : (
-          scenarioSteps.map((step) => renderStep(step, 'scenario'))
+          activeSteps.map((step) => renderStep(step, 'scenario'))
         )}
       </section>
     </div>

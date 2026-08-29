@@ -96,11 +96,11 @@ export default function TestCaseDetailPane({
     return <div>{messages.loading}</div>;
   } else {
     return (
-      <div className="flex h-full min-w-0 w-full max-w-full flex-col overflow-x-hidden p-3">
+      <div className="flex h-full min-h-0 min-w-0 w-full max-w-full flex-col overflow-auto p-3">
         <Tabs
           aria-label={messages.options}
           size="sm"
-          className="min-w-0 w-full max-w-full overflow-x-hidden"
+          className="min-w-0 w-full max-w-full shrink-0 overflow-x-auto"
           selectedKey={selectedTab}
           onSelectionChange={(key) => setSelectedTab(String(key))}
         >
@@ -119,6 +119,7 @@ export default function TestCaseDetailPane({
                 runId={runId}
                 caseId={caseId}
                 runCaseId={runCaseId}
+                examples={testCase.gherkinExamples}
                 locale={locale}
                 messages={messages}
               />
@@ -138,6 +139,7 @@ export default function TestCaseDetailPane({
               runId={runId}
               caseId={caseId}
               runCaseId={runCaseId}
+              examples={testCase.gherkinExamples}
               locale={locale}
               messages={messages}
             />

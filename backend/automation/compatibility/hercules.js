@@ -39,7 +39,7 @@ const FIXED_DOCKER_ARGS = [
   '--env',
   'BROWSER_TYPE=chromium',
   '--env',
-  'RECORD_VIDEO=true',
+  'RECORD_VIDEO=false',
   '--env',
   'TAKE_SCREENSHOTS=true',
   '--env',
@@ -49,9 +49,11 @@ const FIXED_DOCKER_ARGS = [
   ...HERCULES_PATH_ENV_NAMES.flatMap((name) => ['--env', name]),
 ];
 
-function dockerArgs(includeApiKey = true) {
-  if (includeApiKey) return FIXED_DOCKER_ARGS;
+function dockerArgs(includeApiKey = true, captureVideo = false) {
   const args = [...FIXED_DOCKER_ARGS];
+  const recordVideoIndex = args.indexOf('RECORD_VIDEO=false');
+  args[recordVideoIndex] = `RECORD_VIDEO=${captureVideo === true ? 'true' : 'false'}`;
+  if (includeApiKey) return args;
   const keyIndex = args.indexOf('LLM_MODEL_API_KEY');
   args.splice(keyIndex - 1, 2);
   return args;
@@ -100,6 +102,25 @@ const LOCAL_HOSTNAMES = new Set([
   'instance-data.ec2.internal',
   'host.docker.internal',
 ]);
+const HOST_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+const MAX_ALLOWED_HOSTS = 128;
+const MAX_HOST_LENGTH = 253;
+
+export function hasExplicitUrlPort(value) {
+  if (typeof value !== 'string') return false;
+  const candidate = value.trim();
+  const schemeEnd = candidate.indexOf('://');
+  const authorityStart = schemeEnd >= 0 ? schemeEnd + 3 : candidate.startsWith('//') ? 2 : -1;
+  if (authorityStart < 0) return false;
+  const authority = candidate.slice(authorityStart).split(/[/?#]/, 1)[0];
+  const hostPort = authority.slice(authority.lastIndexOf('@') + 1);
+  if (hostPort.startsWith('[')) {
+    const closingBracket = hostPort.indexOf(']');
+    return closingBracket >= 0 && hostPort.slice(closingBracket + 1).startsWith(':');
+  }
+  return hostPort.includes(':');
+}
+
 export const HERCULES_CONTRACT = Object.freeze({
   release: '0.1.2',
   image: HERCULES_IMAGE,
@@ -204,10 +225,10 @@ export function buildHerculesPathEnvironment(workdir, workVolume, volumeRoot) {
  * @param {string} workdir
  * @param {string | undefined} image
  * @param {string | undefined} workVolume
- * @param {{ includeApiKey?: boolean, volumeRoot?: string }} [options]
+ * @param {{ includeApiKey?: boolean, volumeRoot?: string, captureVideo?: boolean }} [options]
  */
 export function buildHerculesInvocation(workdir, image, workVolume, options = {}) {
-  const { includeApiKey = true, volumeRoot } = options;
+  const { includeApiKey = true, volumeRoot, captureVideo = false } = options;
   const cwd = resolve(workdir);
   if (/[\r\n,]/.test(cwd)) {
     throw new Error('compatibility workspace path contains unsafe mount characters');
@@ -221,7 +242,7 @@ export function buildHerculesInvocation(workdir, image, workVolume, options = {}
   return {
     file: 'docker',
     cwd,
-    argv: [...dockerArgs(includeApiKey), '--mount', mount, selectedImage],
+    argv: [...dockerArgs(includeApiKey, captureVideo), '--mount', mount, selectedImage],
   };
 }
 function defaultKillProcessGroup(pid, signal, platform, execFileImpl) {
@@ -318,7 +339,109 @@ function isUnsafeLiteralTarget(hostname) {
       (first === 192 && second === 168)
     );
   }
-  return family === 6 && /^(?:::|fc|fd|fe[89ab])/i.test(address);
+  return family === 6 && (/^(?:::|fc|fd|fe[89ab])/i.test(address) || /^::ffff:/i.test(address));
+}
+function isUnsafeHostname(hostname) {
+  return (
+    LOCAL_HOSTNAMES.has(hostname) ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname === 'internal' ||
+    hostname.endsWith('.internal')
+  );
+}
+function hostError(code) {
+  return new EnvironmentTargetError(code);
+}
+function normalizeExactHost(value) {
+  if (typeof value !== 'string') throw hostError('environment_host_invalid');
+  const candidate = value.trim();
+  if (
+    !candidate ||
+    candidate.length > MAX_HOST_LENGTH ||
+    hasControlCharacter(candidate) ||
+    /\s/.test(candidate) ||
+    candidate.includes('://') ||
+    /[/?#@*]/.test(candidate)
+  )
+    throw hostError('environment_host_invalid');
+
+  let host = candidate;
+  if (host.startsWith('[') || host.endsWith(']')) {
+    if (!host.startsWith('[') || !host.endsWith(']')) throw hostError('environment_host_invalid');
+    host = host.slice(1, -1);
+  }
+  host = host.replace(/\.$/, '').toLowerCase();
+  if (!host) throw hostError('environment_host_invalid');
+
+  const family = isIP(host);
+  if (family) {
+    if (isUnsafeLiteralTarget(host)) throw hostError('environment_host_unsafe');
+    if (family === 6) {
+      try {
+        host = new URL(`http://[${host}]`).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+      } catch {
+        throw hostError('environment_host_invalid');
+      }
+    }
+    return host;
+  }
+
+  if (host.includes(':') || host.length > MAX_HOST_LENGTH || !host.includes('.'))
+    throw hostError('environment_host_invalid');
+  const labels = host.split('.');
+  if (labels.some((label) => !HOST_LABEL_PATTERN.test(label))) throw hostError('environment_host_invalid');
+  if (isUnsafeHostname(host)) throw hostError('environment_host_unsafe');
+  return host;
+}
+
+function normalizeHostEntry(value) {
+  if (typeof value !== 'string') throw hostError('environment_host_invalid');
+  const candidate = value.trim();
+  if (!/^[a-z][a-z\d+.-]*:\/\//i.test(candidate)) return normalizeExactHost(value);
+
+  let target;
+  try {
+    target = new URL(candidate);
+  } catch {
+    throw hostError('environment_host_invalid');
+  }
+  if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
+    throw hostError('environment_host_invalid');
+  }
+
+  const schemeEnd = candidate.indexOf('://') + 3;
+  const authority = candidate.slice(schemeEnd).split(/[/?#]/, 1)[0];
+  if (
+    !authority ||
+    authority.includes('@') ||
+    candidate.includes('?') ||
+    candidate.includes('#') ||
+    (target.pathname !== '' && target.pathname !== '/')
+  ) {
+    throw hostError('environment_host_invalid');
+  }
+  if (authority.startsWith('[')) {
+    const closingBracket = authority.indexOf(']');
+    if (closingBracket < 0 || authority.slice(closingBracket + 1)) throw hostError('environment_host_invalid');
+  } else if (authority.includes(':') || target.port) {
+    throw hostError('environment_host_invalid');
+  }
+  return normalizeExactHost(target.hostname);
+}
+function normalizeHostEntries(values) {
+  if (!Array.isArray(values) || values.length > MAX_ALLOWED_HOSTS) throw hostError('environment_hosts_invalid');
+  return [...new Set(values.map(normalizeHostEntry))];
+}
+export function normalizeHostList(values) {
+  return normalizeHostEntries(values);
+}
+export class EnvironmentTargetError extends Error {
+  constructor(code) {
+    super(code);
+    this.name = 'EnvironmentTargetError';
+    this.code = code;
+  }
 }
 /**
  * @param {string} root
@@ -392,15 +515,19 @@ export function collectExecutionArtifacts(root, { includeVideo = true } = {}) {
     });
 }
 export function validateHostAllowlist(urls, allowedHosts) {
-  const allowed = new Set(allowedHosts.map((host) => host.toLowerCase().replace(/\.$/, '')));
-  const rejected = urls.filter((value) => {
+  const values = Array.isArray(urls) ? urls : [];
+  let allowed;
+  try {
+    allowed = new Set(normalizeHostEntries(allowedHosts));
+  } catch {
+    return { allowed: false, rejected: values };
+  }
+  const rejected = values.filter((value) => {
     try {
+      if (hasExplicitUrlPort(value)) return true;
       const target = new URL(value);
-      if (!['http:', 'https:'].includes(target.protocol)) return true;
-      const hostname = target.hostname.toLowerCase().replace(/\.$/, '');
-      const localHostname =
-        LOCAL_HOSTNAMES.has(hostname) || hostname.endsWith('.localhost') || hostname.endsWith('.local');
-      if (localHostname || isUnsafeLiteralTarget(hostname)) return true;
+      if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) return true;
+      const hostname = normalizeExactHost(target.hostname);
       return !allowed.has(hostname);
     } catch {
       return true;
@@ -408,26 +535,29 @@ export function validateHostAllowlist(urls, allowedHosts) {
   });
   return { allowed: rejected.length === 0, rejected };
 }
-export function normalizeEnvironmentTarget(value) {
+export function normalizeEnvironmentTarget(value, additionalHosts = []) {
+  const rawValue = String(value ?? '');
   let target;
   try {
-    target = new URL(String(value ?? ''));
+    target = new URL(rawValue);
   } catch {
     throw new Error('environment_url_invalid');
   }
-  const host = target.hostname
-    .toLowerCase()
-    .replace(/^\[|\]$/g, '')
-    .replace(/\.$/, '');
-  if (
-    !['http:', 'https:'].includes(target.protocol) ||
-    target.username ||
-    target.password ||
-    !validateHostAllowlist([target.toString()], [host]).allowed
-  ) {
-    throw new Error('environment_target_rejected');
+  if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password)
+    throw new EnvironmentTargetError('environment_target_rejected');
+  if (hasExplicitUrlPort(rawValue)) throw new EnvironmentTargetError('environment_target_rejected');
+  let host;
+  try {
+    host = normalizeExactHost(target.hostname);
+  } catch (error) {
+    if (error instanceof EnvironmentTargetError && error.code === 'environment_host_unsafe') throw error;
+    throw new EnvironmentTargetError('environment_target_rejected');
   }
-  return { baseUrl: target.toString(), allowedHosts: [host] };
+  const configuredHosts = normalizeHostEntries(additionalHosts);
+  const allowedHosts = normalizeHostEntries([host, ...configuredHosts]);
+  if (!validateHostAllowlist([target.toString()], allowedHosts).allowed)
+    throw new EnvironmentTargetError('environment_target_rejected');
+  return { baseUrl: target.toString(), allowedHosts };
 }
 export function evaluateCompatibility({ feature, result, evidence, proof = {} }) {
   const errors = [...validateCanonicalFeature(feature).errors];

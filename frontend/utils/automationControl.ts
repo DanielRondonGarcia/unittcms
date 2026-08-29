@@ -94,6 +94,11 @@ export function formatAutomationDuration(durationMs?: number): string {
   return `${(durationMs / 1000).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}s`;
 }
 
+export function formatAutomationExampleLabel(label: string, exampleIndex: number, row?: readonly string[]): string {
+  const preview = row?.join(' · ') ?? '';
+  return `${label} ${exampleIndex + 1}${preview ? `: ${preview}` : ''}`;
+}
+
 export async function fetchAutomationEnvironments(jwt: string, projectId: number): Promise<AutomationEnvironment[]> {
   const payload = await request<AutomationPayload>(jwt, `/automation/projects/${projectId}/environments`);
   return items<AutomationEnvironment>(payload).filter((value) => value.enabled !== false);
@@ -134,8 +139,13 @@ export async function runAutomationBatch(
         projectId: input.projectId,
         caseId: testCase.caseId,
         runCaseId: testCase.runCaseId,
+        ...(testCase.exampleIndex === undefined ? {} : { exampleIndex: testCase.exampleIndex }),
         environmentId: input.environmentId,
-        idempotencyKey: `run-${input.runId}-case-${testCase.runCaseId}-${input.batchId}`,
+        idempotencyKey: `run-${input.runId}-case-${testCase.runCaseId}-${input.batchId}${
+          testCase.exampleIndex === undefined || testCase.exampleIndex === null
+            ? ''
+            : `-example-${testCase.exampleIndex}`
+        }`,
       });
       const result = {
         ...base,
@@ -169,7 +179,7 @@ export async function fetchAutomationDefaultEnvironment(
 export async function saveAutomationDefaultEnvironment(
   jwt: string,
   projectId: number,
-  input: { baseUrl: string; enabled: boolean; captureVideo: boolean }
+  input: { baseUrl: string; allowedHosts: string[]; enabled: boolean; captureVideo: boolean }
 ): Promise<AutomationDefaultEnvironment> {
   const payload = await request<AutomationPayload>(jwt, `/projects/${projectId}/settings/automation-environment`, {
     method: 'PUT',
@@ -208,9 +218,11 @@ export async function fetchAutomationHistory(
   jwt: string,
   projectId: number,
   caseId?: number,
-  runCaseId?: number
+  runCaseId?: number,
+  limit = 20
 ): Promise<AutomationExecution[]> {
-  const query = new URLSearchParams({ page: '1', limit: '20' });
+  const safeLimit = Math.min(100, Math.max(1, Math.floor(Number(limit) || 20)));
+  const query = new URLSearchParams({ page: '1', limit: String(safeLimit) });
   if (caseId !== undefined) query.set('caseId', String(caseId));
   if (runCaseId !== undefined) query.set('runCaseId', String(runCaseId));
   const payload = await request<AutomationPayload>(

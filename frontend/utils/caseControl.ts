@@ -37,7 +37,24 @@ export type GherkinValidationResult = {
   issues: GherkinValidationIssue[];
 };
 
+export type CaseErrorField = {
+  field: string;
+  code: string;
+  message: string;
+};
+
+export class CaseRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    public readonly fields: CaseErrorField[] = []
+  ) {
+    super(code);
+  }
+}
+
 type GherkinKeywordLabels = Partial<Record<GherkinKeyword, string>>;
+type CaseErrorPayload = { error?: unknown; code?: unknown; fields?: unknown };
 
 const canonicalKeywordLabels: Record<GherkinKeyword, string> = {
   given: 'Given',
@@ -53,6 +70,19 @@ function issue(code: GherkinValidationCode, field: string, location: Partial<Ghe
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function safeCaseErrorFields(value: unknown): CaseErrorField[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((item) => {
+      if (!isRecord(item)) return [];
+      const field = typeof item.field === 'string' ? item.field.trim().slice(0, 200) : '';
+      const code = typeof item.code === 'string' ? item.code.trim().slice(0, 64) : '';
+      const message = typeof item.message === 'string' ? item.message.trim().slice(0, 500) : '';
+      return field && code && message ? [{ field, code, message }] : [];
+    })
+    .slice(0, 32);
 }
 
 function isGherkinKeyword(value: unknown): value is GherkinKeyword {
@@ -528,13 +558,20 @@ async function updateCase(jwt: string, updateCaseData: CaseType) {
   const url = `${apiServer}/cases/${updateCaseData.id}`;
   try {
     const response = await fetch(url, fetchOptions);
+    const payload = (await response.json().catch(() => ({}))) as CaseErrorPayload;
     if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
+      const code =
+        typeof payload.code === 'string'
+          ? payload.code
+          : typeof payload.error === 'string'
+            ? payload.error
+            : 'case_update_failed';
+      throw new CaseRequestError(response.status, code, safeCaseErrorFields(payload.fields));
     }
-    const data = await response.json();
-    return data;
+    return payload;
   } catch (error: unknown) {
-    logError('Error updating project', error);
+    logError('Error updating case', error);
+    throw error;
   }
 }
 

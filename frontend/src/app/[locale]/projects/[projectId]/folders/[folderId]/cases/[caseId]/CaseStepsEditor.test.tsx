@@ -90,7 +90,9 @@ describe('Gherkin step editor', () => {
     act(() => mocks.selections[0](new Set(['then'])));
     expect(onStepUpdate).toHaveBeenCalledWith(
       1,
-      expect.objectContaining({ caseSteps: { stepNo: 1, keyword: 'then' } })
+      expect.objectContaining({
+        caseSteps: expect.objectContaining({ stepNo: 1, keyword: 'then', section: 'scenario' }),
+      })
     );
     act(() => root.unmount());
   });
@@ -127,29 +129,29 @@ describe('Gherkin step editor', () => {
     ).toBe(true);
   });
 
-  it('renders background steps in their own section', () => {
+  it('renders legacy background steps in the unified scenario editor', () => {
     const rendered = renderEditor([
       makeStep(1, 1, 'given', 'background'),
       makeStep(2, 2, 'when', 'scenario'),
       makeStep(3, 3, 'then', 'scenario'),
     ]);
 
-    expect(rendered.container.textContent).toContain('Antecedentes');
+    expect(rendered.container.textContent).not.toContain('Antecedentes');
     expect(rendered.container.textContent).toContain('Escenario');
     act(() => rendered.root.unmount());
   });
 
-  it('can add a Background step before scenario steps', () => {
+  it('adds new steps to the scenario editor', () => {
     const rendered = renderEditor([makeStep(1, 1, 'when'), makeStep(2, 2, 'then')]);
     const buttons = rendered.container.querySelectorAll('button');
 
     act(() => buttons[0].click());
 
-    expect(rendered.onStepPlus).toHaveBeenCalledWith(1, 'background');
+    expect(rendered.onStepPlus).toHaveBeenCalledWith(3, 'scenario');
     act(() => rendered.root.unmount());
   });
 
-  it('preserves a legacy background row in the Background section', () => {
+  it('preserves legacy background metadata without creating an authoring section', () => {
     const normalized = normalizeGherkinCaseSteps([
       makeStep(1, 1, 'given', 'background'),
       makeStep(2, 2, 'when', 'scenario'),

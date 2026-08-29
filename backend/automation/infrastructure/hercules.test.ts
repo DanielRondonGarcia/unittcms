@@ -25,7 +25,7 @@ function junit(cwd: string, failures = 0, errors = 0): void {
   mkdirSync(join(cwd, 'output'), { recursive: true });
   writeFileSync(
     join(cwd, 'output', 'scenario.xml'),
-    `<testsuite tests="1" failures="${failures}" errors="${errors}"></testsuite>`
+    `<testsuite tests="1" failures="${failures}" errors="${errors}"><testcase classname="fixture" name="scenario"/></testsuite>`
   );
 }
 function llmConfig(
@@ -83,6 +83,7 @@ describe('Hercules automation executor', () => {
       `type=bind,src=${observed.invocation.cwd},dst=/testzeus-hercules/opt`,
       HERCULES_CONTRACT.image,
     ]);
+    expect(observed.invocation.argv).toContain('RECORD_VIDEO=false');
     expect(observed.invocation.argv.join(' ')).not.toContain(apiKey);
     expect(observed.env).toMatchObject({
       HEADLESS: 'true',
@@ -110,8 +111,10 @@ describe('Hercules automation executor', () => {
 
   it('enables video capture only when the resolved environment opts in', async () => {
     let observedVideo = '';
+    let observedVideoArgument = '';
     const processRunner = vi.fn(async (invocation, options) => {
       observedVideo = options.env.RECORD_VIDEO;
+      observedVideoArgument = invocation.argv.find((value) => value.startsWith('RECORD_VIDEO=')) ?? '';
       options.registerCancellation(vi.fn());
       junit(invocation.cwd);
       return { exitCode: 0 };
@@ -124,6 +127,7 @@ describe('Hercules automation executor', () => {
       environment: { ...compatibilityEnvironment, captureVideo: true },
     });
     expect(observedVideo).toBe('true');
+    expect(observedVideoArgument).toBe('RECORD_VIDEO=true');
   });
 
   it('returns validated video evidence before removing the execution workspace', async () => {
@@ -421,7 +425,59 @@ describe('Hercules automation executor', () => {
     ).resolves.toEqual({
       outcome: 'technical_error',
       error: 'evidence_secret_detected',
+      errorKind: 'evidence',
     });
+  });
+
+  it.each([
+    ['missing', () => undefined, 'evidence_junit_missing'],
+    ['empty', (cwd: string) => {
+      mkdirSync(join(cwd, 'output'), { recursive: true });
+      writeFileSync(join(cwd, 'output', 'scenario.xml'), '');
+    }, 'evidence_junit_invalid'],
+    ['malformed', (cwd: string) => {
+      mkdirSync(join(cwd, 'output'), { recursive: true });
+      writeFileSync(join(cwd, 'output', 'scenario.xml'), '<testsuite tests="1" failures="0" errors="0">');
+    }, 'evidence_junit_invalid'],
+    ['no-testcase', (cwd: string) => {
+      mkdirSync(join(cwd, 'output'), { recursive: true });
+      writeFileSync(join(cwd, 'output', 'scenario.xml'), '<testsuite tests="1" failures="0" errors="0"></testsuite>');
+    }, 'evidence_junit_invalid'],
+    ['mismatched-test-count', (cwd: string) => {
+      mkdirSync(join(cwd, 'output'), { recursive: true });
+      writeFileSync(
+        join(cwd, 'output', 'scenario.xml'),
+        '<testsuite tests="2" failures="0" errors="0"><testcase/></testsuite>'
+      );
+    }, 'evidence_junit_invalid'],
+  ] as const)('requires valid JUnit evidence for a zero exit (%s)', async (_name, writeEvidence, error) => {
+    const processRunner = vi.fn(async (invocation, options) => {
+      options.registerCancellation(vi.fn());
+      writeEvidence(invocation.cwd);
+      return { exitCode: 0 };
+    });
+    const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
+
+    await expect(
+      executor.execute({ executionId: `missing-evidence-${_name}`, snapshot: CANONICAL_FEATURE, environment: compatibilityEnvironment })
+    ).resolves.toMatchObject({ outcome: 'technical_error', error, errorKind: 'evidence' });
+  });
+
+  it('accepts a valid nested JUnit result as pass evidence', async () => {
+    const processRunner = vi.fn(async (invocation, options) => {
+      options.registerCancellation(vi.fn());
+      mkdirSync(join(invocation.cwd, 'output', 'run_1', 'run_2'), { recursive: true });
+      writeFileSync(
+        join(invocation.cwd, 'output', 'run_1', 'run_2', 'scenario.xml'),
+        '<testsuite tests="1" failures="0" errors="0"><testcase/></testsuite>'
+      );
+      return { exitCode: 0 };
+    });
+    const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
+
+    await expect(
+      executor.execute({ executionId: 'nested-evidence', snapshot: CANONICAL_FEATURE, environment: compatibilityEnvironment })
+    ).resolves.toMatchObject({ outcome: 'passed' });
   });
 
   it('terminates active work on cancellation and is idempotent for unknown executions', async () => {
@@ -453,7 +509,7 @@ describe('Hercules automation executor', () => {
   it('binds the selected environment target and rejects case-controlled arbitrary URLs', async () => {
     const targetEnvironment = {
       baseUrl: 'https://qa.example.test/app',
-      allowedHosts: ['qa.example.test'],
+      allowedHosts: ['qa.example.test', 'gateway.example.test'],
       secretRefs: [],
     };
     let feature = '';
@@ -475,17 +531,69 @@ describe('Hercules automation executor', () => {
     expect(feature).toContain('https://qa.example.test/app/login');
     expect(processRunner.mock.calls[0][1].env).toMatchObject({
       HERCULES_BASE_URL: 'https://qa.example.test/app',
-      HERCULES_ALLOWED_HOSTS: 'qa.example.test',
+      HERCULES_ALLOWED_HOSTS: 'qa.example.test,gateway.example.test',
     });
+
+    await expect(
+      executor.execute({
+        executionId: 'saved-target',
+        snapshot:
+          'Feature: Target\n\n  Scenario: Target\n    Given I open the page "https://qa.example.test/login"\n    When I inspect the page\n    Then the page is available\n',
+        environment: targetEnvironment,
+      })
+    ).resolves.toMatchObject({ outcome: 'passed' });
+    expect(feature).toContain('https://qa.example.test/app/login');
+
+    await expect(
+      executor.execute({
+        executionId: 'approved-gateway',
+        snapshot:
+          'Feature: Target\n\n  Scenario: Target\n    Given I open the page "https://gateway.example.test/sso/callback?state=fixture#done"\n    When I inspect the page\n    Then the page is available\n',
+        environment: targetEnvironment,
+      })
+    ).resolves.toMatchObject({ outcome: 'passed' });
+    expect(feature).toContain('https://gateway.example.test/sso/callback?state=fixture#done');
 
     await expect(
       executor.execute({
         executionId: 'arbitrary-target',
         snapshot:
           'Feature: Target\n\n  Scenario: Target\n    Given I open the page "https://evil.example.test"\n    When I inspect the page\n    Then the page is available\n',
-        environment: { ...targetEnvironment, allowedHosts: ['qa.example.test', 'evil.example.test'] },
+        environment: targetEnvironment,
       })
     ).resolves.toEqual({ outcome: 'technical_error', error: 'environment_target_rejected' });
+  });
+
+  it('injects the resolved base URL into a URL-free parameterized Scenario Outline once', async () => {
+    const targetEnvironment = {
+      baseUrl: 'https://qa.example.test/app',
+      allowedHosts: ['qa.example.test'],
+      secretRefs: [],
+    };
+    let feature = '';
+    const processRunner = vi.fn(async (invocation, options) => {
+      feature = readFileSync(join(invocation.cwd, 'input', 'test.feature'), 'utf8');
+      options.registerCancellation(vi.fn());
+      junit(invocation.cwd);
+      return { exitCode: 0 };
+    });
+    const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
+
+    await expect(
+      executor.execute({
+        executionId: 'parameterized-target',
+        snapshot:
+          'Feature: Login\n\n  Scenario Outline: Login <user>\n    Given the user enters "<user>"\n    When the user submits the form\n    Then the dashboard is shown\n\n  Examples:\n    | user |\n    | Ada  |\n',
+        environment: targetEnvironment,
+      })
+    ).resolves.toMatchObject({ outcome: 'passed' });
+
+    expect(feature).toContain(
+      '  Scenario Outline: Login <user>\n    Given I open the page "https://qa.example.test/app"\n    Given the user enters "<user>"'
+    );
+    expect(feature.match(/\bhttps?:\/\/[^\s"')]+/g)).toEqual(['https://qa.example.test/app']);
+    expect(feature).not.toContain('example.com');
+    expect(feature).not.toContain('/app/app');
   });
 
   it('rejects executions without a resolved environment before starting a process', async () => {

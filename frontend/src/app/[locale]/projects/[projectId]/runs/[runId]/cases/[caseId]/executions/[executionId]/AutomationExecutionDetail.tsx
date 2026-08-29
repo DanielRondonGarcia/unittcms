@@ -11,7 +11,10 @@ import {
   fetchAutomationArtifacts,
   fetchAutomationExecution,
   formatAutomationDuration,
+  formatAutomationExampleLabel,
+  isAutomationActive,
 } from '@/utils/automationControl';
+import { useAutomationPolling } from '@/utils/useAutomationPolling';
 
 type Props = {
   projectId: string;
@@ -35,6 +38,10 @@ function statusLabel(status: AutomationStatus, messages: RunDetailMessages): str
   )[status];
 }
 
+function executionStatusLabel(execution: AutomationExecution, messages: RunDetailMessages): string {
+  return execution.errorKind === 'evidence' ? messages.automationEvidenceInsufficient : statusLabel(execution.status, messages);
+}
+
 function timestamp(value: string | undefined, locale: string): string {
   if (!value) return '—';
   const date = new Date(value);
@@ -47,24 +54,54 @@ function artifactBytes(content: string): Uint8Array {
   return Uint8Array.from(atob(content), (character) => character.charCodeAt(0));
 }
 
+function artifactName(artifact: AutomationArtifact): string {
+  return artifact.filename ?? artifact.storageKey?.split('/').pop() ?? artifact.kind;
+}
+
+function artifactSize(size: number | undefined): string {
+  if (!Number.isFinite(size) || size === undefined || size < 0) return '—';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function snapshotExampleRow(execution: AutomationExecution): string[] | undefined {
+  if (execution.exampleIndex === undefined || execution.exampleIndex === null) return undefined;
+  const snapshot =
+    typeof execution.snapshot === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(execution.snapshot) as unknown;
+          } catch {
+            return undefined;
+          }
+        })()
+      : execution.snapshot;
+  if (!snapshot || typeof snapshot !== 'object') return undefined;
+  const examples = (snapshot as { examples?: unknown }).examples;
+  if (!examples || typeof examples !== 'object') return undefined;
+  const rows = (examples as { rows?: unknown }).rows;
+  const row = Array.isArray(rows) ? rows[execution.exampleIndex] : undefined;
+  return Array.isArray(row) && row.every((value) => typeof value === 'string') ? row : undefined;
+}
+
 export default function AutomationExecutionDetail({ projectId, runId, caseId, executionId, locale, messages }: Props) {
   const context = useContext(TokenContext);
   const [execution, setExecution] = useState<AutomationExecution | null>(null);
   const [artifacts, setArtifacts] = useState<AutomationArtifact[]>([]);
   const [videoUrl, setVideoUrl] = useState('');
   const [error, setError] = useState('');
+  const accessToken = context.token.access_token;
 
   useEffect(() => {
-    if (!context.isSignedIn() || !context.token.access_token) return;
+    if (!context.isSignedIn() || !accessToken) return;
     let disposed = false;
     Promise.all([
-      fetchAutomationExecution(context.token.access_token, executionId),
-      fetchAutomationArtifacts(context.token.access_token, executionId),
+      fetchAutomationExecution(accessToken, executionId),
     ])
-      .then(([nextExecution, nextArtifacts]) => {
+      .then(([nextExecution]) => {
         if (!disposed) {
           setExecution(nextExecution);
-          setArtifacts(nextArtifacts);
         }
       })
       .catch(() => {
@@ -73,14 +110,42 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
     return () => {
       disposed = true;
     };
-  }, [context, context.token.access_token, executionId, messages.automationUnavailable]);
+  }, [accessToken, context, executionId, messages.automationUnavailable]);
+
+  useAutomationPolling({
+    active: Boolean(accessToken && execution && isAutomationActive(execution.status)),
+    poll: () => fetchAutomationExecution(accessToken as string, executionId),
+    onValue: (nextExecution) => {
+      setExecution(nextExecution);
+      setError('');
+    },
+    onError: () => setError(messages.automationUnavailable),
+  });
+
+  const terminalExecutionId = execution?.id;
+  const terminalExecutionStatus = execution?.status;
+
+  useEffect(() => {
+    if (!terminalExecutionId || !accessToken || !terminalExecutionStatus || isAutomationActive(terminalExecutionStatus)) return;
+    let disposed = false;
+    fetchAutomationArtifacts(accessToken, terminalExecutionId)
+      .then((nextArtifacts) => {
+        if (!disposed) setArtifacts(nextArtifacts);
+      })
+      .catch(() => {
+        if (!disposed) setError(messages.automationUnavailable);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [accessToken, messages.automationUnavailable, terminalExecutionId, terminalExecutionStatus]);
 
   useEffect(() => {
     const video = artifacts.find((artifact) => artifact.mimeType?.toLowerCase().startsWith('video/'));
-    if (!video || execution?.captureVideo !== true || !context.token.access_token) return;
+    if (!video || execution?.captureVideo !== true || !accessToken) return;
     let disposed = false;
     let objectUrl = '';
-    downloadAutomationArtifact(context.token.access_token, video.id)
+    downloadAutomationArtifact(accessToken, video.id)
       .then((download) => {
         if (disposed || !download.content || download.encoding !== 'base64') return;
         objectUrl = URL.createObjectURL(new Blob([artifactBytes(download.content)], { type: video.mimeType }));
@@ -93,12 +158,12 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
       disposed = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifacts, context, context.token.access_token, execution?.captureVideo, messages.automationUnavailable]);
+  }, [accessToken, artifacts, execution?.captureVideo, messages.automationUnavailable]);
 
   const handleDownload = async (artifact: AutomationArtifact) => {
-    if (!context.token.access_token) return;
+    if (!accessToken) return;
     try {
-      const download = await downloadAutomationArtifact(context.token.access_token, artifact.id);
+      const download = await downloadAutomationArtifact(accessToken, artifact.id);
       if (!download.content || download.encoding !== 'base64') return;
       const objectUrl = URL.createObjectURL(
         new Blob([artifactBytes(download.content)], { type: download.mimeType ?? 'application/octet-stream' })
@@ -121,7 +186,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
     typeof execution.snapshot === 'string' ? execution.snapshot : JSON.stringify(execution.snapshot ?? {}, null, 2);
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-4xl space-y-6 overflow-x-hidden p-6">
+    <main className="mx-auto min-h-full w-full min-w-0 max-w-4xl space-y-6 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">{messages.automationExecutionDetail}</h1>
@@ -151,7 +216,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
                   : 'warning'
             }
           >
-            {statusLabel(execution.status, messages)}
+            {executionStatusLabel(execution, messages)}
           </Chip>
           {execution.attempt !== undefined && (
             <span className="text-sm">
@@ -162,7 +227,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
             {messages.automationDuration}: {formatAutomationDuration(execution.durationMs)}
           </span>
         </div>
-        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+        <dl className="mt-4 grid min-w-0 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <dt className="font-semibold">{messages.automationQueuedAt}</dt>
             <dd>{timestamp(execution.queuedAt, locale)}</dd>
@@ -175,13 +240,68 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
             <dt className="font-semibold">{messages.automationFinishedAt}</dt>
             <dd>{timestamp(execution.finishedAt, locale)}</dd>
           </div>
+          <div>
+            <dt className="font-semibold">{messages.automationExample}</dt>
+            <dd>
+              {execution.exampleIndex === undefined || execution.exampleIndex === null
+                ? '—'
+                : (() => {
+                    const label = formatAutomationExampleLabel(
+                      messages.automationExample,
+                      execution.exampleIndex,
+                      snapshotExampleRow(execution)
+                    );
+                    return (
+                      <span className="block min-w-0 max-w-full truncate" title={label} aria-label={label}>
+                        {label}
+                      </span>
+                    );
+                  })()}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold">{messages.automationAttemptHistory}</dt>
+            <dd>{Array.isArray(execution.attemptHistory) ? execution.attemptHistory.length : '—'}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">{messages.automationEngine}</dt>
+            <dd className="break-words">{execution.engine || '—'}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">{messages.automationModel}</dt>
+            <dd className="break-words">{execution.model || '—'}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">{messages.automationEnvironmentId}</dt>
+            <dd>{execution.environmentId ?? '—'}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">{messages.automationCorrelationId}</dt>
+            <dd className="break-all" translate="no">
+              {execution.correlationId || '—'}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold">{messages.automationSnapshotHash}</dt>
+            <dd className="break-all" translate="no">
+              {execution.snapshotHash || '—'}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold">{messages.automationWorkerStatus}</dt>
+            <dd className="break-words">{execution.lastWorkerEvent || execution.lastAttemptStatus || '—'}</dd>
+          </div>
         </dl>
         {execution.summary && <p className="mt-4 break-words whitespace-pre-wrap">{execution.summary}</p>}
-        {execution.error && (
+        {execution.errorKind === 'evidence' ? (
+          <p className="mt-4 break-words whitespace-pre-wrap text-danger" role="alert">
+            {messages.automationEvidenceInsufficient}
+          </p>
+        ) : execution.error ? (
           <p className="mt-4 break-words whitespace-pre-wrap text-danger" role="alert">
             {execution.error}
           </p>
-        )}
+        ) : null}
         {execution.errorFields && execution.errorFields.length > 0 && (
           <ul className="mt-2 list-disc space-y-1 ps-5 text-sm text-danger">
             {execution.errorFields.map((field, index) => (
@@ -206,9 +326,14 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
           <ul className="mt-3 space-y-2">
             {artifacts.map((artifact) => (
               <li key={String(artifact.id)} className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-                <span className="min-w-0 break-all">{artifact.filename ?? artifact.kind}</span>
-                <Button size="sm" variant="light" onPress={() => handleDownload(artifact)}>
-                  {messages.downloadAutomationArtifact}
+                <div className="min-w-0 flex-1">
+                  <p className="break-all">{artifactName(artifact)}</p>
+                  <p className="break-words text-xs text-default-500">
+                    {artifact.kind} · {artifact.mimeType ?? '—'} · {artifactSize(artifact.size)}
+                  </p>
+                </div>
+                <Button className="max-w-full" size="sm" variant="light" onPress={() => handleDownload(artifact)}>
+                  <span className="break-words">{messages.downloadAutomationArtifact}</span>
                 </Button>
               </li>
             ))}

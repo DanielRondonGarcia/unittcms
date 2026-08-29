@@ -30,6 +30,8 @@ export type SettingsMessages = {
   automationEnvironment: string;
   automationEnvironmentDescription: string;
   automationBaseUrl: string;
+  automationAllowedHosts: string;
+  automationAllowedHostsDescription: string;
   automationEnabled: string;
   automationCaptureVideo: string;
   automationSave: string;

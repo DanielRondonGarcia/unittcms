@@ -10,6 +10,7 @@ import { up as addDefaultEnvironment } from '../migrations/20260824000000-add-de
 import { up as addWorkerMetadata } from '../migrations/20260824000001-add-worker-execution-metadata.js';
 import { up as addGherkinExamples } from '../migrations/20260825000000-add-gherkin-examples-to-cases.js';
 import { up as addVideoCapture } from '../migrations/20260826000000-add-automation-video-capture.js';
+import { up as addExampleIndex } from '../migrations/20260827000000-add-example-index-to-automation-executions.js';
 
 describe('automation persistence contract', () => {
   it('stores versioned snapshots, attempts, private artifact metadata, and secret references only', () => {
@@ -31,6 +32,7 @@ describe('automation persistence contract', () => {
     expect(Execution.rawAttributes.attemptHistory.defaultValue).toBe('[]');
     expect(Execution.rawAttributes.lastWorkerEvent.allowNull).toBe(true);
     expect(Execution.rawAttributes.runCaseId.allowNull).toBe(true);
+    expect(Execution.rawAttributes.exampleIndex.allowNull).toBe(true);
     expect(Artifact.rawAttributes.storageKey.allowNull).toBe(false);
     expect(Environment.rawAttributes.secretRefs.type.toString()).toContain('TEXT');
     expect(Environment.rawAttributes.isDefault.defaultValue).toBe(false);
@@ -106,6 +108,16 @@ describe('automation persistence contract', () => {
       'automationExecutions',
       'captureVideo',
       expect.objectContaining({ defaultValue: false })
+    );
+  });
+
+  it('adds a nullable example row index without changing existing executions', async () => {
+    const query = { addColumn: vi.fn(), removeColumn: vi.fn() };
+    await addExampleIndex(query, DataTypes);
+    expect(query.addColumn).toHaveBeenCalledWith(
+      'automationExecutions',
+      'exampleIndex',
+      expect.objectContaining({ allowNull: true })
     );
   });
 });

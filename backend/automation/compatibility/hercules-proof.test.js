@@ -2,8 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { CANONICAL_FEATURE, HERCULES_CONTRACT, evaluateCompatibility } from './hercules.js';
 import { HERCULES_PROOF_SOURCE, buildCompatibilityProof, parseCanonicalJUnit } from './hercules-proof.js';
 
-const PASS_XML = '<testsuite tests="1" failures="0" errors="0"></testsuite>';
-const FAIL_XML = '<testsuite tests="1" failures="1" errors="0"><failure>fixture failure</failure></testsuite>';
+const PASS_XML = '<testsuite tests="1" failures="0" errors="0"><testcase classname="fixture" name="scenario"/></testsuite>';
+const EMPTY_XML = '<testsuite tests="0" failures="0" errors="0"></testsuite>';
+const NO_TESTCASE_XML = '<testsuite tests="1" failures="0" errors="0"></testsuite>';
+const MISMATCHED_TEST_COUNT_XML =
+  '<testsuite tests="2" failures="0" errors="0"><testcase classname="fixture" name="scenario"/></testsuite>';
+const NESTED_TESTCASE_XML =
+  '<testsuite tests="1" failures="0" errors="0"><properties><testcase classname="fixture" name="scenario"/></properties></testsuite>';
+const WRAPPED_PASS_XML =
+  '<testsuites><testsuite tests="1" failures="0" errors="0"><testcase classname="fixture" name="scenario"/></testsuite></testsuites>';
+const MISMATCHED_ROOT_XML = '<testsuite tests="1" failures="0" errors="0"></testsuites>';
+const MALFORMED_XML = '<testsuite tests="1" failures="0" errors="0"><testcase><failure></testsuite>';
+const FAIL_XML =
+  '<testsuite tests="1" failures="1" errors="0"><testcase classname="fixture" name="scenario"><failure>fixture failure</failure></testcase></testsuite>';
 const invocation = [...HERCULES_CONTRACT.argv];
 const keylessInvocation = [...invocation];
 const apiKeyIndex = keylessInvocation.indexOf('LLM_MODEL_API_KEY');
@@ -37,6 +48,10 @@ const evidence = {
   binaryScan: { complete: true, scannedFiles: ['proof.png'], suspiciousFiles: [], unscannedFiles: [] },
 };
 
+function invocationWithRecordVideo(value) {
+  return invocation.map((argument) => (argument === 'RECORD_VIDEO=false' ? `RECORD_VIDEO=${value}` : argument));
+}
+
 function context(overrides = {}) {
   return {
     passResult: parseCanonicalJUnit(PASS_XML, 0),
@@ -63,6 +78,13 @@ function evaluate(built, collectedEvidence = evidence) {
 describe('Hercules compatibility proof harness', () => {
   it('parses only a zero-failure, zero-error pass with exit code zero', () => {
     expect(parseCanonicalJUnit(PASS_XML, 0)).toEqual({ exitCode: 0, result: 'passed' });
+    expect(parseCanonicalJUnit(EMPTY_XML, 0)).toBeNull();
+    expect(parseCanonicalJUnit(NO_TESTCASE_XML, 0)).toBeNull();
+    expect(parseCanonicalJUnit(MISMATCHED_TEST_COUNT_XML, 0)).toBeNull();
+    expect(parseCanonicalJUnit(NESTED_TESTCASE_XML, 0)).toBeNull();
+    expect(parseCanonicalJUnit(WRAPPED_PASS_XML, 0)).toEqual({ exitCode: 0, result: 'passed' });
+    expect(parseCanonicalJUnit(MISMATCHED_ROOT_XML, 0)).toBeNull();
+    expect(parseCanonicalJUnit(MALFORMED_XML, 0)).toBeNull();
     expect(parseCanonicalJUnit(FAIL_XML, 0)).toBeNull();
     expect(parseCanonicalJUnit(PASS_XML, 1)).toBeNull();
   });
@@ -84,6 +106,57 @@ describe('Hercules compatibility proof harness', () => {
       verificationSource: HERCULES_PROOF_SOURCE,
     });
     expect(evaluate(built).ready).toBe(true);
+  });
+
+  it('accepts RECORD_VIDEO=false with matching or absent runtime evidence', () => {
+    const invocationWithFalse = invocationWithRecordVideo('false');
+
+    expect(
+      evaluate(
+        buildCompatibilityProof(
+          context({
+            invocation: invocationWithFalse,
+            runtimeEnv: { ...runtimeEnv, RECORD_VIDEO: 'false' },
+          })
+        )
+      ).ready
+    ).toBe(true);
+    expect(evaluate(buildCompatibilityProof(context({ invocation: invocationWithFalse }))).ready).toBe(true);
+  });
+
+  it('accepts RECORD_VIDEO=true when runtime evidence matches', () => {
+    const built = buildCompatibilityProof(
+      context({
+        invocation: invocationWithRecordVideo('true'),
+        runtimeEnv: { ...runtimeEnv, RECORD_VIDEO: 'true' },
+      })
+    );
+
+    expect(evaluate(built).ready).toBe(true);
+  });
+
+  it('fails closed for mismatched or invalid RECORD_VIDEO values', () => {
+    const mismatchedRuntime = buildCompatibilityProof(
+      context({
+        invocation: invocationWithRecordVideo('true'),
+        runtimeEnv: { ...runtimeEnv, RECORD_VIDEO: 'false' },
+      })
+    );
+    const invalidRuntime = buildCompatibilityProof(
+      context({
+        invocation: invocationWithRecordVideo('true'),
+        runtimeEnv: { ...runtimeEnv, RECORD_VIDEO: 'invalid' },
+      })
+    );
+    const invalidArgv = buildCompatibilityProof(
+      context({
+        invocation: invocationWithRecordVideo('invalid'),
+      })
+    );
+
+    expect(evaluate(mismatchedRuntime).ready).toBe(false);
+    expect(evaluate(invalidRuntime).ready).toBe(false);
+    expect(evaluate(invalidArgv).ready).toBe(false);
   });
 
   it('accepts keyless Ollama runtime evidence but rejects an unrelated key', () => {

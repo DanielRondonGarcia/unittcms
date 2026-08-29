@@ -1,6 +1,7 @@
+import { Op } from 'sequelize';
 import { transitionExecution } from '../domain/index.js';
 import type { CaseSource } from '../domain/index.js';
-import type { AutomationStore, RunCaseSource, StoredExecution } from '../ports/index.js';
+import { RUN_CASE_STATUS, type AutomationStore, type RunCaseSource, type RunCaseStatusUpdate, type StoredExecution } from '../ports/index.js';
 
 type PlainRecord = Record<string, unknown>;
 type ModelInstance = PlainRecord & {
@@ -38,6 +39,7 @@ const EXECUTION_FIELDS = [
   'definitionId',
   'projectId',
   'caseId',
+  'exampleIndex',
   'runCaseId',
   'environmentId',
   'captureVideo',
@@ -77,6 +79,7 @@ const EXECUTION_UPDATE_FIELDS = [
 ] as const;
 
 const EXECUTION_STATES = new Set(['queued', 'running', 'passed', 'failed', 'error', 'cancelled']);
+const ACTIVE_EXECUTION_STATES = new Set(['queued', 'running']);
 
 function plain(value: unknown): PlainRecord | null {
   if (!value || typeof value !== 'object') return null;
@@ -93,6 +96,14 @@ function positiveId(value: unknown): number {
 
 function safeArtifactStorageKey(value: string): boolean {
   return !value.startsWith('/') && value.split('/').every((part) => part && part !== '.' && part !== '..');
+}
+
+function activeExecutionKey(value: PlainRecord): string | null {
+  const runCaseId = Number(value.runCaseId);
+  const status = String(value.status ?? '');
+  if (!Number.isSafeInteger(runCaseId) || runCaseId <= 0 || !ACTIVE_EXECUTION_STATES.has(status)) return null;
+  const exampleIndex = value.exampleIndex === undefined || value.exampleIndex === null ? 'scenario' : String(value.exampleIndex);
+  return `${runCaseId}:${exampleIndex}`;
 }
 
 function parseArray(value: unknown): unknown[] {
@@ -166,6 +177,15 @@ function safeExecution(value: unknown): StoredExecution | null {
   result.caseId = caseId;
   result.attempt = attempt;
   result.status = status as StoredExecution['status'];
+  if ('exampleIndex' in source) {
+    if (source.exampleIndex === null || source.exampleIndex === undefined) {
+      result.exampleIndex = null;
+    } else {
+      const exampleIndex = Number(source.exampleIndex);
+      if (!Number.isSafeInteger(exampleIndex) || exampleIndex < 0) throw new Error('automation_execution_invalid');
+      result.exampleIndex = exampleIndex;
+    }
+  }
   result.attemptHistory = attemptHistory(source.attemptHistory);
   const definition = plain(source.AutomationDefinition ?? source.definition);
   if (definition?.snapshot !== undefined) {
@@ -229,6 +249,7 @@ function createValues(value: PlainRecord): PlainRecord {
     'definitionId',
     'projectId',
     'caseId',
+    'exampleIndex',
     'runCaseId',
     'environmentId',
     'captureVideo',
@@ -249,10 +270,11 @@ function createValues(value: PlainRecord): PlainRecord {
   result.error = boundedText(value.error);
   result.errorKind = boundedText(value.errorKind, 64);
   result.attemptHistory = JSON.stringify(attemptHistory(value.attemptHistory));
+  result.activeExecutionKey = activeExecutionKey(value);
   return result;
 }
 
-function updateValues(value: PlainRecord): PlainRecord {
+function updateValues(value: PlainRecord, current: PlainRecord = {}): PlainRecord {
   const result: PlainRecord = {};
   for (const field of EXECUTION_UPDATE_FIELDS) {
     if (field === 'attemptHistory') continue;
@@ -260,6 +282,9 @@ function updateValues(value: PlainRecord): PlainRecord {
       result[field] = field === 'summary' || field === 'error' ? boundedText(value[field]) : value[field];
   }
   if ('attemptHistory' in value) result.attemptHistory = JSON.stringify(attemptHistory(value.attemptHistory));
+  const merged = { ...current, ...value };
+  if (ACTIVE_EXECUTION_STATES.has(String(merged.status ?? ''))) result.activeExecutionKey = activeExecutionKey(merged);
+  else if (EXECUTION_STATES.has(String(merged.status ?? ''))) result.activeExecutionKey = null;
   if (value.status === 'queued') {
     if (!('startedAt' in value) || value.startedAt === undefined) result.startedAt = null;
     if (!('finishedAt' in value) || value.finishedAt === undefined) result.finishedAt = null;
@@ -331,6 +356,22 @@ export class SequelizeAutomationStore implements AutomationStore {
     return safeExecution(record);
   }
 
+  async findActiveExecution(input: { runCaseId: number; exampleIndex: number | null }): Promise<StoredExecution | null> {
+    const runCaseId = positiveId(input.runCaseId);
+    const exampleIndex = input.exampleIndex === null ? null : Number(input.exampleIndex);
+    if (exampleIndex !== null && (!Number.isSafeInteger(exampleIndex) || exampleIndex < 0)) return null;
+    return safeExecution(
+      await this.models.AutomationExecution.findOne({
+        where: {
+          runCaseId,
+          exampleIndex,
+          status: { [Op.in]: [...ACTIVE_EXECUTION_STATES] },
+        },
+        order: [['id', 'ASC']],
+      })
+    );
+  }
+
   async createDefinition(value: PlainRecord): Promise<PlainRecord> {
     const data = {
       projectId: positiveId(value.projectId),
@@ -364,8 +405,15 @@ export class SequelizeAutomationStore implements AutomationStore {
         projectId: Number(data.projectId),
         idempotencyKey: String(data.idempotencyKey),
       });
-      if (!existing) throw error;
-      return existing;
+      if (existing) return existing;
+      if (data.activeExecutionKey && data.runCaseId !== undefined) {
+        const active = await this.findActiveExecution({
+          runCaseId: Number(data.runCaseId),
+          exampleIndex: data.exampleIndex === undefined || data.exampleIndex === null ? null : Number(data.exampleIndex),
+        });
+        if (active) throw new Error('automation_execution_active');
+      }
+      throw error;
     }
   }
 
@@ -429,7 +477,7 @@ export class SequelizeAutomationStore implements AutomationStore {
   async updateExecution(executionId: string, value: PlainRecord): Promise<StoredExecution> {
     const record = (await this.models.AutomationExecution.findByPk(String(executionId))) as ModelInstance | null;
     if (!record || typeof record.update !== 'function') throw new Error('execution_not_found');
-    await record.update(updateValues(value));
+    await record.update(updateValues(value, plain(record) ?? {}));
     const result = safeExecution(record);
     if (!result) throw new Error('automation_execution_invalid');
     return result;
@@ -440,7 +488,7 @@ export class SequelizeAutomationStore implements AutomationStore {
     if (!current) throw new Error('execution_not_found');
     if (['passed', 'failed', 'error', 'cancelled'].includes(current.status)) return current;
     const transitioned = transitionExecution(current, 'cancelled');
-    await this.models.AutomationExecution.update(updateValues(transitioned), {
+    await this.models.AutomationExecution.update(updateValues(transitioned, plain(current) ?? {}), {
       where: { id: String(executionId), status: current.status },
     });
     return (await this.findExecution(executionId)) ?? current;
@@ -503,11 +551,32 @@ export class SequelizeAutomationStore implements AutomationStore {
     };
   }
 
-  async updateRunCaseStatus(input: { runCaseId: number; projectId: number; status: number }): Promise<void> {
+  async updateRunCaseStatus(input: RunCaseStatusUpdate): Promise<void> {
     if (![1, 2].includes(input.status)) throw new Error('run_case_status_invalid');
     const runCase = await this.findRunCase(input.runCaseId);
     if (!runCase || runCase.projectId !== positiveId(input.projectId)) throw new Error('run_case_not_found');
-    await this.models.RunCase.update({ status: input.status }, { where: { id: runCase.id } });
+    const current = plain(await this.models.AutomationExecution.findByPk(String(input.executionId)));
+    if (!current || Number(current.projectId) !== runCase.projectId || Number(current.runCaseId) !== runCase.id)
+      throw new Error('run_case_execution_not_found');
+
+    const statusFor = (value: unknown): 1 | 2 | undefined =>
+      value === 'passed' ? 1 : value === 'failed' ? 2 : undefined;
+    let status = statusFor(current.status);
+    const evidenceUnavailable = current.status === 'error' && current.errorKind === 'evidence';
+    const isExampleExecution = current.exampleIndex !== undefined && current.exampleIndex !== null;
+    if (isExampleExecution) {
+      const executions = await this.models.AutomationExecution.findAll({
+        where: { runCaseId: runCase.id, projectId: runCase.projectId },
+      });
+      const statuses = [current, ...executions.map((execution) => plain(execution)).filter(Boolean)].map((execution) =>
+        statusFor(execution?.status)
+      );
+      status = statuses.includes(2) || evidenceUnavailable ? 2 : undefined;
+    } else if (evidenceUnavailable) {
+      status = RUN_CASE_STATUS.failed;
+    }
+    if (status === undefined) return;
+    await this.models.RunCase.update({ status }, { where: { id: runCase.id } });
   }
 
   async listArtifacts(executionId: string): Promise<unknown[]> {
@@ -533,6 +602,10 @@ export class SequelizeAutomationStore implements AutomationStore {
       projectId,
       attempt: Number(source.attempt),
       kind: source.kind,
+      filename:
+        String(source.storageKey ?? '')
+          .split('/')
+          .pop() || undefined,
       storageKey: source.storageKey,
       mimeType: source.mimeType,
       size: Number(source.size),
