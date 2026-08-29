@@ -158,6 +158,7 @@ export function createAutomationApplication({
       const snapshot = composeCanonicalSnapshot(source);
       if (!snapshot.ok) throw new AutomationError(400, 'invalid_source', snapshot.errors);
       const exampleIndex = resolveExampleIndex(snapshot.snapshot, input.exampleIndex);
+      const llmModel = (await store.findHerculesModel?.(input.projectId)) ?? undefined;
       if (input.runCaseId !== undefined && store.findActiveExecution) {
         const active = await store.findActiveExecution({ runCaseId: input.runCaseId, exampleIndex });
         if (active) {
@@ -191,6 +192,7 @@ export function createAutomationApplication({
           correlationId: input.correlationId ?? randomUUID(),
           status: 'queued',
           attempt: 1,
+          ...(llmModel ? { model: llmModel } : {}),
         });
       } catch (error) {
         if (error instanceof Error && error.message === 'automation_execution_active') {
@@ -211,6 +213,7 @@ export function createAutomationApplication({
           exampleIndex === null ? snapshot.snapshot.feature : presentExampleSnapshot(snapshot.snapshot, exampleIndex),
         environment: resolvedEnvironment,
         ...(input.executorKey ? { executorKey: input.executorKey } : {}),
+        ...(llmModel ? { llmModel } : {}),
       });
       return { ...execution, jobId, snapshotHash: snapshot.snapshot.hash };
     },

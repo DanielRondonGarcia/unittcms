@@ -40,6 +40,8 @@ function models(overrides: Partial<Record<keyof AutomationModels, Record<string,
     AutomationExecution: model(overrides.AutomationExecution),
     TestEnvironment: model(overrides.TestEnvironment),
     ExecutionArtifact: model(overrides.ExecutionArtifact),
+    ...(overrides.ExecutionEvent ? { ExecutionEvent: model(overrides.ExecutionEvent) } : {}),
+    ...(overrides.Organization ? { Organization: model(overrides.Organization) } : {}),
   } as unknown as AutomationModels;
 }
 
@@ -145,6 +147,203 @@ describe('Sequelize automation store', () => {
     expect(JSON.stringify(resolved)).not.toContain('must-not-leak');
   });
 
+  it('loads ordered execution events and serializes bounded diagnostics without leaking unrelated fields', async () => {
+    const execution = record({
+      id: 12,
+      projectId: 10,
+      caseId: 7,
+      status: 'error',
+      attempt: 1,
+      diagnostics: JSON.stringify({ exitCode: 2, stderr: 'api_key=must-not-leak' }),
+    });
+    const events = [
+      record({
+        id: 2,
+        executionId: 12,
+        attempt: 1,
+        sequence: 130,
+        eventType: 'error',
+        message: 'failed',
+        details: '{}',
+      }),
+      record({ id: 1, executionId: 12, attempt: 1, sequence: 110, eventType: 'queued', message: 'queued' }),
+    ];
+    const data = models({
+      AutomationExecution: { findByPk: vi.fn(async () => execution) },
+      ExecutionEvent: {
+        findAll: vi.fn(async () => events),
+        create: vi.fn(async (value) => record({ id: 3, ...value })),
+        findOne: vi.fn(async () => null),
+      },
+    });
+    const store = new SequelizeAutomationStore(data);
+
+    const found = await store.findExecution('12');
+    const appended = await store.appendExecutionEvent?.({
+      executionId: '12',
+      attempt: 1,
+      sequence: 120,
+      type: 'running',
+      message: 'started',
+      details: { diagnostics: { stderr: 'safe output' }, secret: 'must-not-leak' },
+    });
+
+    expect(found?.events).toEqual([
+      expect.objectContaining({ sequence: 110, type: 'queued' }),
+      expect.objectContaining({ sequence: 130, type: 'error' }),
+    ]);
+    expect(found?.diagnostics).toEqual({ exitCode: 2, stderr: 'api_key=[REDACTED]' });
+    expect(JSON.stringify(found)).not.toContain('must-not-leak');
+    expect(appended).toMatchObject({ executionId: '12', sequence: 120, type: 'running' });
+    expect(data.ExecutionEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionId: '12',
+        sequence: 120,
+        eventType: 'running',
+        details: '{"diagnostics":{"stderr":"safe output"}}',
+      })
+    );
+  });
+
+  it('sanitizes direct writes and legacy execution reads across result, history, diagnostics, and event text', async () => {
+    const canary = 'topsecret';
+    const rawSummary = `Safe summary api_key=${canary}`;
+    const rawError = `{"outer":{"api_key":"${canary}"}}`;
+    const rawHistory = [
+      {
+        attempt: 1,
+        status: 'error',
+        error: `api_key="${canary}"`,
+        nested: `{"token":"${canary}"}`,
+      },
+    ];
+    const execution = record({
+      id: 'e1',
+      projectId: 10,
+      caseId: 7,
+      status: 'error',
+      attempt: 1,
+      summary: rawSummary,
+      error: rawError,
+      errorKind: 'technical',
+      attemptHistory: JSON.stringify(rawHistory),
+      diagnostics: JSON.stringify({ stderr: `api_key=[${canary}]` }),
+    });
+    const legacyEvent = record({
+      id: 2,
+      executionId: 'e1',
+      attempt: 1,
+      sequence: 130,
+      eventType: 'error',
+      message: `{"message":"api_key=${canary}"}`,
+      details: '{}',
+    });
+    const createExecution = vi.fn(async (value: Record<string, unknown>) =>
+      record({ id: 'e2', projectId: 10, caseId: 7, status: 'error', attempt: 1, ...value })
+    );
+    const createEvent = vi.fn(async (value: Record<string, unknown>) => record({ id: 3, ...value }));
+    const data = models({
+      AutomationExecution: {
+        create: createExecution,
+        findByPk: vi.fn(async () => execution),
+      },
+      ExecutionEvent: {
+        findAll: vi.fn(async () => [legacyEvent]),
+        create: createEvent,
+        findOne: vi.fn(async () => null),
+      },
+    });
+    const store = new SequelizeAutomationStore(data);
+
+    const created = await store.createExecution({
+      projectId: 10,
+      caseId: 7,
+      status: 'error',
+      attempt: 1,
+      summary: rawSummary,
+      error: rawError,
+      errorKind: 'technical',
+      attemptHistory: rawHistory,
+      diagnostics: { stderr: `api_key=[${canary}]` },
+    });
+    const updated = await store.updateExecution('e1', {
+      summary: rawSummary,
+      error: rawError,
+      errorKind: 'technical',
+      attemptHistory: rawHistory,
+      diagnostics: { stderr: `api_key=[${canary}]` },
+    });
+    const found = await store.findExecution('e1');
+    const appended = await store.appendExecutionEvent?.({
+      executionId: 'e1',
+      attempt: 1,
+      sequence: 140,
+      type: 'error',
+      message: `api_key=[${canary}]`,
+    });
+    const safeError = '{"outer":{"api_key":"[REDACTED]"}}';
+
+    expect(createExecution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary: 'Safe summary api_key=[REDACTED]',
+        error: safeError,
+        attemptHistory: JSON.stringify([
+          {
+            attempt: 1,
+            status: 'error',
+            error: 'api_key="[REDACTED]"',
+            nested: '{"token":"[REDACTED]"}',
+          },
+        ]),
+        diagnostics: '{"stderr":"api_key=[REDACTED]"}',
+      })
+    );
+    expect(execution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary: 'Safe summary api_key=[REDACTED]',
+        error: safeError,
+        attemptHistory: expect.not.stringContaining(canary),
+        diagnostics: '{"stderr":"api_key=[REDACTED]"}',
+      })
+    );
+    expect(created).toMatchObject({ summary: 'Safe summary api_key=[REDACTED]', error: safeError });
+    expect(updated).toMatchObject({ summary: 'Safe summary api_key=[REDACTED]', error: safeError });
+    expect(found).toMatchObject({ summary: 'Safe summary api_key=[REDACTED]', error: safeError });
+    expect(found?.attemptHistory).toEqual([
+      {
+        attempt: 1,
+        status: 'error',
+        error: 'api_key="[REDACTED]"',
+        nested: '{"token":"[REDACTED]"}',
+      },
+    ]);
+    expect(found?.diagnostics).toEqual({ stderr: 'api_key=[REDACTED]' });
+    expect(found?.events).toEqual([expect.objectContaining({ message: '{"message":"api_key=[REDACTED]"}' })]);
+    expect(appended).toMatchObject({ message: 'api_key=[REDACTED]' });
+    expect(createEvent).toHaveBeenCalledWith(expect.objectContaining({ message: 'api_key=[REDACTED]' }));
+    expect(JSON.stringify({ created, updated, found, appended })).not.toContain(canary);
+  });
+
+  it('resolves the organization model through the project association', async () => {
+    const data = models({
+      Project: { findByPk: vi.fn(async () => record({ id: 10, userId: 7, organizationId: 4 })) },
+      Organization: { findByPk: vi.fn(async () => record({ id: 4, ownerUserId: 7, herculesModel: 'org-model' })) },
+    });
+
+    await expect(new SequelizeAutomationStore(data).findHerculesModel?.(10)).resolves.toBe('org-model');
+  });
+
+  it('does not resolve a Hercules model from an organization outside the project owner scope', async () => {
+    const data = models({
+      Project: { findByPk: vi.fn(async () => record({ id: 10, userId: 7, organizationId: 99 })) },
+      Organization: {
+        findByPk: vi.fn(async () => record({ id: 99, ownerUserId: 42, herculesModel: 'foreign-model' })),
+      },
+    });
+
+    await expect(new SequelizeAutomationStore(data).findHerculesModel?.(10)).resolves.toBeNull();
+  });
+
   it('finds legacy active RunCase executions without a backfilled key and clears the key when terminal', async () => {
     const execution = record({
       id: 'e1',
@@ -174,6 +373,47 @@ describe('Sequelize automation store', () => {
     );
     await store.updateExecution('e1', { status: 'passed' });
     expect(execution.update).toHaveBeenCalledWith(expect.objectContaining({ activeExecutionKey: null }));
+  });
+
+  it('clears retry failure metadata when a later attempt passes while preserving history', async () => {
+    const execution = record({
+      id: 'e1',
+      projectId: 10,
+      caseId: 7,
+      status: 'running',
+      attempt: 2,
+      error: 'connection lost',
+      errorKind: 'technical',
+      diagnostics: JSON.stringify({ stderr: 'old failure output' }),
+      lastAttemptStatus: 'error',
+      attemptHistory: JSON.stringify([{ attempt: 1, status: 'error' }]),
+    });
+    const data = models({
+      AutomationExecution: { findByPk: vi.fn(async () => execution) },
+    });
+    const store = new SequelizeAutomationStore(data);
+
+    const updated = await store.updateExecution('e1', {
+      status: 'passed',
+      attempt: 2,
+      attemptHistory: [
+        { attempt: 1, status: 'error' },
+        { attempt: 2, status: 'passed' },
+      ],
+    });
+
+    expect(updated).toMatchObject({ status: 'passed', attempt: 2 });
+    expect(updated.attemptHistory).toEqual([
+      { attempt: 1, status: 'error' },
+      { attempt: 2, status: 'passed' },
+    ]);
+    expect(updated).not.toHaveProperty('error');
+    expect(updated).not.toHaveProperty('errorKind');
+    expect(updated).not.toHaveProperty('diagnostics');
+    expect(updated).not.toHaveProperty('lastAttemptStatus');
+    expect(execution.update).toHaveBeenCalledWith(
+      expect.objectContaining({ error: null, errorKind: null, diagnostics: null, lastAttemptStatus: null })
+    );
   });
 
   it('turns a unique-key race into the active execution error while checking legacy rows', async () => {

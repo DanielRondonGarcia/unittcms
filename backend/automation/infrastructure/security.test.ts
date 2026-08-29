@@ -193,6 +193,32 @@ describe('private artifact storage', () => {
       'artifact_contains_secret'
     );
   });
+
+  it.each([
+    ['nested JSON API key', '{"outer":{"api_key":"fixture-api-key"}}'],
+    ['camel-case JSON token', '{"tokenValue":"fixture-token"}'],
+    ['quoted JSON password', '{"payload":"{\\"password\\":\\"fixture-password\\"}"}'],
+    ['JSON authorization bearer', '{"authorization":"Bearer fixture-bearer"}'],
+  ])('rejects %s before writing an artifact', async (_label, content) => {
+    const root = await newRoot();
+    const storage = new FileArtifactStorage({ rootDir: root });
+
+    await expect(
+      storage.put(input({ content: Buffer.from(content), mimeType: 'application/json', filename: 'diagnostics.json' }))
+    ).rejects.toThrow('artifact_contains_secret');
+  });
+
+  it('keeps safe structured placeholders storable without persisting credentials', async () => {
+    const content = '{"token":"<redacted>","apiKey":"[REDACTED]","password":"placeholder"}';
+    const storage = new FileArtifactStorage({ rootDir: await newRoot() });
+
+    const ref = await storage.put(
+      input({ content: Buffer.from(content), mimeType: 'application/json', filename: 'diagnostics.json' })
+    );
+
+    expect((await storage.get(ref.storageKey)).toString()).toBe(content);
+    expect(content).not.toContain('fixture-');
+  });
 });
 
 describe('artifact application boundary', () => {

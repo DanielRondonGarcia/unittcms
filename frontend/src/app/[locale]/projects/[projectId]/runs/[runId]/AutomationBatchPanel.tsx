@@ -18,6 +18,7 @@ import { TokenContext } from '@/utils/TokenProvider';
 import {
   fetchAutomationEnvironments,
   fetchAutomationHistory,
+  formatAutomationError,
   formatAutomationExampleLabel,
   isAutomationActive,
   runAutomationBatch,
@@ -58,6 +59,18 @@ function executionStatusLabel(execution: AutomationExecution, messages: RunMessa
     : statusLabel(execution.status, messages);
 }
 
+function executionErrorMessage(execution: AutomationExecution, messages: RunMessages): string | undefined {
+  return formatAutomationError(
+    {
+      code: execution.error,
+      errorKind: execution.errorKind,
+      status: execution.status,
+      timedOut: execution.diagnostics?.timedOut === true,
+    },
+    messages
+  );
+}
+
 function batchCaseLabel(testCase: AutomationBatchCase, messages: RunMessages): string {
   return testCase.exampleIndex === undefined || testCase.exampleIndex === null
     ? testCase.title
@@ -66,9 +79,7 @@ function batchCaseLabel(testCase: AutomationBatchCase, messages: RunMessages): s
 
 function resultLabel(result: AutomationBatchResult, messages: RunMessages): string {
   if (result.execution) return executionStatusLabel(result.execution, messages);
-  if (result.error === 'evidence_junit_missing' || result.error === 'evidence_junit_invalid' || result.error === 'evidence_secret_detected')
-    return messages.automationEvidenceInsufficient;
-  return result.error ?? messages.automationError;
+  return formatAutomationError({ code: result.error }, messages) ?? messages.automationError;
 }
 
 export default function AutomationBatchPanel({
@@ -127,8 +138,8 @@ export default function AutomationBatchPanel({
 
   const batchPollingActive = Boolean(accessToken && isAuthorized && eligibleCases.length > 0);
   const batchPollingKey = eligibleCases.map(automationBatchCaseKey).join('|');
-  const hasActiveBatchExecution = results.some(
-    (result) => Boolean(result.execution && isAutomationActive(result.execution.status))
+  const hasActiveBatchExecution = results.some((result) =>
+    Boolean(result.execution && isAutomationActive(result.execution.status))
   );
 
   useEffect(() => {
@@ -294,46 +305,50 @@ export default function AutomationBatchPanel({
         <div className="mt-4 space-y-2">
           <p className="text-sm font-semibold">{messages.runGherkinCasesComplete}</p>
           <ul className="space-y-1 text-sm">
-            {results.map((result) => (
-              <li key={automationBatchCaseKey(result)} className="flex min-w-0 flex-wrap items-center gap-2">
-                <span
-                  className="min-w-0 max-w-full flex-1 truncate"
-                  title={batchCaseLabel(result, messages)}
-                  aria-label={batchCaseLabel(result, messages)}
-                >
-                  {batchCaseLabel(result, messages)}
-                </span>
-                <div className="min-w-0">
-                  <Chip
-                    size="sm"
-                    className="max-w-full"
-                    color={
-                      result.error ||
-                      result.execution?.status === 'failed' ||
-                      result.execution?.status === 'error' ||
-                      result.execution?.errorKind === 'evidence'
-                        ? 'danger'
-                        : result.execution?.status === 'passed'
-                          ? 'success'
-                          : 'warning'
-                    }
+            {results.map((result) => {
+              const feedback = result.execution
+                ? executionErrorMessage(result.execution, messages)
+                : formatAutomationError({ code: result.error }, messages);
+              return (
+                <li key={automationBatchCaseKey(result)} className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span
+                    className="min-w-0 max-w-full flex-1 truncate"
+                    title={batchCaseLabel(result, messages)}
+                    aria-label={batchCaseLabel(result, messages)}
                   >
-                    <span className="break-words">
-                      {resultLabel(result, messages)}
-                    </span>
-                  </Chip>
-                  {result.errorFields && result.errorFields.length > 0 && (
-                    <ul className="mt-1 list-disc space-y-1 ps-5 text-danger">
-                      {result.errorFields.map((field, index) => (
-                        <li key={`${field.field}-${index}`} className="break-words">
-                          <code translate="no">{field.field}</code>: {field.message}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </li>
-            ))}
+                    {batchCaseLabel(result, messages)}
+                  </span>
+                  <div className="min-w-0">
+                    <Chip
+                      size="sm"
+                      className="max-w-full"
+                      color={
+                        result.error ||
+                        result.execution?.status === 'failed' ||
+                        result.execution?.status === 'error' ||
+                        result.execution?.errorKind === 'evidence'
+                          ? 'danger'
+                          : result.execution?.status === 'passed'
+                            ? 'success'
+                            : 'warning'
+                      }
+                    >
+                      <span className="break-words">{resultLabel(result, messages)}</span>
+                    </Chip>
+                    {result.errorFields && result.errorFields.length > 0 && (
+                      <ul className="mt-1 list-disc space-y-1 ps-5 text-danger">
+                        {result.errorFields.map((field, index) => (
+                          <li key={`${field.field}-${index}`} className="break-words">
+                            <code translate="no">{field.field}</code>: {field.message}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {feedback && <p className="mt-1 break-words text-danger">{feedback}</p>}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

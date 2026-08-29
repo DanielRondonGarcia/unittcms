@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  createExecutionResultSanitizer,
+  type ExecutionResultSanitizer,
+} from './compatibility/execution-result-safety.js';
 import { NeutralExecutorRegistry } from './ports/registry.js';
 import type {
   AutomationStore,
@@ -315,7 +319,10 @@ describe('automation queue and worker boundary', () => {
     const runCase = makeRunCaseStatus();
     const updater = new WorkerResultUpdater(data.store, 'server-secret', runCase.update);
     const signed = signWorkerEvent(
-      event({ outcome, ...(outcome === 'evidence_error' ? { outcome: 'technical_error', errorKind: 'evidence' } : {}) }),
+      event({
+        outcome,
+        ...(outcome === 'evidence_error' ? { outcome: 'technical_error', errorKind: 'evidence' } : {}),
+      }),
       'server-secret'
     );
 
@@ -416,6 +423,166 @@ describe('automation queue and worker boundary', () => {
     expect(runCase.read().status).toBe(2);
   });
 
+  it('clears stale retry failure metadata after a successful terminal attempt', async () => {
+    const data = makeStore({
+      ...initial,
+      status: 'running',
+      attempt: 1,
+      error: 'connection lost',
+      errorKind: 'technical',
+      diagnostics: { stderr: 'old failure output' },
+      lastAttemptStatus: 'error',
+      errorFields: [{ field: 'worker', code: 'technical', message: 'old failure' }],
+    });
+    const updater = new WorkerResultUpdater(data.store, 'server-secret');
+
+    const retried = await updater.record(
+      signWorkerEvent(
+        event({ outcome: 'technical_error', recoverable: true, error: 'connection lost', errorCategory: 'technical' }),
+        'server-secret'
+      )
+    );
+    expect(retried).toMatchObject({ status: 'queued', attempt: 2 });
+
+    const passed = await updater.record(
+      signWorkerEvent(event({ attempt: 2, jobId: 'e1:attempt:2', outcome: 'passed' }), 'server-secret')
+    );
+
+    expect(passed).toMatchObject({ status: 'passed', attempt: 2 });
+    expect(passed).toMatchObject({
+      error: null,
+      errorKind: null,
+      diagnostics: null,
+      lastAttemptStatus: null,
+      errorFields: null,
+    });
+    expect(passed.attemptHistory).toEqual([
+      expect.objectContaining({ attempt: 1, status: 'error', outcome: 'technical_error' }),
+      expect.objectContaining({ attempt: 2, status: 'passed', outcome: 'passed' }),
+    ]);
+  });
+
+  it('records ordered execution timeline events without exposing diagnostic secrets', async () => {
+    const data = makeStore({ ...initial, status: 'running' });
+    const events = vi.fn(async (value: Record<string, unknown>) => ({
+      id: `event-${events.mock.calls.length}`,
+      executionId: 'e1',
+      attempt: value.attempt,
+      sequence: value.sequence,
+      type: value.type,
+    }));
+    const updater = new WorkerResultUpdater(
+      { ...data.store, appendExecutionEvent: events } as unknown as Pick<
+        AutomationStore,
+        'findExecution' | 'updateExecution' | 'appendExecutionEvent'
+      >,
+      'server-secret'
+    );
+
+    await updater.record(
+      signWorkerEvent(
+        event({
+          outcome: 'functional_failure',
+          diagnostics: { exitCode: 2, stderr: 'safe redacted output' },
+        }),
+        'server-secret'
+      )
+    );
+
+    expect(events).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'failed',
+        sequence: 130,
+        details: { diagnostics: { exitCode: 2, stderr: 'safe redacted output' } },
+      })
+    );
+    expect(events.mock.calls).toHaveLength(1);
+  });
+
+  it('redacts executor result fields before signing, persistence, history, and timeline delivery', async () => {
+    const canary = 'topsecret';
+    const configuredLlmSecret = 'llm-random-secret';
+    const resultSanitizer = createExecutionResultSanitizer([configuredLlmSecret]);
+    const timeline: Record<string, unknown>[] = [];
+    const executor = {
+      execute: vi.fn(async () => ({
+        outcome: 'functional_failure' as const,
+        summary: `Safe summary; api_key=${canary}; ${configuredLlmSecret}`,
+        error: `{"outer":{"api_key":"${canary}","token":"${configuredLlmSecret}"}}`,
+        diagnostics: { stderr: `stderr api_key="${canary}" ${configuredLlmSecret}` },
+      })),
+      cancel: vi.fn(async () => undefined),
+      health: vi.fn(async () => ({ ready: true, status: 'test' })),
+    };
+    const registry = new NeutralExecutorRegistry();
+    registry.register('injected', executor);
+    const data = makeStore();
+    const updater = new WorkerResultUpdater(
+      {
+        ...data.store,
+        appendExecutionEvent: vi.fn(async (value: Record<string, unknown>) => timeline.push(value)),
+      } as unknown as Pick<AutomationStore, 'findExecution' | 'updateExecution' | 'appendExecutionEvent'>,
+      'server-secret',
+      undefined,
+      resultSanitizer
+    );
+    const worker = new ExecutionWorker(registry, updater, {
+      secret: 'server-secret',
+      phase0Ready: true,
+      resultSanitizer,
+    });
+
+    const result = await worker.process({ ...job, executorKey: 'injected' });
+    const patch = data.updateExecution.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    const expectedError = `{"outer":{"api_key":"[REDACTED]","token":"[REDACTED]"}}`;
+
+    expect(patch.summary).toBe(`Safe summary; api_key=[REDACTED]; [REDACTED]`);
+    expect(patch.error).toBe(expectedError);
+    expect(patch.diagnostics).toEqual({ stderr: 'stderr api_key="[REDACTED]" [REDACTED]' });
+    expect(patch.attemptHistory).toEqual([expect.objectContaining({ error: expectedError })]);
+    expect(timeline).toContainEqual(expect.objectContaining({ type: 'failed', message: expectedError }));
+    expect(JSON.stringify({ patch, result, timeline })).not.toContain(canary);
+    expect(JSON.stringify({ patch, result, timeline })).not.toContain(configuredLlmSecret);
+    expect(JSON.stringify(executor.execute.mock.calls[0][0])).not.toContain(configuredLlmSecret);
+  });
+
+  it('redacts already-signed legacy result payloads again at the updater boundary', async () => {
+    const timeline: Record<string, unknown>[] = [];
+    const data = makeStore({ ...initial, status: 'running' });
+    const identitySanitizer: ExecutionResultSanitizer = {
+      text: (value) => (value === undefined || value === null ? null : String(value)),
+      diagnostics: (value) => value as ExecutorResult['diagnostics'],
+      attemptHistory: (value) => (Array.isArray(value) ? value : []),
+      eventMessage: (value) => (value === undefined || value === null ? null : String(value)),
+    };
+    const updater = new WorkerResultUpdater(
+      {
+        ...data.store,
+        appendExecutionEvent: vi.fn(async (value: Record<string, unknown>) => timeline.push(value)),
+      } as unknown as Pick<AutomationStore, 'findExecution' | 'updateExecution' | 'appendExecutionEvent'>,
+      'server-secret'
+    );
+    const signed = signWorkerEvent(
+      event({
+        outcome: 'functional_failure',
+        summary: 'Safe summary api_key=topsecret',
+        error: '{"nested":{"token":"topsecret"}}',
+        diagnostics: { stderr: 'api_key="topsecret"' },
+      }),
+      'server-secret',
+      identitySanitizer
+    );
+
+    const result = await updater.record(signed);
+    const patch = data.updateExecution.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+
+    expect(patch.summary).toBe('Safe summary api_key=[REDACTED]');
+    expect(patch.error).toBe('{"nested":{"token":"[REDACTED]"}}');
+    expect(patch.attemptHistory).toEqual([expect.objectContaining({ error: '{"nested":{"token":"[REDACTED]"}}' })]);
+    expect(timeline).toContainEqual(expect.objectContaining({ message: '{"nested":{"token":"[REDACTED]"}}' }));
+    expect(JSON.stringify({ patch, result, timeline })).not.toContain('topsecret');
+  });
+
   it('maps an authenticated worker completion through the injected executor boundary', async () => {
     const executor = {
       execute: vi.fn(async () => ({ outcome: 'passed' as const })),
@@ -434,6 +601,30 @@ describe('automation queue and worker boundary', () => {
     await expect(worker.process({ ...job, executorKey: 'injected' })).resolves.toMatchObject({ status: 'passed' });
     expect(executor.execute).toHaveBeenCalledWith({ executionId: 'e1', snapshot: 'Feature: Login' });
     expect(runCase.read()).toMatchObject({ status: 1, history: [{ status: 3, source: 'manual' }] });
+  });
+
+  it('forwards the organization model snapshot to the executor without forwarding credentials', async () => {
+    const executor = {
+      execute: vi.fn(async () => ({ outcome: 'passed' as const })),
+      cancel: vi.fn(async () => undefined),
+      health: vi.fn(async () => ({ ready: true, status: 'test' })),
+    };
+    const registry = new NeutralExecutorRegistry();
+    registry.register('injected', executor);
+    const data = makeStore();
+    const worker = new ExecutionWorker(registry, new WorkerResultUpdater(data.store, 'server-secret'), {
+      secret: 'server-secret',
+      phase0Ready: true,
+    });
+
+    await worker.process({ ...job, executorKey: 'injected', llmModel: 'organization-model' });
+
+    expect(executor.execute).toHaveBeenCalledWith({
+      executionId: 'e1',
+      snapshot: 'Feature: Login',
+      llmModel: 'organization-model',
+    });
+    expect(JSON.stringify(executor.execute.mock.calls[0][0])).not.toContain('server-secret');
   });
 
   it('persists executor artifacts before emitting a metadata-only terminal event', async () => {

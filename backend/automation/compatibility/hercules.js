@@ -2,6 +2,7 @@ import { execFile as defaultExecFile, spawn as defaultSpawn } from 'node:child_p
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
+import { containsSecretBytes, containsSecretMaterial } from './diagnostics.js';
 const HERCULES_IMAGE =
   'testzeus/hercules:0.1.2@sha256:11ff3700104f92230bafdff1e85f43b8932e8a7df5ab85b7f7d00d3cea61f52c';
 const HERCULES_IMAGE_COMPONENT = '[a-z0-9]+(?:[._]|__|[-]*[a-z0-9]+)*';
@@ -254,6 +255,26 @@ function defaultKillProcessGroup(pid, signal, platform, execFileImpl) {
   }
   process.kill(pid, signal);
 }
+const MAX_PROCESS_OUTPUT = 16 * 1024;
+function boundedProcessOutput() {
+  let value = '';
+  let truncated = false;
+  return {
+    append(chunk) {
+      const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '');
+      const remaining = MAX_PROCESS_OUTPUT - value.length;
+      if (remaining <= 0) {
+        truncated = true;
+        return;
+      }
+      value += text.slice(0, remaining);
+      if (text.length > remaining) truncated = true;
+    },
+    read() {
+      return value ? `${value}${truncated ? '\n[output truncated]' : ''}` : '';
+    },
+  };
+}
 export function runHerculesProcess(
   invocation,
   {
@@ -276,6 +297,8 @@ export function runHerculesProcess(
       clearTimeout(timer);
       callback(value);
     };
+    const stdout = boundedProcessOutput();
+    const stderr = boundedProcessOutput();
     let child;
     try {
       child = spawnImpl(invocation.file, invocation.argv, {
@@ -283,22 +306,32 @@ export function runHerculesProcess(
         env: { PATH: process.env.PATH ?? '/usr/bin:/bin', ...runtimeEnv },
         shell: false,
         detached: true,
-        stdio: ['ignore', 'ignore', 'ignore'],
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
       finish(reject, error);
       return;
     }
-    child.once('error', (error) => finish(reject, error));
-    child.once('close', (exitCode, signal) => finish(resolveResult, { exitCode, signal }));
+    child.once('error', (error) =>
+      finish(reject, Object.assign(error, { stdout: stdout.read(), stderr: stderr.read() }))
+    );
+    child.stdout?.on('data', (chunk) => stdout.append(chunk));
+    child.stderr?.on('data', (chunk) => stderr.append(chunk));
+    child.once('close', (exitCode, signal) =>
+      finish(resolveResult, { exitCode, signal, stdout: stdout.read(), stderr: stderr.read() })
+    );
     timer = setTimeout(() => {
       try {
         if (child.pid) terminateProcess(-child.pid, 'SIGKILL');
       } catch {
         // The process may already have exited before termination completed.
       }
-      const error = new Error(`Hercules compatibility process exceeded ${timeoutMs}ms`);
-      error.code = 'ETIMEDOUT';
+      const error = Object.assign(new Error(`Hercules compatibility process exceeded ${timeoutMs}ms`), {
+        code: 'ETIMEDOUT',
+        timedOut: true,
+        stdout: stdout.read(),
+        stderr: stderr.read(),
+      });
       finish(reject, error);
     }, timeoutMs);
   });
@@ -310,22 +343,6 @@ function listFiles(root, current = root) {
     if (entry.isFile()) return [relative(root, absolute).replaceAll('\\', '/')];
     return [];
   });
-}
-function containsSecretMaterial(text) {
-  return (
-    /\b(?:password|api[_ -]?key|authorization|token)\s*[:=]\s*(?!<[^>]+>|redacted|placeholder|replace-me)[^\s"',;]+/i.test(
-      text
-    ) ||
-    /\bBearer\s+(?!<[^>]+>|redacted)[A-Za-z0-9._~-]{12,}/i.test(text) ||
-    /\bsk-[A-Za-z0-9_-]{12,}\b/.test(text)
-  );
-}
-function containsSecretBytes(bytes, secretValues = []) {
-  const value = Buffer.from(bytes);
-  return (
-    containsSecretMaterial(value.toString('latin1')) ||
-    secretValues.some((secret) => typeof secret === 'string' && secret && value.includes(Buffer.from(secret, 'utf8')))
-  );
 }
 function isUnsafeLiteralTarget(hostname) {
   const address = hostname.replace(/^\[|\]$/g, '');
@@ -479,17 +496,22 @@ export function collectCompatibilityEvidence(root, options = {}) {
     textFiles,
     binaryFiles,
     binaryScan,
-    secretFree: !containsSecretMaterial(text) && binaryScan.complete && binaryScan.suspiciousFiles.length === 0,
+    secretFree:
+      !containsSecretMaterial(text, secretValues) && binaryScan.complete && binaryScan.suspiciousFiles.length === 0,
   };
   if (allowLargeVideos || secretValues.length > 0) {
     evidence.executionSafe =
-      !containsSecretMaterial(text) &&
+      !containsSecretMaterial(text, secretValues) &&
       binaryScan.suspiciousFiles.length === 0 &&
       binaryScan.unscannedFiles.every((file) => allowLargeVideos && EVIDENCE_PATTERNS.videos.test(file));
   }
   return evidence;
 }
-export function collectExecutionArtifacts(root, { includeVideo = true } = {}) {
+/**
+ * @param {string} root
+ * @param {{ includeVideo?: boolean, secretValues?: readonly string[] }} [options]
+ */
+export function collectExecutionArtifacts(root, { includeVideo = true, secretValues = [] } = {}) {
   return listFiles(root)
     .sort()
     .flatMap((file) => {
@@ -508,7 +530,9 @@ export function collectExecutionArtifacts(root, { includeVideo = true } = {}) {
               : descriptor.mimeType;
       if (!mimeType) return [];
       try {
-        return [{ kind: descriptor.kind, filename: file, mimeType, content: readFileSync(join(root, file)) }];
+        const content = readFileSync(join(root, file));
+        if (containsSecretBytes(content, secretValues)) return [];
+        return [{ kind: descriptor.kind, filename: file, mimeType, content }];
       } catch {
         return [];
       }

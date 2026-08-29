@@ -56,6 +56,13 @@ export default function Page({ params }: { params: { projectId: string; locale: 
     automationLoading: t('automation_loading'),
     automationSaved: t('automation_saved'),
     automationError: t('automation_error'),
+    automationModel: t('automation_model'),
+    automationModelDescription: t('automation_model_description'),
+    automationModelPlaceholder: t('automation_model_placeholder'),
+    automationModelSave: t('automation_model_save'),
+    automationModelLoading: t('automation_model_loading'),
+    automationModelSaved: t('automation_model_saved'),
+    automationModelError: t('automation_model_error'),
   };
 
   const pt = useTranslations('ProjectDialog');

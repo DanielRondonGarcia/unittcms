@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import { containsSecretBytes, redactSecretMaterial } from '../compatibility/diagnostics.js';
 import type { ArtifactStorage } from '../ports/index.js';
 
 export type ArtifactInput = {
@@ -35,21 +36,8 @@ const MIME_EXTENSIONS: Record<string, string[]> = {
 };
 const TEXT_MIME_TYPES = new Set(['application/json', 'application/xml', 'text/xml', 'text/html', 'text/plain']);
 
-function containsSecretMaterial(text: string): boolean {
-  return (
-    /\b(?:password|api[_ -]?key|authorization|token)\s*[:=]\s*(?!<[^>]+>|redacted|placeholder|replace-me)[^\s"',;]+/i.test(
-      text
-    ) ||
-    /\bBearer\s+(?!<[^>]+>|redacted)[A-Za-z0-9._~-]{12,}/i.test(text) ||
-    /\bsk-[A-Za-z0-9_-]{12,}\b/.test(text)
-  );
-}
-
 export function redactSecretValues(value: string, secrets: readonly string[]): string {
-  return [...secrets]
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length)
-    .reduce((text, secret) => text.split(secret).join('[REDACTED]'), value);
+  return redactSecretMaterial(value, secrets);
 }
 
 function contained(root: string, target: string): boolean {
@@ -86,11 +74,7 @@ function prepare(input: ArtifactInput, options: Options): { bytes: Buffer; ref: 
   if (bytes.byteLength > maxBytes) throw new Error('artifact_size_exceeded');
   const text = TEXT_MIME_TYPES.has(mimeType) ? bytes.toString('utf8') : bytes.toString('latin1');
   if (TEXT_MIME_TYPES.has(mimeType) && text.includes('\ufffd')) throw new Error('artifact_unscannable');
-  if (
-    containsSecretMaterial(text) ||
-    options.secretValues?.some((secret) => secret && bytes.includes(Buffer.from(secret, 'utf8')))
-  )
-    throw new Error('artifact_contains_secret');
+  if (containsSecretBytes(bytes, options.secretValues ?? [])) throw new Error('artifact_contains_secret');
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const expiresAt = input.expiresAt ?? new Date(Date.now() + (options.retentionMs ?? 7 * 24 * 60 * 60 * 1000));
   if (Number.isNaN(expiresAt.getTime())) throw new Error('artifact_retention_invalid');

@@ -100,6 +100,12 @@ type RunMessages = {
   automationError: string;
   automationEvidenceInsufficient: string;
   automationCancelled: string;
+  automationTechnicalFailure: string;
+  automationFunctionalFailure: string;
+  automationEvidenceFailure: string;
+  automationCancelledDetail: string;
+  automationGenericFailure: string;
+  automationTimeoutDetail: string;
   noCasesFound: string;
   areYouSureLeave: string;
   type: string;
@@ -178,6 +184,7 @@ type RunDetailMessages = {
   runAutomatically: string;
   automationLoading: string;
   automationQueued: string;
+  automationRetrying: string;
   automationRunning: string;
   automationPassed: string;
   automationFailed: string;
@@ -213,6 +220,21 @@ type RunDetailMessages = {
   automationVideo: string;
   automationBackToHistory: string;
   automationNoVideo: string;
+  automationTimeline: string;
+  automationDiagnostics: string;
+  automationExitCode: string;
+  automationSignal: string;
+  automationOutput: string;
+  automationNoDiagnostics: string;
+  automationTimeout: string;
+  automationTimeoutDetail: string;
+  automationTechnicalFailure: string;
+  automationFunctionalFailure: string;
+  automationEvidenceFailure: string;
+  automationCancelledDetail: string;
+  automationGenericFailure: string;
+  automationDiagnosticsAvailable: string;
+  automationVideoDescription: string;
 };
 
 export type {

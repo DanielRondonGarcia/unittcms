@@ -20,6 +20,7 @@ export type ExecutorInput = {
 };
 export type ExecutorInvocation = ExecutorInput & {
   artifactSink?: (artifacts: ExecutorArtifact[]) => Promise<void>;
+  llmModel?: string;
 };
 export type ExecutorArtifact = {
   kind: string;
@@ -33,9 +34,29 @@ export type ExecutorResult = {
   summary?: string;
   error?: string;
   errorKind?: ExecutorErrorKind;
+  diagnostics?: {
+    exitCode?: number | null;
+    signal?: string | null;
+    timedOut?: boolean;
+    stdout?: string;
+    stderr?: string;
+  };
   artifacts?: ExecutorArtifact[];
 };
 export type ExecutorHealth = { key?: string; ready: boolean; status: string };
+
+export type StoredExecutionEventType = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'cancelled' | 'retrying';
+
+export type StoredExecutionEvent = {
+  id: string;
+  executionId: string;
+  attempt: number;
+  sequence: number;
+  type: StoredExecutionEventType;
+  message?: string;
+  details?: Record<string, unknown>;
+  createdAt?: string;
+};
 
 export interface AutomationExecutor {
   execute(input: ExecutorInvocation): Promise<ExecutorResult>;
@@ -43,7 +64,7 @@ export interface AutomationExecutor {
   health(): Promise<ExecutorHealth>;
 }
 
-export type ExecutionJob = ExecutorInput & { attempt: number; executorKey?: string };
+export type ExecutionJob = ExecutorInput & { attempt: number; executorKey?: string; llmModel?: string };
 export type QueueHealth = { ready: boolean; status: string };
 export interface ExecutionQueue {
   enqueue(job: ExecutionJob): Promise<string>;
@@ -96,8 +117,21 @@ export type StoredExecution = {
   idempotencyKey?: string;
   correlationId?: string;
   snapshotHash?: string;
+  diagnostics?: {
+    exitCode?: number | null;
+    signal?: string | null;
+    timedOut?: boolean;
+    stdout?: string;
+    stderr?: string;
+  } | null;
+  events?: StoredExecutionEvent[];
   [key: string]: unknown;
 };
+
+export function executionEventSequence(attempt: number, type: StoredExecutionEventType): number {
+  const phase = type === 'retrying' ? 5 : type === 'queued' ? 10 : type === 'running' ? 20 : 30;
+  return attempt * 100 + phase;
+}
 
 export const RUN_CASE_STATUS = { passed: 1, failed: 2 } as const;
 export type RunCaseStatusUpdate = {
@@ -120,6 +154,16 @@ export interface AutomationStore {
   createArtifact(value: Record<string, unknown>): Promise<Record<string, unknown>>;
   deleteArtifacts(storageKeys: readonly string[]): Promise<void>;
   findExecution(executionId: string): Promise<StoredExecution | null>;
+  appendExecutionEvent?(value: {
+    executionId: string;
+    attempt: number;
+    sequence: number;
+    type: StoredExecutionEventType;
+    message?: string;
+    details?: Record<string, unknown>;
+  }): Promise<StoredExecutionEvent>;
+  listExecutionEvents?(executionId: string): Promise<StoredExecutionEvent[]>;
+  findHerculesModel?(projectId: number): Promise<string | null>;
   updateExecution(executionId: string, value: Record<string, unknown>): Promise<StoredExecution>;
   cancelExecution?(executionId: string): Promise<StoredExecution>;
   listExecutions(query: Record<string, unknown>): Promise<{ items: StoredExecution[]; total: number }>;

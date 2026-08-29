@@ -1,8 +1,12 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { mapExecutorResult, transitionExecution } from './domain/index.js';
-import type { ExecutorErrorKind, ExecutorOutcome } from './domain/index.js';
+import type { ExecutorDiagnostics, ExecutorErrorKind, ExecutorOutcome } from './domain/index.js';
+import {
+  genericExecutionResultSanitizer,
+  type ExecutionResultSanitizer,
+} from './compatibility/execution-result-safety.js';
 /* prettier-ignore */
-import { RUN_CASE_STATUS } from './ports/index.js';
+import { executionEventSequence, RUN_CASE_STATUS } from './ports/index.js';
 /* prettier-ignore */
 import type {
   ArtifactStorage,
@@ -14,6 +18,7 @@ import type {
   ExecutorResult,
   RunCaseStatusUpdater,
   StoredExecution,
+  StoredExecutionEvent,
 } from './ports/index.js';
 
 const MAX_ATTEMPTS = 2;
@@ -221,16 +226,19 @@ async function persistArtifacts(
 
 function resultEvent(
   base: { executionId: string; attempt: number; correlationId: string; jobId: string },
-  outcome: ExecutorResult
+  outcome: ExecutorResult,
+  sanitizer: ExecutionResultSanitizer
 ): Extract<WorkerEvent, { phase: 'result' }> {
-  return {
+  const event: Extract<WorkerEvent, { phase: 'result' }> = {
     ...base,
     phase: 'result',
     outcome: outcome.outcome,
     ...(outcome.summary !== undefined ? { summary: outcome.summary } : {}),
     ...(outcome.error !== undefined ? { error: outcome.error } : {}),
     ...(outcome.errorKind !== undefined ? { errorKind: outcome.errorKind } : {}),
+    ...(outcome.diagnostics !== undefined ? { diagnostics: outcome.diagnostics } : {}),
   };
+  return sanitizeWorkerEvent(event, sanitizer) as Extract<WorkerEvent, { phase: 'result' }>;
 }
 
 /* prettier-ignore */
@@ -254,14 +262,73 @@ type WorkerEventBase = {
   errorKind?: ExecutorErrorKind;
   errorCategory?: string;
   recoverable?: boolean;
+  diagnostics?: ExecutorDiagnostics;
 };
 /* prettier-ignore */
 export type WorkerEvent = WorkerEventBase & ({ phase: 'running' } | { phase: 'result'; outcome: ExecutorOutcome; summary?: string });
 export type SignedWorkerEvent = WorkerEvent & { signature: string };
+function sanitizeWorkerEvent(event: WorkerEvent, sanitizer: ExecutionResultSanitizer): WorkerEvent {
+  const result = { ...event };
+  if ('summary' in result) {
+    const summary = sanitizer.text(result.summary);
+    if (summary === null) delete result.summary;
+    else result.summary = summary;
+  }
+  if ('error' in result) {
+    const error = sanitizer.text(result.error);
+    if (error === null) delete result.error;
+    else result.error = error;
+  }
+  if (result.diagnostics !== undefined) {
+    const diagnostics = sanitizer.diagnostics(result.diagnostics);
+    if (diagnostics) result.diagnostics = diagnostics;
+    else delete result.diagnostics;
+  }
+  return result;
+}
+function sanitizeStoredExecution(value: StoredExecution, sanitizer: ExecutionResultSanitizer): StoredExecution {
+  const result = { ...value };
+  if ('summary' in value) result.summary = sanitizer.text(value.summary);
+  if ('error' in value) result.error = sanitizer.text(value.error);
+  if ('attemptHistory' in value) result.attemptHistory = sanitizer.attemptHistory(value.attemptHistory);
+  if ('diagnostics' in value) {
+    if (value.diagnostics === null) result.diagnostics = null;
+    else {
+      const diagnostics = sanitizer.diagnostics(value.diagnostics);
+      if (diagnostics) result.diagnostics = diagnostics;
+      else delete result.diagnostics;
+    }
+  }
+  if (Array.isArray(value.events)) {
+    result.events = value.events.map((event): StoredExecutionEvent => {
+      const next = { ...event };
+      if (event.message !== undefined) {
+        const message = sanitizer.eventMessage(event.message);
+        if (message === null) delete next.message;
+        else next.message = message;
+      }
+      if (event.details?.diagnostics !== undefined) {
+        const diagnostics = sanitizer.diagnostics(event.details.diagnostics);
+        next.details = diagnostics ? { ...event.details, diagnostics } : { ...event.details };
+        if (!diagnostics) delete next.details.diagnostics;
+      }
+      return next;
+    });
+  }
+  return result;
+}
 /* prettier-ignore */
-function payload(event: WorkerEvent): string { return JSON.stringify([event.phase, event.executionId, event.attempt, event.correlationId, event.jobId, 'outcome' in event ? event.outcome : undefined, 'summary' in event ? event.summary : undefined, event.error, event.errorKind, event.errorCategory, event.recoverable]); }
+function payload(event: WorkerEvent): string { return JSON.stringify([event.phase, event.executionId, event.attempt, event.correlationId, event.jobId, 'outcome' in event ? event.outcome : undefined, 'summary' in event ? event.summary : undefined, event.error, event.errorKind, event.errorCategory, event.recoverable, event.diagnostics]); }
 /* prettier-ignore */
-export function signWorkerEvent(event: WorkerEvent, secret: string): SignedWorkerEvent { if (!secret) throw new WorkerBoundaryError('worker_secret_required'); return { ...event, signature: createHmac('sha256', secret).update(payload(event)).digest('hex') }; }
+export function signWorkerEvent(
+  event: WorkerEvent,
+  secret: string,
+  sanitizer: ExecutionResultSanitizer = genericExecutionResultSanitizer
+): SignedWorkerEvent {
+  if (!secret) throw new WorkerBoundaryError('worker_secret_required');
+  const safeEvent = sanitizeWorkerEvent(event, sanitizer);
+  return { ...safeEvent, signature: createHmac('sha256', secret).update(payload(safeEvent)).digest('hex') };
+}
 /* prettier-ignore */
 function verify(event: SignedWorkerEvent, secret: string): void { if (!secret || !event.signature) throw new WorkerBoundaryError('invalid_worker_signature'); const expected = createHmac('sha256', secret).update(payload(event)).digest('hex'); const actual = Buffer.from(event.signature); if (actual.length !== expected.length || !timingSafeEqual(actual, Buffer.from(expected))) throw new WorkerBoundaryError('invalid_worker_signature'); }
 /* prettier-ignore */
@@ -270,26 +337,105 @@ export function shouldRetry(result: { outcome: ExecutorOutcome; recoverable?: bo
 /* prettier-ignore */
 export class WorkerResultUpdater {
   constructor(
-    private readonly store: Pick<AutomationStore, 'findExecution' | 'updateExecution'>,
+    private readonly store: Pick<AutomationStore, 'findExecution' | 'updateExecution' | 'appendExecutionEvent'>,
     private readonly secret: string,
-    private readonly runCaseStatusUpdater?: RunCaseStatusUpdater
+    private readonly runCaseStatusUpdater?: RunCaseStatusUpdater,
+    private readonly resultSanitizer: ExecutionResultSanitizer = genericExecutionResultSanitizer
   ) {}
-  find(executionId: string): Promise<StoredExecution | null> { return this.store.findExecution(executionId); }
+  async find(executionId: string): Promise<StoredExecution | null> {
+    const current = await this.store.findExecution(executionId);
+    return current ? sanitizeStoredExecution(current, this.resultSanitizer) : null;
+  }
+  private async appendEvent(input: Parameters<NonNullable<AutomationStore['appendExecutionEvent']>>[0]): Promise<void> {
+    if (!this.store.appendExecutionEvent) return;
+    try {
+      await this.store.appendExecutionEvent(input);
+    } catch {
+      // Timeline persistence is best effort and must not change the execution result.
+    }
+  }
   async record(event: SignedWorkerEvent): Promise<StoredExecution> {
-    verify(event, this.secret); const current = await this.store.findExecution(event.executionId); if (!current) throw new WorkerBoundaryError('execution_not_found');
-    if (event.phase === 'result' && !VALID_OUTCOMES.has(event.outcome)) throw new WorkerBoundaryError('worker_result_invalid');
-    const key = `${event.jobId}:${event.phase}:${event.attempt}:${'outcome' in event ? event.outcome : ''}`; if (current.lastWorkerEvent === key) return current;
-    if (event.jobId !== jobIdFor(event) || current.attempt !== event.attempt || current.correlationId !== event.correlationId) throw new WorkerBoundaryError('worker_event_mismatch');
-    if (event.phase === 'running') { if (current.status === 'running') return current; if (current.status !== 'queued') throw new WorkerBoundaryError('worker_event_state'); return this.store.updateExecution(event.executionId, { ...transitionExecution(current, 'running'), lastWorkerEvent: key }); }
-    if (!event.outcome) throw new WorkerBoundaryError('worker_result_missing'); const mapped = mapExecutorResult(event);
-    if (TERMINAL.has(current.status)) { if (mapped.status === current.status) return current; throw new WorkerBoundaryError('worker_event_replay'); }
+    verify(event, this.secret);
+    const safeEvent = sanitizeWorkerEvent(event, this.resultSanitizer) as SignedWorkerEvent;
+    const found = await this.store.findExecution(event.executionId);
+    if (!found) throw new WorkerBoundaryError('execution_not_found');
+    const current = sanitizeStoredExecution(found, this.resultSanitizer);
+    if (safeEvent.phase === 'result' && !VALID_OUTCOMES.has(safeEvent.outcome))
+      throw new WorkerBoundaryError('worker_result_invalid');
+    const key = `${safeEvent.jobId}:${safeEvent.phase}:${safeEvent.attempt}:${'outcome' in safeEvent ? safeEvent.outcome : ''}`;
+    if (current.lastWorkerEvent === key) return current;
+    if (
+      safeEvent.jobId !== jobIdFor(safeEvent) ||
+      current.attempt !== safeEvent.attempt ||
+      current.correlationId !== safeEvent.correlationId
+    )
+      throw new WorkerBoundaryError('worker_event_mismatch');
+    if (safeEvent.phase === 'running') {
+      if (current.status === 'running') return current;
+      if (current.status !== 'queued') throw new WorkerBoundaryError('worker_event_state');
+      const updated = await this.store.updateExecution(safeEvent.executionId, {
+        ...transitionExecution(current, 'running'),
+        lastWorkerEvent: key,
+      });
+      await this.appendEvent({
+        executionId: safeEvent.executionId,
+        attempt: safeEvent.attempt,
+        sequence: executionEventSequence(safeEvent.attempt, 'running'),
+        type: 'running',
+        message: 'Execution started',
+      });
+      return sanitizeStoredExecution(updated, this.resultSanitizer);
+    }
+    if (!safeEvent.outcome) throw new WorkerBoundaryError('worker_result_missing');
+    const mapped = mapExecutorResult(safeEvent);
+    if (TERMINAL.has(current.status)) {
+      if (mapped.status === current.status) return current;
+      throw new WorkerBoundaryError('worker_event_replay');
+    }
     const base = current.status === 'queued' ? transitionExecution(current, 'running') : current;
-    const history = [...(Array.isArray(current.attemptHistory) ? current.attemptHistory : []), { attempt: event.attempt, status: mapped.status, outcome: event.outcome, error: event.error }];
+    const history = [
+      ...this.resultSanitizer.attemptHistory(current.attemptHistory),
+      {
+        attempt: safeEvent.attempt,
+        status: mapped.status,
+        outcome: safeEvent.outcome,
+        error: safeEvent.error,
+      },
+    ];
     const patch: Record<string, unknown> = { ...transitionExecution(base, mapped.status), ...mapped, attemptHistory: history, lastWorkerEvent: key };
-    if (shouldRetry(event) && event.attempt < MAX_ATTEMPTS) Object.assign(patch, { status: 'queued', attempt: event.attempt + 1, queuedAt: new Date().toISOString(), startedAt: undefined, finishedAt: undefined, durationMs: undefined, lastAttemptStatus: mapped.status });
+    if (mapped.status === 'passed')
+      Object.assign(patch, { error: null, errorKind: null, diagnostics: null, lastAttemptStatus: null, errorFields: null });
+    if (shouldRetry(safeEvent) && safeEvent.attempt < MAX_ATTEMPTS)
+      Object.assign(patch, {
+        status: 'queued',
+        attempt: safeEvent.attempt + 1,
+        queuedAt: new Date().toISOString(),
+        startedAt: undefined,
+        finishedAt: undefined,
+        durationMs: undefined,
+        lastAttemptStatus: mapped.status,
+      });
     const runCaseId = Number(current.runCaseId);
     const projectId = Number(current.projectId);
-    const updated = await this.store.updateExecution(event.executionId, patch);
+    const updated = await this.store.updateExecution(safeEvent.executionId, patch);
+    await this.appendEvent({
+      executionId: safeEvent.executionId,
+      attempt: safeEvent.attempt,
+      sequence: executionEventSequence(safeEvent.attempt, mapped.status),
+      type: mapped.status,
+      message: this.resultSanitizer.eventMessage(safeEvent.error ?? safeEvent.outcome) ?? safeEvent.outcome,
+      ...(mapped.diagnostics ? { details: { diagnostics: mapped.diagnostics } } : {}),
+    });
+    if (patch.status === 'queued' && Number(patch.attempt) === safeEvent.attempt + 1) {
+      await this.appendEvent({
+        executionId: safeEvent.executionId,
+        attempt: safeEvent.attempt + 1,
+        sequence: executionEventSequence(safeEvent.attempt + 1, 'retrying'),
+        type: 'retrying',
+        message: 'Retry queued',
+        details: { previousAttempt: safeEvent.attempt, outcome: safeEvent.outcome },
+      });
+    }
     const runCaseStatus =
       mapped.errorKind === 'evidence'
         ? RUN_CASE_STATUS.failed
@@ -309,11 +455,11 @@ export class WorkerResultUpdater {
         projectId,
         status: runCaseStatus,
         executionId: current.id,
-        attempt: event.attempt,
+        attempt: safeEvent.attempt,
         correlationId: String(current.correlationId),
       });
     }
-    return updated;
+    return sanitizeStoredExecution(updated, this.resultSanitizer);
   }
 }
 
@@ -325,6 +471,7 @@ type WorkerOptions = Limits & {
   hooks?: WorkerHooks;
   artifactStorage?: ArtifactStorage;
   artifactStore?: Pick<AutomationStore, 'createArtifact' | 'deleteArtifacts'>;
+  resultSanitizer?: ExecutionResultSanitizer;
 };
 /* prettier-ignore */
 export type WorkerRuntime = {
@@ -338,17 +485,17 @@ async function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T>
 
 /* prettier-ignore */
 export class ExecutionWorker {
-  private readonly config: Required<Pick<WorkerOptions, 'deadlineMs' | 'concurrency' | 'phase0Ready'>> & WorkerOptions;
+  private readonly config: Required<Pick<WorkerOptions, 'deadlineMs' | 'concurrency' | 'phase0Ready' | 'resultSanitizer'>> & WorkerOptions;
   private readonly active = new Map<string, { cancel(id: string): Promise<void> }>(); private accepting = true;
   private runtime?: WorkerRuntime;
   private heartbeatAt?: string;
-  constructor(private readonly registry: ExecutorRegistry, private readonly updater: WorkerResultUpdater, config: WorkerOptions) { this.config = { ...config, ...limit(config), phase0Ready: config.phase0Ready ?? false }; }
+  constructor(private readonly registry: ExecutorRegistry, private readonly updater: WorkerResultUpdater, config: WorkerOptions) { this.config = { ...config, ...limit(config), phase0Ready: config.phase0Ready ?? false, resultSanitizer: config.resultSanitizer ?? genericExecutionResultSanitizer }; }
   async process(job: WorkerJob): Promise<StoredExecution | undefined> {
     if (!this.accepting) throw new WorkerBoundaryError('worker_shutdown'); const current = await this.updater.find(job.executionId);
     if (!current?.correlationId) { emit(this.config.hooks, { executionId: job.executionId, jobId: job.jobId ?? jobIdFor(job), status: 'error', errorCategory: 'execution_missing' }); return undefined; }
     const base = { executionId: job.executionId, attempt: job.attempt, correlationId: current.correlationId, jobId: job.jobId ?? jobIdFor(job) };
-    await this.updater.record(signWorkerEvent({ ...base, phase: 'running' }, this.config.secret)); const executor = await this.registry.select(job.executorKey);
-    if (!executor) return this.updater.record(signWorkerEvent({ ...base, phase: 'result', outcome: 'technical_error', error: 'executor_not_configured', errorCategory: 'configuration' }, this.config.secret));
+    await this.updater.record(signWorkerEvent({ ...base, phase: 'running' }, this.config.secret, this.config.resultSanitizer)); const executor = await this.registry.select(job.executorKey);
+    if (!executor) return this.updater.record(signWorkerEvent({ ...base, phase: 'result', outcome: 'technical_error', error: 'executor_not_configured', errorCategory: 'configuration' }, this.config.secret, this.config.resultSanitizer));
     this.active.set(job.executionId, executor); const started = Date.now(); let result: Extract<WorkerEvent, { phase: 'result' }>;
     try {
       const artifactPersistence = this.config.artifactStorage && this.config.artifactStore
@@ -360,6 +507,7 @@ export class ExecutionWorker {
           executionId: job.executionId,
           snapshot: job.snapshot,
           ...(job.environment ? { environment: job.environment } : {}),
+          ...(job.llmModel ? { llmModel: job.llmModel } : {}),
           ...(artifactPersistence
             ? {
                 artifactSink: async (artifacts) => {
@@ -374,18 +522,18 @@ export class ExecutionWorker {
       );
       if (!artifactsPersisted)
         await persistArtifacts(current, job.attempt, outcome.artifacts, artifactPersistence, this.config.hooks);
-      result = resultEvent(base, outcome);
+      result = resultEvent(base, outcome, this.config.resultSanitizer);
     } catch (error) {
       if (error instanceof DeadlineError) { try { await executor.cancel(job.executionId); } catch { emit(this.config.hooks, { ...base, status: 'error', errorCategory: 'cancel_failed' }); } result = { ...base, phase: 'result', outcome: 'timeout', error: 'deadline_exceeded', errorCategory: 'timeout' }; }
       else if (error instanceof WorkerBoundaryError && error.code === 'artifact_persistence_failed') result = { ...base, phase: 'result', outcome: 'technical_error', error: error.code, errorCategory: 'artifact' };
       else result = { ...base, phase: 'result', outcome: 'technical_error', error: 'executor_failure', errorCategory: 'technical', recoverable: (error as { recoverable?: unknown })?.recoverable === true };
     } finally { this.active.delete(job.executionId); }
-    const updated = await this.updater.record(signWorkerEvent(result, this.config.secret)); if (shouldRetry(result) && updated.status === 'queued' && this.config.queue) await this.config.queue.enqueue({ ...job, attempt: updated.attempt });
+    const updated = await this.updater.record(signWorkerEvent(result, this.config.secret, this.config.resultSanitizer)); if (shouldRetry(result) && updated.status === 'queued' && this.config.queue) await this.config.queue.enqueue({ ...job, attempt: updated.attempt });
     emit(this.config.hooks, { executionId: job.executionId, caseId: current.caseId, runCaseId: current.runCaseId as number | undefined, jobId: base.jobId, status: updated.status, duration: Date.now() - started, errorCategory: result.errorCategory }); return updated;
   }
   async cancel(executionId: string): Promise<StoredExecution | undefined> {
     const active = this.active.get(executionId); if (active) await active.cancel(executionId); const current = await this.updater.find(executionId); if (!current || TERMINAL.has(current.status)) return current ?? undefined;
-    return this.updater.record(signWorkerEvent({ phase: 'result', executionId, attempt: current.attempt, correlationId: String(current.correlationId), jobId: jobIdFor({ executionId, attempt: current.attempt }), outcome: 'cancelled', errorCategory: 'cancelled' }, this.config.secret));
+    return this.updater.record(signWorkerEvent({ phase: 'result', executionId, attempt: current.attempt, correlationId: String(current.correlationId), jobId: jobIdFor({ executionId, attempt: current.attempt }), outcome: 'cancelled', errorCategory: 'cancelled' }, this.config.secret, this.config.resultSanitizer));
   }
   async start(runtime: WorkerRuntime): Promise<void> {
     this.runtime = runtime;

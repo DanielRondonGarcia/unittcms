@@ -224,6 +224,46 @@ describe('Hercules compatibility contract', () => {
     expect(hercules.validateHostAllowlist(['https://example.test/login'], ['example.test']).allowed).toBe(true);
     expect(hercules.validateHostAllowlist(['https://evil.test/login'], ['example.test']).allowed).toBe(false);
   });
+  it.each([
+    ['nested api key JSON', '{"outer":{"api_key":"fixture-api-key"}}'],
+    ['camel-case API key JSON', '{"apiKey":"fixture-api-key"}'],
+    ['quoted password JSON', '{"payload":"{\\"password\\":\\"fixture-password\\"}"}'],
+    ['authorization bearer JSON', '{"Authorization":"Bearer fixture-bearer"}'],
+  ])('rejects %s in text evidence before artifact collection', (_label, diagnostic) => {
+    const root = makeRoot();
+    writeEvidence(root, diagnostic);
+
+    const evidence = hercules.collectCompatibilityEvidence(root);
+    const artifacts = hercules.collectExecutionArtifacts(root);
+
+    expect(evidence.secretFree).toBe(false);
+    expect(artifacts.some(({ filename }) => filename.endsWith('events.log'))).toBe(false);
+    expect(JSON.stringify(artifacts)).not.toContain('fixture-');
+  });
+  it('fails closed for explicitly configured bracketed secrets in evidence and artifacts', () => {
+    const root = makeRoot();
+    const secretValues = ['topsecret'];
+    writeEvidence(root, 'api_key=[topsecret]');
+
+    const evidence = hercules.collectCompatibilityEvidence(root, { secretValues });
+    const artifacts = hercules.collectExecutionArtifacts(root, { secretValues });
+
+    expect(evidence).toMatchObject({ secretFree: false, executionSafe: false });
+    expect(artifacts.some(({ filename }) => filename.endsWith('events.log'))).toBe(false);
+    expect(JSON.stringify(artifacts)).not.toContain('topsecret');
+  });
+  it('preserves safe diagnostic placeholders without treating them as credentials', () => {
+    const root = makeRoot();
+    const diagnostic =
+      '{"outer":{"token":"<redacted>","api_key":"[REDACTED]","password":"placeholder","authorization":"Bearer <redacted>"}}';
+    writeEvidence(root, diagnostic);
+
+    const evidence = hercules.collectCompatibilityEvidence(root);
+    const log = hercules.collectExecutionArtifacts(root).find(({ filename }) => filename.endsWith('events.log'));
+
+    expect(evidence.secretFree).toBe(true);
+    expect(log?.content.toString()).toBe(diagnostic);
+  });
   it('runs a safe stub by default and never claims readiness without proof', async () => {
     const root = makeRoot();
     const skipped = await hercules.runCompatibilityGate({ workdir: root, evidenceRoot: root });
@@ -503,6 +543,43 @@ describe('Hercules process boundary', () => {
       code: 'ETIMEDOUT',
     });
     expect(killProcessGroup).toHaveBeenCalledWith(-73, 'SIGKILL');
+  });
+  it('keeps bounded process output on timeout errors for diagnostics', async () => {
+    const invocation = hercules.buildHerculesInvocation(makeRoot());
+    const child = Object.assign(childProcess(73), { stdout: new EventEmitter(), stderr: new EventEmitter() });
+    const spawnImpl = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'stdout before timeout');
+        child.stderr.emit('data', 'stderr before timeout');
+      });
+      return child;
+    });
+
+    await expect(hercules.runHerculesProcess(invocation, { spawnImpl, timeoutMs: 5 })).rejects.toMatchObject({
+      code: 'ETIMEDOUT',
+      timedOut: true,
+      stdout: 'stdout before timeout',
+      stderr: 'stderr before timeout',
+    });
+  });
+  it('keeps process output on spawn errors for diagnostics', async () => {
+    const invocation = hercules.buildHerculesInvocation(makeRoot());
+    const child = Object.assign(childProcess(73), { stdout: new EventEmitter(), stderr: new EventEmitter() });
+    const error = Object.assign(new Error('spawn failed'), { code: 'ENOENT' });
+    const spawnImpl = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'stdout before spawn error');
+        child.stderr.emit('data', 'stderr before spawn error');
+        child.emit('error', error);
+      });
+      return child;
+    });
+
+    await expect(hercules.runHerculesProcess(invocation, { spawnImpl })).rejects.toMatchObject({
+      code: 'ENOENT',
+      stdout: 'stdout before spawn error',
+      stderr: 'stderr before spawn error',
+    });
   });
   it('uses shell-free taskkill for the default Windows timeout terminator', async () => {
     const invocation = hercules.buildHerculesInvocation(makeRoot());

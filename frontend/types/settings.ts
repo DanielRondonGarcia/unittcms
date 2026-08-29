@@ -38,4 +38,11 @@ export type SettingsMessages = {
   automationLoading: string;
   automationSaved: string;
   automationError: string;
+  automationModel: string;
+  automationModelDescription: string;
+  automationModelPlaceholder: string;
+  automationModelSave: string;
+  automationModelLoading: string;
+  automationModelSaved: string;
+  automationModelError: string;
 };

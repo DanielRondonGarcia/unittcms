@@ -3,6 +3,8 @@ import { useState, useEffect, useContext } from 'react';
 import { Button, Table, TableHeader, TableColumn, TableBody, TableRow, TableCell } from '@heroui/react';
 import { Pencil, Trash } from 'lucide-react';
 import ProjectTagsManager from './ProjectTagsManager';
+import AutomationEnvironmentSettings from './AutomationEnvironmentSettings';
+import HerculesModelSettings from './HerculesModelSettings';
 import { SettingsMessages } from '@/types/settings';
 import { TokenContext } from '@/utils/TokenProvider';
 import { deleteProject, fetchProject, updateProject } from '@/utils/projectsControl';
@@ -14,7 +16,6 @@ import { UserType } from '@/types/user';
 import { findUser } from '@/utils/usersControl';
 import { logError } from '@/utils/errorHandler';
 import UserAvatar from '@/components/UserAvatar';
-import AutomationEnvironmentSettings from './AutomationEnvironmentSettings';
 
 type Props = {
   projectId: string;
@@ -155,6 +156,8 @@ export default function SettingsPage({ projectId, messages, projectDialogMessage
       </div>
 
       <AutomationEnvironmentSettings projectId={projectId} messages={messages} />
+
+      <HerculesModelSettings projectId={projectId} messages={messages} />
 
       <ProjectDialog
         isOpen={isProjectDialogOpen}

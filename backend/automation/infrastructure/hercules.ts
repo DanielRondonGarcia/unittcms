@@ -15,7 +15,9 @@ import {
   resolveHerculesImage,
   resolveHerculesVolume,
 } from '../compatibility/hercules.js';
+import { redactSecretMaterial } from '../compatibility/diagnostics.js';
 import { inspectCanonicalJUnit } from '../compatibility/hercules-proof.js';
+import type { ExecutorDiagnostics } from '../domain/index.js';
 import type {
   AutomationExecutor,
   ExecutorHealth,
@@ -26,7 +28,13 @@ import type {
 import { validateWorkerLlmConfig, type WorkerLlmConfig } from './llm-config.js';
 
 export type HerculesInvocation = { file: string; cwd: string; argv: string[] };
-export type HerculesProcessResult = { exitCode: number | null; signal?: string | null; timedOut?: boolean };
+export type HerculesProcessResult = {
+  exitCode: number | null;
+  signal?: string | null;
+  timedOut?: boolean;
+  stdout?: string;
+  stderr?: string;
+};
 export type HerculesProcessRunner = (
   invocation: HerculesInvocation,
   options: {
@@ -54,9 +62,12 @@ const FIXED_ENV = {
   CAPTURE_NETWORK: 'true',
 };
 
-function safeEnvironment(llmConfig: WorkerLlmConfig): Record<string, string> {
+function safeEnvironment(llmConfig: WorkerLlmConfig, modelOverride?: string): Record<string, string> {
   const env: Record<string, string> = { PATH: process.env.PATH ?? '/usr/bin:/bin', ...FIXED_ENV };
-  const config = validateWorkerLlmConfig(llmConfig);
+  const config = validateWorkerLlmConfig({
+    ...llmConfig,
+    ...(modelOverride === undefined ? {} : { model: modelOverride }),
+  });
   const apiType =
     config.provider === 'ollama' || config.provider === 'ollama-cloud'
       ? 'ollama'
@@ -186,6 +197,32 @@ type JunitFlags = {
   missing: boolean;
 };
 
+const MAX_DIAGNOSTIC_TEXT = 16_384;
+function sanitizeDiagnosticText(value: unknown, secretValues: readonly string[]): string | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const result = redactSecretMaterial(value, secretValues);
+  return result.slice(0, MAX_DIAGNOSTIC_TEXT);
+}
+
+function sanitizeProcessDiagnostics(value: unknown, secretValues: readonly string[]): ExecutorDiagnostics | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const source = value as Record<string, unknown>;
+  const stdout = sanitizeDiagnosticText(source.stdout, secretValues);
+  const stderr = sanitizeDiagnosticText(source.stderr, secretValues);
+  const diagnostics: ExecutorDiagnostics = {};
+  if (source.exitCode === null || (typeof source.exitCode === 'number' && Number.isSafeInteger(source.exitCode)))
+    diagnostics.exitCode = source.exitCode as number | null;
+  if (source.signal === null || (typeof source.signal === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(source.signal)))
+    diagnostics.signal = source.signal as string | null;
+  if (typeof source.timedOut === 'boolean') diagnostics.timedOut = source.timedOut;
+  if (stdout) diagnostics.stdout = stdout;
+  if (stderr) diagnostics.stderr = stderr;
+  const hasUsefulOutput = Boolean(stdout || stderr);
+  const hasNonZeroExit = typeof source.exitCode === 'number' && source.exitCode !== 0;
+  if (!hasUsefulOutput && !hasNonZeroExit && source.timedOut !== true) return undefined;
+  return Object.keys(diagnostics).length > 0 ? diagnostics : undefined;
+}
+
 function junitDocumentFlags(text: string): { failures: boolean; errors: boolean; valid: boolean } {
   const inspected = inspectCanonicalJUnit(text);
   return {
@@ -220,20 +257,24 @@ function mapProcessResult(
   result: HerculesProcessResult,
   workdir: string,
   cancelled: boolean,
-  evidence = collectCompatibilityEvidence(workdir)
+  evidence = collectCompatibilityEvidence(workdir),
+  diagnostics?: ExecutorDiagnostics
 ): ExecutorResult {
-  if (cancelled) return { outcome: 'cancelled', error: 'hercules_cancelled' };
-  if (result.timedOut) return { outcome: 'timeout', error: 'hercules_timeout' };
+  const withDiagnostics = <T extends ExecutorResult>(mapped: T): T =>
+    diagnostics ? ({ ...mapped, diagnostics } as T) : mapped;
+  if (cancelled) return withDiagnostics({ outcome: 'cancelled', error: 'hercules_cancelled' });
+  if (result.timedOut) return withDiagnostics({ outcome: 'timeout', error: 'hercules_timeout' });
   const junit = junitFlags(workdir, evidence);
-  if (!junit.safe) return { outcome: 'technical_error', error: 'evidence_secret_detected', errorKind: 'evidence' };
+  if (!junit.safe)
+    return withDiagnostics({ outcome: 'technical_error', error: 'evidence_secret_detected', errorKind: 'evidence' });
   if (result.exitCode === 0 && junit.missing)
-    return { outcome: 'technical_error', error: 'evidence_junit_missing', errorKind: 'evidence' };
+    return withDiagnostics({ outcome: 'technical_error', error: 'evidence_junit_missing', errorKind: 'evidence' });
   if (result.exitCode === 0 && !junit.valid)
-    return { outcome: 'technical_error', error: 'evidence_junit_invalid', errorKind: 'evidence' };
-  if (junit.errors) return { outcome: 'technical_error', error: 'hercules_result_error' };
-  if (result.exitCode === 0) return { outcome: junit.failures ? 'functional_failure' : 'passed' };
-  if (result.exitCode === 1) return { outcome: 'functional_failure' };
-  return { outcome: 'technical_error', error: 'hercules_process_failed' };
+    return withDiagnostics({ outcome: 'technical_error', error: 'evidence_junit_invalid', errorKind: 'evidence' });
+  if (junit.errors) return withDiagnostics({ outcome: 'technical_error', error: 'hercules_result_error' });
+  if (result.exitCode === 0) return withDiagnostics({ outcome: junit.failures ? 'functional_failure' : 'passed' });
+  if (result.exitCode === 1) return withDiagnostics({ outcome: 'functional_failure' });
+  return withDiagnostics({ outcome: 'technical_error', error: 'hercules_process_failed' });
 }
 
 export class HerculesAutomationExecutor implements AutomationExecutor {
@@ -242,7 +283,7 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
   private readonly timeoutMs: number;
   private readonly image: string;
   private readonly workVolume: string | undefined;
-  private readonly environment: Readonly<Record<string, string>>;
+  private readonly llmConfig: WorkerLlmConfig;
   private readonly processRunner: HerculesProcessRunner;
 
   constructor(options: HerculesExecutorOptions) {
@@ -253,7 +294,7 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
     const requested = options.timeoutMs ?? HERCULES_CONTRACT.timeoutMs;
     const maxTimeoutMs = Number(HERCULES_CONTRACT.timeoutMs);
     this.timeoutMs = Math.min(maxTimeoutMs, Math.max(1, Number.isFinite(requested) ? requested : 1));
-    this.environment = safeEnvironment(options.llmConfig);
+    this.llmConfig = validateWorkerLlmConfig(options.llmConfig);
     this.processRunner = options.processRunner ?? defaultProcessRunner;
   }
 
@@ -262,6 +303,13 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
     const captureVideo = input.environment?.captureVideo === true;
     if (!validateCanonicalFeature(feature).valid)
       return { outcome: 'technical_error', error: 'invalid_canonical_feature' };
+    const secretValues = this.llmConfig.apiKey ? [this.llmConfig.apiKey] : [];
+    let environment: Readonly<Record<string, string>>;
+    try {
+      environment = safeEnvironment(this.llmConfig, input.llmModel);
+    } catch {
+      return { outcome: 'technical_error', error: 'hercules_llm_config_invalid' };
+    }
     let target: BoundHerculesTarget;
     try {
       target = bindEnvironmentTarget(feature, input.environment);
@@ -291,14 +339,14 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
       const result = await this.processRunner(
         buildHerculesInvocation(workspace, this.image, this.workVolume, {
           includeApiKey:
-            this.environment.LLM_MODEL_API_TYPE !== 'ollama' ||
-            Object.prototype.hasOwnProperty.call(this.environment, 'LLM_MODEL_API_KEY'),
+            environment.LLM_MODEL_API_TYPE !== 'ollama' ||
+            Object.prototype.hasOwnProperty.call(environment, 'LLM_MODEL_API_KEY'),
           volumeRoot: this.workdir,
           captureVideo,
         }),
         {
           env: Object.freeze({
-            ...this.environment,
+            ...environment,
             ...buildHerculesPathEnvironment(workspace, this.workVolume, this.workdir),
             RECORD_VIDEO: captureVideo ? 'true' : 'false',
             HERCULES_BASE_URL: target.baseUrl,
@@ -309,12 +357,13 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
         }
       );
       const allowLargeVideos = captureVideo;
-      const secretValues = this.environment.LLM_MODEL_API_KEY ? [this.environment.LLM_MODEL_API_KEY] : [];
       const evidence = collectCompatibilityEvidence(workspace, { allowLargeVideos, secretValues });
-      const mapped = mapProcessResult(result, workspace, run.cancelled, evidence);
+      const diagnostics = sanitizeProcessDiagnostics(result, secretValues);
+      const mapped = mapProcessResult(result, workspace, run.cancelled, evidence, diagnostics);
       if (!(evidence.executionSafe ?? evidence.secretFree)) return mapped;
       const artifacts = collectExecutionArtifacts(workspace, {
         includeVideo: allowLargeVideos,
+        secretValues,
       });
       if (artifacts.length === 0) return mapped;
       if (input.artifactSink) {
@@ -324,9 +373,19 @@ export class HerculesAutomationExecutor implements AutomationExecutor {
       return { ...mapped, artifacts };
     } catch (error) {
       if (run.cancelled) return { outcome: 'cancelled', error: 'hercules_cancelled' };
-      if ((error as { code?: unknown })?.code === 'ETIMEDOUT') return { outcome: 'timeout', error: 'hercules_timeout' };
+      if ((error as { code?: unknown })?.code === 'ETIMEDOUT')
+        return {
+          outcome: 'timeout',
+          error: 'hercules_timeout',
+          diagnostics: sanitizeProcessDiagnostics({ ...(error as object), timedOut: true }, secretValues),
+        };
       if ((error as { code?: unknown })?.code === 'artifact_persistence_failed') throw error;
-      return { outcome: 'technical_error', error: 'hercules_process_failed' };
+      const diagnostics = sanitizeProcessDiagnostics(error, secretValues);
+      return {
+        outcome: 'technical_error',
+        error: 'hercules_process_failed',
+        ...(diagnostics ? { diagnostics } : {}),
+      };
     } finally {
       this.active.delete(input.executionId);
       if (workspace) rmSync(workspace, { recursive: true, force: true });

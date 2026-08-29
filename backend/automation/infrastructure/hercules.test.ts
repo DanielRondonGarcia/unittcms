@@ -407,6 +407,7 @@ describe('Hercules automation executor', () => {
     ).resolves.toEqual({
       outcome: 'timeout',
       error: 'hercules_timeout',
+      diagnostics: { timedOut: true },
     });
 
     const secret = ['fixture', 'value'].join('-');
@@ -429,27 +430,95 @@ describe('Hercules automation executor', () => {
     });
   });
 
+  it('returns bounded redacted process diagnostics for a failed Hercules process', async () => {
+    const secret = ['fixture', 'diagnostic', 'secret'].join('-');
+    const processRunner = vi.fn(async (invocation, options) => {
+      options.registerCancellation(vi.fn());
+      return {
+        exitCode: 2,
+        stderr: `request failed api_key=${secret} ${'x'.repeat(20_000)}`,
+        stdout: `Bearer ${secret}`,
+      };
+    });
+    const executor = new HerculesAutomationExecutor({
+      workdir: root(),
+      llmConfig: llmConfig(secret),
+      processRunner,
+    });
+
+    const result = await executor.execute({
+      executionId: 'diagnostic-output',
+      snapshot: CANONICAL_FEATURE,
+      environment: compatibilityEnvironment,
+    });
+
+    expect(result).toMatchObject({ outcome: 'technical_error', error: 'hercules_process_failed' });
+    expect(result.diagnostics).toMatchObject({ exitCode: 2 });
+    expect(result.diagnostics?.stderr).not.toContain(secret);
+    expect(result.diagnostics?.stdout).not.toContain(secret);
+    expect(result.diagnostics?.stderr?.length).toBeLessThanOrEqual(16_384);
+  });
+
+  it('redacts nested quoted JSON credentials while preserving safe diagnostic text', async () => {
+    const processRunner = vi.fn(async (invocation, options) => {
+      options.registerCancellation(vi.fn());
+      return {
+        exitCode: 2,
+        stderr: '{"outer":{"apiKey":"fixture-api-key","authorization":"Bearer fixture-bearer"}}',
+        stdout: '{"token":"<redacted>","message":"safe diagnostic"}',
+      };
+    });
+    const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
+
+    const result = await executor.execute({
+      executionId: 'structured-diagnostics',
+      snapshot: CANONICAL_FEATURE,
+      environment: compatibilityEnvironment,
+    });
+
+    expect(result).toMatchObject({ outcome: 'technical_error', error: 'hercules_process_failed' });
+    expect(JSON.stringify(result)).not.toContain('fixture-');
+    expect(result.diagnostics?.stdout).toContain('safe diagnostic');
+    expect(result.diagnostics?.stdout).toContain('<redacted>');
+  });
+
   it.each([
     ['missing', () => undefined, 'evidence_junit_missing'],
-    ['empty', (cwd: string) => {
-      mkdirSync(join(cwd, 'output'), { recursive: true });
-      writeFileSync(join(cwd, 'output', 'scenario.xml'), '');
-    }, 'evidence_junit_invalid'],
-    ['malformed', (cwd: string) => {
-      mkdirSync(join(cwd, 'output'), { recursive: true });
-      writeFileSync(join(cwd, 'output', 'scenario.xml'), '<testsuite tests="1" failures="0" errors="0">');
-    }, 'evidence_junit_invalid'],
-    ['no-testcase', (cwd: string) => {
-      mkdirSync(join(cwd, 'output'), { recursive: true });
-      writeFileSync(join(cwd, 'output', 'scenario.xml'), '<testsuite tests="1" failures="0" errors="0"></testsuite>');
-    }, 'evidence_junit_invalid'],
-    ['mismatched-test-count', (cwd: string) => {
-      mkdirSync(join(cwd, 'output'), { recursive: true });
-      writeFileSync(
-        join(cwd, 'output', 'scenario.xml'),
-        '<testsuite tests="2" failures="0" errors="0"><testcase/></testsuite>'
-      );
-    }, 'evidence_junit_invalid'],
+    [
+      'empty',
+      (cwd: string) => {
+        mkdirSync(join(cwd, 'output'), { recursive: true });
+        writeFileSync(join(cwd, 'output', 'scenario.xml'), '');
+      },
+      'evidence_junit_invalid',
+    ],
+    [
+      'malformed',
+      (cwd: string) => {
+        mkdirSync(join(cwd, 'output'), { recursive: true });
+        writeFileSync(join(cwd, 'output', 'scenario.xml'), '<testsuite tests="1" failures="0" errors="0">');
+      },
+      'evidence_junit_invalid',
+    ],
+    [
+      'no-testcase',
+      (cwd: string) => {
+        mkdirSync(join(cwd, 'output'), { recursive: true });
+        writeFileSync(join(cwd, 'output', 'scenario.xml'), '<testsuite tests="1" failures="0" errors="0"></testsuite>');
+      },
+      'evidence_junit_invalid',
+    ],
+    [
+      'mismatched-test-count',
+      (cwd: string) => {
+        mkdirSync(join(cwd, 'output'), { recursive: true });
+        writeFileSync(
+          join(cwd, 'output', 'scenario.xml'),
+          '<testsuite tests="2" failures="0" errors="0"><testcase/></testsuite>'
+        );
+      },
+      'evidence_junit_invalid',
+    ],
   ] as const)('requires valid JUnit evidence for a zero exit (%s)', async (_name, writeEvidence, error) => {
     const processRunner = vi.fn(async (invocation, options) => {
       options.registerCancellation(vi.fn());
@@ -459,7 +528,11 @@ describe('Hercules automation executor', () => {
     const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
 
     await expect(
-      executor.execute({ executionId: `missing-evidence-${_name}`, snapshot: CANONICAL_FEATURE, environment: compatibilityEnvironment })
+      executor.execute({
+        executionId: `missing-evidence-${_name}`,
+        snapshot: CANONICAL_FEATURE,
+        environment: compatibilityEnvironment,
+      })
     ).resolves.toMatchObject({ outcome: 'technical_error', error, errorKind: 'evidence' });
   });
 
@@ -476,7 +549,11 @@ describe('Hercules automation executor', () => {
     const executor = new HerculesAutomationExecutor({ workdir: root(), llmConfig: llmConfig(), processRunner });
 
     await expect(
-      executor.execute({ executionId: 'nested-evidence', snapshot: CANONICAL_FEATURE, environment: compatibilityEnvironment })
+      executor.execute({
+        executionId: 'nested-evidence',
+        snapshot: CANONICAL_FEATURE,
+        environment: compatibilityEnvironment,
+      })
     ).resolves.toMatchObject({ outcome: 'passed' });
   });
 

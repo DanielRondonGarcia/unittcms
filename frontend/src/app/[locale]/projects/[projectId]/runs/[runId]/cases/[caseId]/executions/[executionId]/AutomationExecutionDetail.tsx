@@ -2,6 +2,7 @@
 
 import { useContext, useEffect, useState } from 'react';
 import { Button, Chip } from '@heroui/react';
+import AutomationTimeline from '../../AutomationTimeline';
 import { Link } from '@/src/i18n/routing';
 import type { RunDetailMessages } from '@/types/run';
 import type { AutomationArtifact, AutomationExecution, AutomationStatus } from '@/types/automation';
@@ -10,6 +11,7 @@ import {
   downloadAutomationArtifact,
   fetchAutomationArtifacts,
   fetchAutomationExecution,
+  formatAutomationError,
   formatAutomationDuration,
   formatAutomationExampleLabel,
   isAutomationActive,
@@ -39,7 +41,37 @@ function statusLabel(status: AutomationStatus, messages: RunDetailMessages): str
 }
 
 function executionStatusLabel(execution: AutomationExecution, messages: RunDetailMessages): string {
-  return execution.errorKind === 'evidence' ? messages.automationEvidenceInsufficient : statusLabel(execution.status, messages);
+  return execution.diagnostics?.timedOut === true ||
+    execution.error === 'hercules_timeout' ||
+    execution.error === 'deadline_exceeded'
+    ? messages.automationTimeout
+    : execution.errorKind === 'evidence'
+      ? messages.automationEvidenceInsufficient
+      : statusLabel(execution.status, messages);
+}
+
+function isTimedOut(execution: AutomationExecution): boolean {
+  return (
+    execution.diagnostics?.timedOut === true ||
+    execution.error === 'hercules_timeout' ||
+    execution.error === 'deadline_exceeded'
+  );
+}
+
+function executionErrorMessage(execution: AutomationExecution, messages: RunDetailMessages): string | undefined {
+  return formatAutomationError(
+    {
+      code: execution.error,
+      errorKind: execution.errorKind,
+      status: execution.status,
+      timedOut: execution.diagnostics?.timedOut === true,
+    },
+    messages
+  );
+}
+
+function workerStatusLabel(execution: AutomationExecution, messages: RunDetailMessages): string {
+  return executionErrorMessage(execution, messages) ?? executionStatusLabel(execution, messages);
 }
 
 function timestamp(value: string | undefined, locale: string): string {
@@ -96,9 +128,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
   useEffect(() => {
     if (!context.isSignedIn() || !accessToken) return;
     let disposed = false;
-    Promise.all([
-      fetchAutomationExecution(accessToken, executionId),
-    ])
+    Promise.all([fetchAutomationExecution(accessToken, executionId)])
       .then(([nextExecution]) => {
         if (!disposed) {
           setExecution(nextExecution);
@@ -126,7 +156,8 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
   const terminalExecutionStatus = execution?.status;
 
   useEffect(() => {
-    if (!terminalExecutionId || !accessToken || !terminalExecutionStatus || isAutomationActive(terminalExecutionStatus)) return;
+    if (!terminalExecutionId || !accessToken || !terminalExecutionStatus || isAutomationActive(terminalExecutionStatus))
+      return;
     let disposed = false;
     fetchAutomationArtifacts(accessToken, terminalExecutionId)
       .then((nextArtifacts) => {
@@ -184,6 +215,8 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
 
   const snapshot =
     typeof execution.snapshot === 'string' ? execution.snapshot : JSON.stringify(execution.snapshot ?? {}, null, 2);
+  const errorMessage = executionErrorMessage(execution, messages);
+  const videoDescriptionId = `automation-video-description-${String(execution.id)}`;
 
   return (
     <main className="mx-auto min-h-full w-full min-w-0 max-w-4xl space-y-6 p-6">
@@ -289,19 +322,18 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
           </div>
           <div>
             <dt className="font-semibold">{messages.automationWorkerStatus}</dt>
-            <dd className="break-words">{execution.lastWorkerEvent || execution.lastAttemptStatus || '—'}</dd>
+            <dd className="break-words">{workerStatusLabel(execution, messages)}</dd>
           </div>
         </dl>
         {execution.summary && <p className="mt-4 break-words whitespace-pre-wrap">{execution.summary}</p>}
-        {execution.errorKind === 'evidence' ? (
-          <p className="mt-4 break-words whitespace-pre-wrap text-danger" role="alert">
-            {messages.automationEvidenceInsufficient}
-          </p>
-        ) : execution.error ? (
-          <p className="mt-4 break-words whitespace-pre-wrap text-danger" role="alert">
-            {execution.error}
-          </p>
-        ) : null}
+        {errorMessage && (
+          <div className="mt-4 space-y-1 text-danger" role="alert">
+            <p className="font-semibold">
+              {isTimedOut(execution) ? messages.automationTimeout : messages.automationErrorDetail}
+            </p>
+            <p className="break-words whitespace-pre-wrap">{errorMessage}</p>
+          </div>
+        )}
         {execution.errorFields && execution.errorFields.length > 0 && (
           <ul className="mt-2 list-disc space-y-1 ps-5 text-sm text-danger">
             {execution.errorFields.map((field, index) => (
@@ -312,6 +344,47 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
           </ul>
         )}
       </section>
+
+      <AutomationTimeline execution={execution} locale={locale} messages={messages} />
+
+      {execution.diagnostics && (
+        <section className="min-w-0 max-w-full rounded-md border p-4">
+          <h2 className="font-semibold">{messages.automationDiagnostics}</h2>
+          <p className="mt-2 text-sm text-default-500">{messages.automationDiagnosticsAvailable}</p>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+            {execution.diagnostics.exitCode !== undefined && (
+              <div>
+                <dt className="font-semibold">{messages.automationExitCode}</dt>
+                <dd>{execution.diagnostics.exitCode ?? '—'}</dd>
+              </div>
+            )}
+            {execution.diagnostics.signal && (
+              <div>
+                <dt className="font-semibold">{messages.automationSignal}</dt>
+                <dd translate="no">{execution.diagnostics.signal}</dd>
+              </div>
+            )}
+          </dl>
+          {execution.diagnostics.stdout || execution.diagnostics.stderr ? (
+            <div className="mt-4">
+              <h3 className="font-semibold">{messages.automationOutput}</h3>
+              <pre
+                className="mt-2 max-h-96 max-w-full overflow-auto whitespace-pre-wrap rounded bg-default-100 p-3 text-xs"
+                translate="no"
+              >
+                {[
+                  execution.diagnostics.stderr && `stderr\n${execution.diagnostics.stderr}`,
+                  execution.diagnostics.stdout && `stdout\n${execution.diagnostics.stdout}`,
+                ]
+                  .filter(Boolean)
+                  .join('\n\n')}
+              </pre>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-default-500">{messages.automationNoDiagnostics}</p>
+          )}
+        </section>
+      )}
 
       <section className="min-w-0 max-w-full rounded-md border p-4">
         <h2 className="font-semibold">{messages.automationSnapshot}</h2>
@@ -342,7 +415,10 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
         {execution.captureVideo === true && videoUrl ? (
           <div className="mt-4">
             <h3 className="font-semibold">{messages.automationVideo}</h3>
-            <video className="mt-2 max-w-full rounded" controls src={videoUrl} />
+            <p id={videoDescriptionId} className="sr-only">
+              {messages.automationVideoDescription}
+            </p>
+            <video className="mt-2 max-w-full rounded" controls src={videoUrl} aria-describedby={videoDescriptionId} />
           </div>
         ) : execution.captureVideo !== true ? (
           <p className="mt-3 text-sm text-default-500">{messages.automationNoVideo}</p>

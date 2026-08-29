@@ -18,6 +18,7 @@ function defineAutomationExecution(sequelize, DataTypes) {
     summary: { type: DataTypes.TEXT, allowNull: true },
     error: { type: DataTypes.TEXT, allowNull: true },
     errorKind: { type: DataTypes.STRING, allowNull: true },
+    diagnostics: { type: DataTypes.TEXT, allowNull: true },
     activeExecutionKey: { type: DataTypes.STRING, allowNull: true },
     attemptHistory: { type: DataTypes.TEXT, allowNull: false, defaultValue: '[]' },
     lastWorkerEvent: { type: DataTypes.STRING, allowNull: true },
@@ -32,6 +33,7 @@ function defineAutomationExecution(sequelize, DataTypes) {
     AutomationExecution.belongsTo(models.RunCase, { foreignKey: 'runCaseId', onDelete: 'SET NULL' });
     AutomationExecution.belongsTo(models.TestEnvironment, { foreignKey: 'environmentId', onDelete: 'SET NULL' });
     AutomationExecution.hasMany(models.ExecutionArtifact, { foreignKey: 'executionId', onDelete: 'CASCADE' });
+    AutomationExecution.hasMany(models.ExecutionEvent, { foreignKey: 'executionId', onDelete: 'CASCADE' });
   };
   return AutomationExecution;
 }

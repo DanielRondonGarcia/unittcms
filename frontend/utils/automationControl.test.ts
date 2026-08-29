@@ -7,6 +7,7 @@ import {
   fetchAutomationEnvironments,
   fetchAutomationExecution,
   fetchAutomationHistory,
+  formatAutomationError,
   formatAutomationExampleLabel,
   formatAutomationDuration,
   isAutomationActive,
@@ -29,6 +30,47 @@ describe('automation frontend boundary', () => {
     expect(isAutomationActive('error')).toBe(false);
     expect(formatAutomationDuration(1250)).toBe('1.25s');
     expect(formatAutomationDuration(undefined)).toBe('—');
+  });
+
+  it.each([
+    ['hercules_process_failed', 'A technical failure stopped the execution. Check the environment and retry.'],
+    ['functional_failure', 'The scenario did not pass. Review the execution evidence and expected result.'],
+    [
+      'evidence_secret_detected',
+      'The execution could not be verified because required evidence is missing or unsafe. Review the artifacts and retry.',
+    ],
+    [
+      'deadline_exceeded',
+      'Hercules exceeded the execution time limit. Review the process output for context, then retry the execution.',
+    ],
+    ['hercules_cancelled', 'The execution was cancelled before it completed.'],
+    ['legacy_internal_code', 'The automation could not be completed. Review the details and try again.'],
+  ])('maps %s to translated, actionable feedback', (code, expected) => {
+    const messages = {
+      automationTechnicalFailure: 'A technical failure stopped the execution. Check the environment and retry.',
+      automationFunctionalFailure: 'The scenario did not pass. Review the execution evidence and expected result.',
+      automationEvidenceFailure:
+        'The execution could not be verified because required evidence is missing or unsafe. Review the artifacts and retry.',
+      automationCancelledDetail: 'The execution was cancelled before it completed.',
+      automationGenericFailure: 'The automation could not be completed. Review the details and try again.',
+      automationTimeoutDetail:
+        'Hercules exceeded the execution time limit. Review the process output for context, then retry the execution.',
+    };
+
+    expect(formatAutomationError({ code }, messages)).toBe(expected);
+  });
+
+  it('does not turn ordinary lifecycle messages into error feedback', () => {
+    const messages = {
+      automationTechnicalFailure: 'technical',
+      automationFunctionalFailure: 'functional',
+      automationEvidenceFailure: 'evidence',
+      automationCancelledDetail: 'cancelled',
+      automationGenericFailure: 'generic',
+      automationTimeoutDetail: 'timeout',
+    };
+
+    expect(formatAutomationError({ code: 'Execution queued', status: 'queued' }, messages)).toBeUndefined();
   });
 
   it('formats Example labels with a one-based index and a readable row preview', () => {

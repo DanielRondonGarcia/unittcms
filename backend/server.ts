@@ -85,12 +85,14 @@ import projectsNewRoute from './routes/projects/new.js';
 import projectsEditRoute from './routes/projects/edit.js';
 import projectsDeleteRoute from './routes/projects/delete.js';
 import projectsAutomationEnvironmentRoute from './routes/projects/automationEnvironment.js';
+import projectsHerculesModelRoute from './routes/projects/herculesModel.js';
 app.use('/projects', projectsIndexRoute(sequelize));
 app.use('/projects', projectsShowRoute(sequelize));
 app.use('/projects', projectsNewRoute(sequelize));
 app.use('/projects', projectsEditRoute(sequelize));
 app.use('/projects', projectsDeleteRoute(sequelize));
 app.use('/projects', projectsAutomationEnvironmentRoute(sequelize));
+app.use('/projects', projectsHerculesModelRoute(sequelize));
 
 // "/folders"
 import foldersIndexRoute from './routes/folders/index.js';

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HerculesAutomationExecutor } from './infrastructure/hercules.js';
+import { createExecutionResultSanitizer } from './compatibility/execution-result-safety.js';
 import {
   AUTOMATION_HEALTH_TTL_MS,
   BullMqWorkerRuntime,
@@ -136,6 +137,7 @@ export async function start(options: WorkerBootstrapOptions = {}): Promise<Autom
   });
   const llmConfig = options.llmConfig ?? loadWorkerLlmConfig(process.env, { required: true });
   if (!llmConfig) throw new AutomationWorkerBootstrapError('llm_config_required');
+  const resultSanitizer = createExecutionResultSanitizer(llmConfig.apiKey ? [llmConfig.apiKey] : []);
   const workVolume = loadWorkerHerculesVolume({
     AUTOMATION_HERCULES_VOLUME: options.workVolume ?? process.env.AUTOMATION_HERCULES_VOLUME,
   });
@@ -181,7 +183,7 @@ export async function start(options: WorkerBootstrapOptions = {}): Promise<Autom
     };
     const executionWorker = new ExecutionWorker(
       registry,
-      new WorkerResultUpdater(store, workerSecret, runCaseStatusUpdater),
+      new WorkerResultUpdater(store, workerSecret, runCaseStatusUpdater, resultSanitizer),
       {
         secret: workerSecret,
         queue,
@@ -191,6 +193,7 @@ export async function start(options: WorkerBootstrapOptions = {}): Promise<Autom
         backoffMs: options.backoffMs,
         artifactStorage,
         artifactStore: store,
+        resultSanitizer,
         hooks: { log: logWorkerDiagnostic },
       }
     );

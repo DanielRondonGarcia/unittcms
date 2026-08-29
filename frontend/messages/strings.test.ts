@@ -33,8 +33,78 @@ describe('Locale message keys consistency', () => {
   const legacyBase = locales.find((locale) => locale.name === 'de');
   if (!legacyBase) throw new Error('Legacy base locale not found');
 
-  it('keeps the complete 543-key catalog contract', () => {
-    expect(baseKeys).toHaveLength(543);
+  const translatedCaseKeys = [
+    'automation_retrying',
+    'automation_timeline',
+    'automation_diagnostics',
+    'automation_exit_code',
+    'automation_output',
+    'automation_no_diagnostics',
+    'automation_timeout',
+    'automation_timeout_detail',
+    'automation_technical_failure',
+    'automation_functional_failure',
+    'automation_evidence_failure',
+    'automation_cancelled_detail',
+    'automation_generic_failure',
+    'automation_diagnostics_available',
+    'automation_video_description',
+  ] as const;
+  const translatedRunKeys = [
+    'automation_technical_failure',
+    'automation_functional_failure',
+    'automation_evidence_failure',
+    'automation_cancelled_detail',
+    'automation_generic_failure',
+    'automation_timeout_detail',
+  ] as const;
+  const translatedSettingsKeys = [
+    'automation_model',
+    'automation_model_description',
+    'automation_model_placeholder',
+    'automation_model_save',
+    'automation_model_loading',
+    'automation_model_saved',
+    'automation_model_error',
+  ] as const;
+
+  it('keeps the complete automation feedback catalog contract', () => {
+    expect(baseKeys).toHaveLength(572);
+  });
+
+  it('provides translated retry and timeout feedback for every locale', () => {
+    for (const locale of locales) {
+      const catalog = locale.data as typeof en;
+      expect(catalog.Case.automation_retrying).toBeTruthy();
+      expect(catalog.Case.automation_timeout).toBeTruthy();
+      expect(catalog.Case.automation_timeout_detail).toBeTruthy();
+      expect(catalog.Case.automation_technical_failure).toBeTruthy();
+      expect(catalog.Case.automation_functional_failure).toBeTruthy();
+      expect(catalog.Case.automation_evidence_failure).toBeTruthy();
+      expect(catalog.Case.automation_cancelled_detail).toBeTruthy();
+      expect(catalog.Case.automation_generic_failure).toBeTruthy();
+      expect(catalog.Case.automation_diagnostics_available).toBeTruthy();
+      expect(catalog.Case.automation_video_description).toBeTruthy();
+      expect(catalog.Run.automation_technical_failure).toBeTruthy();
+      expect(catalog.Run.automation_functional_failure).toBeTruthy();
+      expect(catalog.Run.automation_evidence_failure).toBeTruthy();
+      expect(catalog.Run.automation_cancelled_detail).toBeTruthy();
+      expect(catalog.Run.automation_generic_failure).toBeTruthy();
+      expect(catalog.Run.automation_timeout_detail).toBeTruthy();
+    }
+
+    for (const locale of locales.filter(({ name }) => name !== 'en')) {
+      const catalog = locale.data as typeof en;
+      for (const key of translatedCaseKeys) {
+        expect(catalog.Case[key], `${locale.name}.Case.${key}`).not.toBe(en.Case[key]);
+      }
+      for (const key of translatedRunKeys) {
+        expect(catalog.Run[key], `${locale.name}.Run.${key}`).not.toBe(en.Run[key]);
+      }
+      for (const key of translatedSettingsKeys) {
+        expect(catalog.Settings[key], `${locale.name}.Settings.${key}`).not.toBe(en.Settings[key]);
+      }
+    }
   });
 
   it(`should have the same keys as ${base.name} in es`, () => {

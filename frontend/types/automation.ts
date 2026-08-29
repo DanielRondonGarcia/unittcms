@@ -17,6 +17,15 @@ export type AutomationErrorField = {
 
 export type AutomationErrorKind = 'technical' | 'functional' | 'cancelled' | 'evidence';
 
+export type AutomationErrorMessages = {
+  automationTechnicalFailure: string;
+  automationFunctionalFailure: string;
+  automationEvidenceFailure: string;
+  automationCancelledDetail: string;
+  automationGenericFailure: string;
+  automationTimeoutDetail: string;
+};
+
 export type AutomationDefaultEnvironment = {
   id?: number;
   projectId?: number;
@@ -53,10 +62,35 @@ export type AutomationExecution = {
   attemptHistory?: unknown[];
   lastWorkerEvent?: string;
   lastAttemptStatus?: string;
+  diagnostics?: {
+    exitCode?: number | null;
+    signal?: string | null;
+    timedOut?: boolean;
+    stdout?: string;
+    stderr?: string;
+  };
+  events?: AutomationExecutionEvent[];
   snapshot?: unknown;
   snapshotHash?: string;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type AutomationExecutionEvent = {
+  id: string | number;
+  executionId: string | number;
+  attempt: number;
+  sequence: number;
+  type: 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'cancelled' | 'retrying';
+  message?: string;
+  details?: Record<string, unknown>;
+  createdAt?: string;
+};
+
+export type AutomationOrganizationModel = {
+  id: number;
+  name: string;
+  herculesModel: string | null;
 };
 
 export type AutomationArtifact = {

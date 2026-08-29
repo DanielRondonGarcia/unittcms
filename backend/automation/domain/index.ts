@@ -279,6 +279,14 @@ type ExecutionRecord = {
 
 export type ExecutorErrorKind = 'technical' | 'functional' | 'cancelled' | 'evidence';
 
+export type ExecutorDiagnostics = {
+  exitCode?: number | null;
+  signal?: string | null;
+  timedOut?: boolean;
+  stdout?: string;
+  stderr?: string;
+};
+
 const transitions: Record<ExecutionState, readonly ExecutionState[]> = {
   queued: ['running', 'error', 'cancelled'],
   running: ['passed', 'failed', 'error', 'cancelled'],
@@ -328,6 +336,7 @@ export function mapExecutorResult(result: {
   summary?: string;
   error?: string;
   errorKind?: ExecutorErrorKind;
+  diagnostics?: ExecutorDiagnostics;
 }) {
   const status: ExecutionState =
     result.outcome === 'passed'
@@ -350,5 +359,6 @@ export function mapExecutorResult(result: {
           : status === 'error'
             ? 'technical'
             : undefined),
+    diagnostics: result.diagnostics,
   };
 }

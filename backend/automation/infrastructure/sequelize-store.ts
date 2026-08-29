@@ -1,7 +1,17 @@
 import { Op } from 'sequelize';
 import { transitionExecution } from '../domain/index.js';
+import { genericExecutionResultSanitizer } from '../compatibility/execution-result-safety.js';
 import type { CaseSource } from '../domain/index.js';
-import { RUN_CASE_STATUS, type AutomationStore, type RunCaseSource, type RunCaseStatusUpdate, type StoredExecution } from '../ports/index.js';
+import {
+  executionEventSequence,
+  RUN_CASE_STATUS,
+  type AutomationStore,
+  type RunCaseSource,
+  type RunCaseStatusUpdate,
+  type StoredExecution,
+  type StoredExecutionEvent,
+  type StoredExecutionEventType,
+} from '../ports/index.js';
 
 type PlainRecord = Record<string, unknown>;
 type ModelInstance = PlainRecord & {
@@ -32,6 +42,8 @@ export type AutomationModels = {
   AutomationExecution: ModelLike;
   TestEnvironment: ModelLike;
   ExecutionArtifact: ModelLike;
+  ExecutionEvent?: ModelLike;
+  Organization?: ModelLike;
 };
 
 const EXECUTION_FIELDS = [
@@ -57,6 +69,7 @@ const EXECUTION_FIELDS = [
   'attemptHistory',
   'lastWorkerEvent',
   'lastAttemptStatus',
+  'diagnostics',
   'idempotencyKey',
   'correlationId',
   'createdAt',
@@ -76,11 +89,21 @@ const EXECUTION_UPDATE_FIELDS = [
   'attemptHistory',
   'lastWorkerEvent',
   'lastAttemptStatus',
+  'diagnostics',
 ] as const;
 
 const EXECUTION_STATES = new Set(['queued', 'running', 'passed', 'failed', 'error', 'cancelled']);
 const ACTIVE_EXECUTION_STATES = new Set(['queued', 'running']);
-
+const EXECUTION_ERROR_KINDS = new Set(['technical', 'functional', 'cancelled', 'evidence']);
+const EXECUTION_EVENT_TYPES = new Set<StoredExecutionEventType>([
+  'queued',
+  'running',
+  'passed',
+  'failed',
+  'error',
+  'cancelled',
+  'retrying',
+]);
 function plain(value: unknown): PlainRecord | null {
   if (!value || typeof value !== 'object') return null;
   const instance = value as ModelInstance;
@@ -102,7 +125,8 @@ function activeExecutionKey(value: PlainRecord): string | null {
   const runCaseId = Number(value.runCaseId);
   const status = String(value.status ?? '');
   if (!Number.isSafeInteger(runCaseId) || runCaseId <= 0 || !ACTIVE_EXECUTION_STATES.has(status)) return null;
-  const exampleIndex = value.exampleIndex === undefined || value.exampleIndex === null ? 'scenario' : String(value.exampleIndex);
+  const exampleIndex =
+    value.exampleIndex === undefined || value.exampleIndex === null ? 'scenario' : String(value.exampleIndex);
   return `${runCaseId}:${exampleIndex}`;
 }
 
@@ -132,7 +156,64 @@ function secretReferences(value: unknown): string[] {
 }
 
 function attemptHistory(value: unknown): unknown[] {
-  return parseArray(value);
+  return genericExecutionResultSanitizer.attemptHistory(value);
+}
+
+function safeDiagnostics(value: unknown): Record<string, unknown> | undefined {
+  return genericExecutionResultSanitizer.diagnostics(value) as Record<string, unknown> | undefined;
+}
+
+function safeEventDetails(value: unknown): Record<string, unknown> | undefined {
+  let candidate = value;
+  if (typeof candidate === 'string') {
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
+  const source = candidate as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  const diagnostics = safeDiagnostics(source.diagnostics);
+  if (diagnostics) result.diagnostics = diagnostics;
+  if (Number.isSafeInteger(source.previousAttempt) && Number(source.previousAttempt) >= 1)
+    result.previousAttempt = source.previousAttempt;
+  if (typeof source.outcome === 'string' && /^[a-z_]{1,64}$/.test(source.outcome)) result.outcome = source.outcome;
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function safeExecutionEvent(value: unknown): StoredExecutionEvent | null {
+  const source = plain(value);
+  if (!source) return null;
+  const id = String(source.id ?? '');
+  const executionId = String(source.executionId ?? '');
+  const attempt = Number(source.attempt);
+  const sequence = Number(source.sequence);
+  const type = String(source.eventType ?? '') as StoredExecutionEventType;
+  if (
+    !id ||
+    !executionId ||
+    !Number.isSafeInteger(attempt) ||
+    attempt < 1 ||
+    !Number.isSafeInteger(sequence) ||
+    sequence < 1 ||
+    !EXECUTION_EVENT_TYPES.has(type)
+  )
+    return null;
+  const details = safeEventDetails(source.details);
+  const message =
+    typeof source.message === 'string' ? genericExecutionResultSanitizer.eventMessage(source.message)?.trim() : null;
+  return {
+    id,
+    executionId,
+    attempt,
+    sequence,
+    type,
+    ...(message ? { message } : {}),
+    ...(details ? { details } : {}),
+    ...(source.createdAt ? { createdAt: String(source.createdAt) } : {}),
+  };
 }
 
 function safeEnvironment(value: PlainRecord | null): Record<string, unknown> | null {
@@ -177,6 +258,13 @@ function safeExecution(value: unknown): StoredExecution | null {
   result.caseId = caseId;
   result.attempt = attempt;
   result.status = status as StoredExecution['status'];
+  if ('summary' in source) result.summary = genericExecutionResultSanitizer.text(source.summary);
+  if ('error' in source) result.error = genericExecutionResultSanitizer.text(source.error);
+  if ('errorKind' in source && source.errorKind !== null && source.errorKind !== undefined) {
+    if (typeof source.errorKind === 'string' && EXECUTION_ERROR_KINDS.has(source.errorKind))
+      result.errorKind = source.errorKind;
+    else delete result.errorKind;
+  }
   if ('exampleIndex' in source) {
     if (source.exampleIndex === null || source.exampleIndex === undefined) {
       result.exampleIndex = null;
@@ -196,6 +284,17 @@ function safeExecution(value: unknown): StoredExecution | null {
     }
   }
   if (definition?.snapshotHash !== undefined) result.snapshotHash = String(definition.snapshotHash);
+  if ('diagnostics' in source) {
+    const diagnostics = safeDiagnostics(source.diagnostics);
+    if (diagnostics) result.diagnostics = diagnostics as StoredExecution['diagnostics'];
+    else delete result.diagnostics;
+  }
+  if (status === 'passed') {
+    delete result.error;
+    delete result.errorKind;
+    delete result.lastAttemptStatus;
+    delete result.diagnostics;
+  }
   return result;
 }
 
@@ -238,11 +337,6 @@ function isUniqueConstraint(error: unknown): boolean {
   );
 }
 
-function boundedText(value: unknown, max = 10_000): string | null {
-  if (value === undefined || value === null) return null;
-  return String(value).slice(0, max);
-}
-
 function createValues(value: PlainRecord): PlainRecord {
   const result: PlainRecord = {};
   for (const field of [
@@ -263,12 +357,18 @@ function createValues(value: PlainRecord): PlainRecord {
     'durationMs',
     'idempotencyKey',
     'correlationId',
+    'diagnostics',
   ]) {
     if (field in value && value[field] !== undefined) result[field] = value[field];
   }
-  result.summary = boundedText(value.summary);
-  result.error = boundedText(value.error);
-  result.errorKind = boundedText(value.errorKind, 64);
+  result.summary = genericExecutionResultSanitizer.text(value.summary);
+  result.error = genericExecutionResultSanitizer.text(value.error);
+  result.errorKind =
+    typeof value.errorKind === 'string' && EXECUTION_ERROR_KINDS.has(value.errorKind) ? value.errorKind : null;
+  if ('diagnostics' in value) {
+    const diagnostics = safeDiagnostics(value.diagnostics);
+    result.diagnostics = diagnostics ? JSON.stringify(diagnostics) : null;
+  }
   result.attemptHistory = JSON.stringify(attemptHistory(value.attemptHistory));
   result.activeExecutionKey = activeExecutionKey(value);
   return result;
@@ -278,10 +378,24 @@ function updateValues(value: PlainRecord, current: PlainRecord = {}): PlainRecor
   const result: PlainRecord = {};
   for (const field of EXECUTION_UPDATE_FIELDS) {
     if (field === 'attemptHistory') continue;
-    if (field in value && value[field] !== undefined)
-      result[field] = field === 'summary' || field === 'error' ? boundedText(value[field]) : value[field];
+    if (field in value && value[field] !== undefined) {
+      if (field === 'summary' || field === 'error') result[field] = genericExecutionResultSanitizer.text(value[field]);
+      else if (field === 'errorKind')
+        result[field] =
+          typeof value[field] === 'string' && EXECUTION_ERROR_KINDS.has(value[field] as string)
+            ? value[field]
+            : null;
+      else result[field] = value[field];
+    }
   }
   if ('attemptHistory' in value) result.attemptHistory = JSON.stringify(attemptHistory(value.attemptHistory));
+  if ('diagnostics' in value) {
+    const diagnostics = safeDiagnostics(value.diagnostics);
+    result.diagnostics = diagnostics ? JSON.stringify(diagnostics) : null;
+  }
+  if (value.status === 'passed') {
+    Object.assign(result, { error: null, errorKind: null, diagnostics: null, lastAttemptStatus: null });
+  }
   const merged = { ...current, ...value };
   if (ACTIVE_EXECUTION_STATES.has(String(merged.status ?? ''))) result.activeExecutionKey = activeExecutionKey(merged);
   else if (EXECUTION_STATES.has(String(merged.status ?? ''))) result.activeExecutionKey = null;
@@ -356,7 +470,10 @@ export class SequelizeAutomationStore implements AutomationStore {
     return safeExecution(record);
   }
 
-  async findActiveExecution(input: { runCaseId: number; exampleIndex: number | null }): Promise<StoredExecution | null> {
+  async findActiveExecution(input: {
+    runCaseId: number;
+    exampleIndex: number | null;
+  }): Promise<StoredExecution | null> {
     const runCaseId = positiveId(input.runCaseId);
     const exampleIndex = input.exampleIndex === null ? null : Number(input.exampleIndex);
     if (exampleIndex !== null && (!Number.isSafeInteger(exampleIndex) || exampleIndex < 0)) return null;
@@ -398,6 +515,13 @@ export class SequelizeAutomationStore implements AutomationStore {
       const record = await this.models.AutomationExecution.create(data);
       const result = safeExecution(record);
       if (!result) throw new Error('automation_execution_invalid');
+      await this.appendExecutionEvent({
+        executionId: result.id,
+        attempt: result.attempt,
+        sequence: executionEventSequence(result.attempt, 'queued'),
+        type: 'queued',
+        message: 'Execution queued',
+      }).catch(() => undefined);
       return result;
     } catch (error) {
       if (!isUniqueConstraint(error)) throw error;
@@ -409,7 +533,8 @@ export class SequelizeAutomationStore implements AutomationStore {
       if (data.activeExecutionKey && data.runCaseId !== undefined) {
         const active = await this.findActiveExecution({
           runCaseId: Number(data.runCaseId),
-          exampleIndex: data.exampleIndex === undefined || data.exampleIndex === null ? null : Number(data.exampleIndex),
+          exampleIndex:
+            data.exampleIndex === undefined || data.exampleIndex === null ? null : Number(data.exampleIndex),
         });
         if (active) throw new Error('automation_execution_active');
       }
@@ -467,11 +592,74 @@ export class SequelizeAutomationStore implements AutomationStore {
   }
 
   async findExecution(executionId: string): Promise<StoredExecution | null> {
-    return safeExecution(
+    const result = safeExecution(
       await this.models.AutomationExecution.findByPk(String(executionId), {
         include: [{ model: this.models.AutomationDefinition, attributes: ['version', 'snapshot', 'snapshotHash'] }],
       })
     );
+    if (!result || !this.models.ExecutionEvent) return result;
+    result.events = await this.listExecutionEvents(result.id);
+    return result;
+  }
+
+  async appendExecutionEvent(value: {
+    executionId: string;
+    attempt: number;
+    sequence: number;
+    type: StoredExecutionEventType;
+    message?: string;
+    details?: Record<string, unknown>;
+  }): Promise<StoredExecutionEvent> {
+    const executionId = String(value.executionId).trim();
+    const attempt = Number(value.attempt);
+    const sequence = Number(value.sequence);
+    const type = String(value.type) as StoredExecutionEventType;
+    if (
+      !this.models.ExecutionEvent ||
+      !executionId ||
+      !Number.isSafeInteger(attempt) ||
+      attempt < 1 ||
+      !Number.isSafeInteger(sequence) ||
+      sequence < 1 ||
+      !EXECUTION_EVENT_TYPES.has(type)
+    )
+      throw new Error('execution_event_invalid');
+    const details = safeEventDetails(value.details);
+    const data = {
+      executionId,
+      attempt,
+      sequence,
+      eventType: type,
+      message: genericExecutionResultSanitizer.eventMessage(value.message),
+      details: details ? JSON.stringify(details) : null,
+    };
+    try {
+      const record = await this.models.ExecutionEvent.create(data);
+      const result = safeExecutionEvent(record);
+      if (!result) throw new Error('execution_event_invalid');
+      return result;
+    } catch (error) {
+      if (!isUniqueConstraint(error)) throw error;
+      const existing = await this.models.ExecutionEvent.findOne({ where: { executionId, sequence } });
+      const result = safeExecutionEvent(existing);
+      if (!result) throw new Error('execution_event_invalid');
+      return result;
+    }
+  }
+
+  async listExecutionEvents(executionId: string): Promise<StoredExecutionEvent[]> {
+    if (!this.models.ExecutionEvent) return [];
+    const records = await this.models.ExecutionEvent.findAll({
+      where: { executionId: String(executionId) },
+      order: [
+        ['sequence', 'ASC'],
+        ['id', 'ASC'],
+      ],
+    });
+    return records
+      .map((record) => safeExecutionEvent(record))
+      .filter((record): record is StoredExecutionEvent => Boolean(record))
+      .sort((left, right) => left.sequence - right.sequence || Number(left.id) - Number(right.id));
   }
 
   async updateExecution(executionId: string, value: PlainRecord): Promise<StoredExecution> {
@@ -491,6 +679,13 @@ export class SequelizeAutomationStore implements AutomationStore {
     await this.models.AutomationExecution.update(updateValues(transitioned, plain(current) ?? {}), {
       where: { id: String(executionId), status: current.status },
     });
+    await this.appendExecutionEvent({
+      executionId: current.id,
+      attempt: current.attempt,
+      sequence: executionEventSequence(current.attempt, 'cancelled'),
+      type: 'cancelled',
+      message: 'Execution cancelled',
+    }).catch(() => undefined);
     return (await this.findExecution(executionId)) ?? current;
   }
 
@@ -513,10 +708,28 @@ export class SequelizeAutomationStore implements AutomationStore {
       }),
       this.models.AutomationExecution.count({ where }),
     ]);
-    return {
-      items: items.map((item) => safeExecution(item)).filter((item): item is StoredExecution => Boolean(item)),
-      total,
-    };
+    const safeItems = items.map((item) => safeExecution(item)).filter((item): item is StoredExecution => Boolean(item));
+    if (!this.models.ExecutionEvent) return { items: safeItems, total };
+    await Promise.all(
+      safeItems.map(async (item) => {
+        item.events = await this.listExecutionEvents(item.id);
+      })
+    );
+    return { items: safeItems, total };
+  }
+
+  async findHerculesModel(projectId: number): Promise<string | null> {
+    if (!this.models.Organization) return null;
+    const project = plain(await this.models.Project.findByPk(positiveId(projectId)));
+    const projectOwnerUserId = Number(project?.userId);
+    if (!Number.isInteger(projectOwnerUserId) || projectOwnerUserId <= 0) return null;
+    const organizationId = Number(project?.organizationId);
+    if (!Number.isInteger(organizationId) || organizationId <= 0) return null;
+    const organization = plain(await this.models.Organization.findByPk(organizationId));
+    const organizationOwnerUserId = Number(organization?.ownerUserId);
+    if (!Number.isInteger(organizationOwnerUserId) || organizationOwnerUserId !== projectOwnerUserId) return null;
+    const model = typeof organization?.herculesModel === 'string' ? organization.herculesModel.trim() : '';
+    return model ? model.slice(0, 256) : null;
   }
 
   async listEnvironments(projectId: number): Promise<Array<Record<string, unknown>>> {

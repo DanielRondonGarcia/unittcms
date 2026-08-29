@@ -4,7 +4,10 @@ import type {
   AutomationBatchCase,
   AutomationBatchResult,
   AutomationDefaultEnvironment,
+  AutomationErrorKind,
+  AutomationErrorMessages,
   AutomationEnvironment,
+  AutomationOrganizationModel,
   AutomationErrorField,
   AutomationExecution,
   AutomationStatus,
@@ -99,6 +102,82 @@ export function formatAutomationExampleLabel(label: string, exampleIndex: number
   return `${label} ${exampleIndex + 1}${preview ? `: ${preview}` : ''}`;
 }
 
+const TIMEOUT_ERROR_CODES = new Set(['deadline_exceeded', 'hercules_timeout', 'timeout']);
+const EVIDENCE_ERROR_CODES = new Set(['evidence_junit_invalid', 'evidence_junit_missing', 'evidence_secret_detected']);
+const FUNCTIONAL_ERROR_CODES = new Set(['assertion_failed', 'functional_failure']);
+const CANCELLED_ERROR_CODES = new Set(['automation_cancelled', 'hercules_cancelled', 'cancelled']);
+const TECHNICAL_ERROR_CODES = new Set([
+  'artifact_not_found',
+  'artifact_persistence_failed',
+  'artifact_storage_not_ready',
+  'automation_execution_active',
+  'automation_not_ready',
+  'automation_request_failed',
+  'environment_invalid',
+  'environment_not_found',
+  'environment_required',
+  'environment_target_rejected',
+  'environment_url_invalid',
+  'executor_failure',
+  'executor_not_configured',
+  'forbidden',
+  'hercules_llm_config_invalid',
+  'hercules_process_failed',
+  'hercules_provider_unsupported',
+  'hercules_result_error',
+  'invalid_automation_environment_response',
+  'invalid_automation_organization_response',
+  'invalid_automation_response',
+  'invalid_canonical_feature',
+  'organization_model_unavailable',
+  'organization_owner_required',
+  'organization_scope_invalid',
+  'project_not_found',
+  'source_not_found',
+  'execution_not_found',
+]);
+
+type AutomationErrorFeedback = {
+  code?: unknown;
+  errorKind?: AutomationErrorKind | string;
+  status?: string;
+  timedOut?: boolean;
+};
+
+function errorCode(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+export function formatAutomationError(
+  feedback: AutomationErrorFeedback,
+  messages: AutomationErrorMessages
+): string | undefined {
+  const code = errorCode(feedback.code);
+  const kind = errorCode(feedback.errorKind);
+  const status = errorCode(feedback.status);
+  const knownCode =
+    TIMEOUT_ERROR_CODES.has(code) ||
+    EVIDENCE_ERROR_CODES.has(code) ||
+    code.startsWith('evidence_') ||
+    FUNCTIONAL_ERROR_CODES.has(code) ||
+    CANCELLED_ERROR_CODES.has(code) ||
+    TECHNICAL_ERROR_CODES.has(code);
+  const failureStatus = ['failed', 'error', 'cancelled'].includes(status);
+
+  if (!code && !kind && !failureStatus) return undefined;
+  if (!kind && !knownCode && !failureStatus && ['queued', 'running', 'passed'].includes(status)) return undefined;
+  if (feedback.timedOut === true || TIMEOUT_ERROR_CODES.has(code)) return messages.automationTimeoutDetail;
+  if (kind === 'evidence' || EVIDENCE_ERROR_CODES.has(code) || code.startsWith('evidence_'))
+    return messages.automationEvidenceFailure;
+  if (kind === 'cancelled' || CANCELLED_ERROR_CODES.has(code) || status === 'cancelled')
+    return messages.automationCancelledDetail;
+  if (kind === 'functional' || FUNCTIONAL_ERROR_CODES.has(code) || status === 'failed')
+    return messages.automationFunctionalFailure;
+  if (kind === 'technical' || TECHNICAL_ERROR_CODES.has(code) || status === 'error')
+    return messages.automationTechnicalFailure;
+  return messages.automationGenericFailure;
+}
+
 export async function fetchAutomationEnvironments(jwt: string, projectId: number): Promise<AutomationEnvironment[]> {
   const payload = await request<AutomationPayload>(jwt, `/automation/projects/${projectId}/environments`);
   return items<AutomationEnvironment>(payload).filter((value) => value.enabled !== false);
@@ -189,6 +268,29 @@ export async function saveAutomationDefaultEnvironment(
     throw new AutomationRequestError(502, 'invalid_automation_environment_response');
   }
   return payload.environment as AutomationDefaultEnvironment;
+}
+
+export async function fetchAutomationOrganizationModel(
+  jwt: string,
+  projectId: number
+): Promise<AutomationOrganizationModel | null> {
+  const payload = await request<AutomationPayload>(jwt, `/projects/${projectId}/settings/hercules-model`);
+  const organization = payload.organization;
+  return organization && typeof organization === 'object' ? (organization as AutomationOrganizationModel) : null;
+}
+
+export async function saveAutomationOrganizationModel(
+  jwt: string,
+  projectId: number,
+  model: string | null
+): Promise<AutomationOrganizationModel> {
+  const payload = await request<AutomationPayload>(jwt, `/projects/${projectId}/settings/hercules-model`, {
+    method: 'PUT',
+    body: JSON.stringify({ model }),
+  });
+  if (!payload.organization || typeof payload.organization !== 'object')
+    throw new AutomationRequestError(502, 'invalid_automation_organization_response');
+  return payload.organization as AutomationOrganizationModel;
 }
 
 export async function createAutomationExecution(

@@ -2,12 +2,18 @@
 
 import { useCallback, useContext, useEffect, useState } from 'react';
 import { Button, Chip } from '@heroui/react';
+import AutomationTimeline from './AutomationTimeline';
 import { Link } from '@/src/i18n/routing';
 import type { GherkinExamples } from '@/types/case';
 import type { RunDetailMessages } from '@/types/run';
 import type { AutomationExecution, AutomationStatus } from '@/types/automation';
 import { TokenContext } from '@/utils/TokenProvider';
-import { fetchAutomationHistory, formatAutomationExampleLabel, formatAutomationDuration } from '@/utils/automationControl';
+import {
+  fetchAutomationHistory,
+  formatAutomationError,
+  formatAutomationExampleLabel,
+  formatAutomationDuration,
+} from '@/utils/automationControl';
 import { useAutomationPolling } from '@/utils/useAutomationPolling';
 
 type Props = {
@@ -34,7 +40,11 @@ function statusLabel(status: AutomationStatus, messages: RunDetailMessages): str
 }
 
 function executionStatusLabel(item: AutomationExecution, messages: RunDetailMessages): string {
-  return item.errorKind === 'evidence' ? messages.automationEvidenceInsufficient : statusLabel(item.status, messages);
+  return item.diagnostics?.timedOut === true || item.error === 'hercules_timeout' || item.error === 'deadline_exceeded'
+    ? messages.automationTimeout
+    : item.errorKind === 'evidence'
+      ? messages.automationEvidenceInsufficient
+      : statusLabel(item.status, messages);
 }
 
 function sortNewestFirst(items: AutomationExecution[]): AutomationExecution[] {
@@ -59,13 +69,17 @@ export default function AutomationHistory({ projectId, runId, caseId, runCaseId,
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const accessToken = context.token.access_token;
-  const validRunCaseId =
-    typeof runCaseId === 'number' && Number.isInteger(runCaseId) && runCaseId > 0;
+  const validRunCaseId = typeof runCaseId === 'number' && Number.isInteger(runCaseId) && runCaseId > 0;
   const historyKey = `${projectId}:${caseId}:${runCaseId ?? ''}`;
 
   const loadHistory = useCallback(async () => {
     const linkedRunCaseId = runCaseId;
-    if (!accessToken || typeof linkedRunCaseId !== 'number' || !Number.isInteger(linkedRunCaseId) || linkedRunCaseId <= 0)
+    if (
+      !accessToken ||
+      typeof linkedRunCaseId !== 'number' ||
+      !Number.isInteger(linkedRunCaseId) ||
+      linkedRunCaseId <= 0
+    )
       return [];
     const history = await fetchAutomationHistory(accessToken, Number(projectId), Number(caseId), linkedRunCaseId);
     return sortNewestFirst(history.filter((item) => Number(item.runCaseId) === linkedRunCaseId));
@@ -92,7 +106,12 @@ export default function AutomationHistory({ projectId, runId, caseId, runCaseId,
     },
   });
 
-  if (isLoading) return <p role="status" aria-live="polite">{messages.automationHistoryLoading}</p>;
+  if (isLoading)
+    return (
+      <p role="status" aria-live="polite">
+        {messages.automationHistoryLoading}
+      </p>
+    );
   if (hasError && items.length === 0) return <p role="alert">{messages.automationUnavailable}</p>;
   if (items.length === 0) return <p>{messages.automationHistoryEmpty}</p>;
 
@@ -102,7 +121,20 @@ export default function AutomationHistory({ projectId, runId, caseId, runCaseId,
         const exampleLabel =
           item.exampleIndex === undefined || item.exampleIndex === null
             ? undefined
-            : formatAutomationExampleLabel(messages.automationExample, item.exampleIndex, examples?.rows[item.exampleIndex]);
+            : formatAutomationExampleLabel(
+                messages.automationExample,
+                item.exampleIndex,
+                examples?.rows[item.exampleIndex]
+              );
+        const errorMessage = formatAutomationError(
+          {
+            code: item.error,
+            errorKind: item.errorKind,
+            status: item.status,
+            timedOut: item.diagnostics?.timedOut === true,
+          },
+          messages
+        );
         return (
           <div
             key={String(item.id)}
@@ -136,11 +168,7 @@ export default function AutomationHistory({ projectId, runId, caseId, runCaseId,
                 )}
               </div>
               {item.summary && <p className="break-words whitespace-pre-wrap">{item.summary}</p>}
-              {item.errorKind === 'evidence' ? (
-                <p className="break-words whitespace-pre-wrap text-danger">{messages.automationEvidenceInsufficient}</p>
-              ) : (
-                item.error && <p className="break-words whitespace-pre-wrap text-danger">{item.error}</p>
-              )}
+              {errorMessage && <p className="break-words whitespace-pre-wrap text-danger">{errorMessage}</p>}
               {item.errorFields && item.errorFields.length > 0 && (
                 <ul className="list-disc space-y-1 ps-5 text-danger">
                   {item.errorFields.map((field, index) => (
@@ -150,6 +178,7 @@ export default function AutomationHistory({ projectId, runId, caseId, runCaseId,
                   ))}
                 </ul>
               )}
+              <AutomationTimeline execution={item} locale={locale} messages={messages} compact />
             </div>
             <Button
               as={Link}

@@ -22,6 +22,7 @@ import {
   fetchAutomationEnvironments,
   fetchAutomationExecution,
   fetchAutomationHistory,
+  formatAutomationError,
   formatAutomationExampleLabel,
   formatAutomationDuration,
   isAutomationActive,
@@ -56,6 +57,18 @@ function executionStatusLabel(execution: AutomationExecution, messages: RunDetai
           cancelled: messages.automationCancelled,
         } as Record<AutomationStatus, string>
       )[execution.status];
+}
+
+function executionErrorMessage(execution: AutomationExecution, messages: RunDetailMessages): string | undefined {
+  return formatAutomationError(
+    {
+      code: execution.error,
+      errorKind: execution.errorKind,
+      status: execution.status,
+      timedOut: execution.diagnostics?.timedOut === true,
+    },
+    messages
+  );
 }
 
 export default function AutomationExecutionPanel({
@@ -102,7 +115,11 @@ export default function AutomationExecutionPanel({
   useEffect(() => {
     setSelectedExampleIndex((current) => {
       const index = Number(current);
-      return exampleCount > 0 && Number.isInteger(index) && index >= 0 && index < exampleCount ? current : exampleCount > 0 ? '0' : '';
+      return exampleCount > 0 && Number.isInteger(index) && index >= 0 && index < exampleCount
+        ? current
+        : exampleCount > 0
+          ? '0'
+          : '';
     });
   }, [exampleCount]);
 
@@ -174,8 +191,7 @@ export default function AutomationExecutionPanel({
   useAutomationPolling({
     active: Boolean(
       accessToken &&
-        (history.some((item) => isAutomationActive(item.status)) ||
-          (execution && isAutomationActive(execution.status)))
+        (history.some((item) => isAutomationActive(item.status)) || (execution && isAutomationActive(execution.status)))
     ),
     poll: loadHistory,
     onValue: (nextHistory) => {
@@ -260,7 +276,7 @@ export default function AutomationExecutionPanel({
       setExecution(nextExecution);
     } catch (error) {
       if (error instanceof AutomationRequestError) {
-        setError(error.code);
+        setError(formatAutomationError({ code: error.code }, messages) ?? messages.automationGenericFailure);
         setErrorFields(error.fields);
       } else {
         setError(messages.automationUnavailable);
@@ -422,22 +438,30 @@ export default function AutomationExecutionPanel({
               <strong>{messages.automationExample}:</strong>{' '}
               <span
                 className="inline-block min-w-0 max-w-full truncate align-bottom"
-                title={formatAutomationExampleLabel(messages.automationExample, execution.exampleIndex, exampleRows[execution.exampleIndex])}
-                aria-label={formatAutomationExampleLabel(messages.automationExample, execution.exampleIndex, exampleRows[execution.exampleIndex])}
+                title={formatAutomationExampleLabel(
+                  messages.automationExample,
+                  execution.exampleIndex,
+                  exampleRows[execution.exampleIndex]
+                )}
+                aria-label={formatAutomationExampleLabel(
+                  messages.automationExample,
+                  execution.exampleIndex,
+                  exampleRows[execution.exampleIndex]
+                )}
               >
-                {formatAutomationExampleLabel(messages.automationExample, execution.exampleIndex, exampleRows[execution.exampleIndex])}
+                {formatAutomationExampleLabel(
+                  messages.automationExample,
+                  execution.exampleIndex,
+                  exampleRows[execution.exampleIndex]
+                )}
               </span>
             </p>
           )}
-          {execution.errorKind === 'evidence' ? (
+          {executionErrorMessage(execution, messages) && (
             <p className="break-words whitespace-pre-wrap" role="alert">
-              <strong>{messages.automationErrorDetail}:</strong> {messages.automationEvidenceInsufficient}
+              <strong>{messages.automationErrorDetail}:</strong> {executionErrorMessage(execution, messages)}
             </p>
-          ) : execution.error ? (
-            <p className="break-words whitespace-pre-wrap" role="alert">
-              <strong>{messages.automationErrorDetail}:</strong> {execution.error}
-            </p>
-          ) : null}
+          )}
           {execution.errorFields && execution.errorFields.length > 0 && (
             <ul className="list-disc space-y-1 ps-5 text-danger">
               {execution.errorFields.map((field, index) => (

@@ -39,6 +39,15 @@ const messages = {
   automationError: 'Error',
   automationCancelled: 'Cancelled',
   automationEvidenceInsufficient: 'Execution evidence is insufficient',
+  automationTechnicalFailure: 'A technical failure stopped the execution. Check the environment and retry.',
+  automationFunctionalFailure: 'The scenario did not pass. Review the execution evidence and expected result.',
+  automationEvidenceFailure: 'The execution could not be verified because required evidence is missing or unsafe.',
+  automationCancelledDetail: 'The execution was cancelled before it completed.',
+  automationGenericFailure: 'The automation could not be completed. Review the details and try again.',
+  automationTimeoutDetail:
+    'Hercules exceeded the execution time limit. Review the process output for context, then retry the execution.',
+  automationTimeline: 'Execution timeline',
+  automationTimeout: 'Timed out',
   automationExample: 'Example',
   automationAttempt: 'Attempt',
   automationViewDetail: 'View details',
@@ -62,17 +71,15 @@ describe('AutomationHistory', () => {
 
   it('discovers a RunCase execution after the initial history response is empty', async () => {
     vi.useFakeTimers();
-    mocks.fetchHistory
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          id: 'execution-1',
-          runCaseId: 12,
-          exampleIndex: 0,
-          status: 'running',
-          queuedAt: '2026-08-28T12:00:00.000Z',
-        },
-      ]);
+    mocks.fetchHistory.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: 'execution-1',
+        runCaseId: 12,
+        exampleIndex: 0,
+        status: 'running',
+        queuedAt: '2026-08-28T12:00:00.000Z',
+      },
+    ]);
     const container = document.createElement('div');
     const root = createRoot(container);
     roots.push(root);
@@ -107,5 +114,40 @@ describe('AutomationHistory', () => {
     expect(mocks.fetchHistory).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain('Example 1: Ada');
     expect(container.textContent).toContain(messages.automationRunning);
+  });
+
+  it('renders a localized technical failure instead of the stored machine code', async () => {
+    mocks.fetchHistory.mockResolvedValueOnce([
+      {
+        id: 'execution-error',
+        runCaseId: 12,
+        status: 'error',
+        error: 'hercules_process_failed',
+        queuedAt: '2026-08-28T12:00:00.000Z',
+      },
+    ]);
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    roots.push(root);
+
+    await act(async () => {
+      root.render(
+        <TokenContext.Provider value={contextValue as never}>
+          <AutomationHistory
+            projectId="10"
+            runId="4"
+            caseId="8"
+            runCaseId={12}
+            locale="en"
+            messages={messages as never}
+          />
+        </TokenContext.Provider>
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain(messages.automationTechnicalFailure);
+    expect(container.textContent).not.toContain('hercules_process_failed');
   });
 });
