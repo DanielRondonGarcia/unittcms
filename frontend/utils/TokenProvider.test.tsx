@@ -7,12 +7,14 @@ import TokenProvider, { TokenContext } from './TokenProvider';
 
 const mocks = vi.hoisted(() => ({
   fetchMyRoles: vi.fn(),
+  isProjectMember: vi.fn(),
   routerPush: vi.fn(),
 }));
 
 vi.mock('./token', () => ({
   isSignedIn: (token: { access_token: string }) => Boolean(token.access_token),
   isAdmin: () => false,
+  isProjectMember: mocks.isProjectMember,
   isProjectOnwer: () => false,
   isProjectManager: () => false,
   isProjectDeveloper: () => false,
@@ -33,6 +35,11 @@ function LocaleProbe() {
   return <output>{token.user?.locale ?? 'none'}</output>;
 }
 
+function ProjectMemberProbe() {
+  const { isProjectMember } = useContext(TokenContext);
+  return <output>{String(isProjectMember(10))}</output>;
+}
+
 describe('signed-in locale restoration', () => {
   beforeAll(() => {
     (globalThis as typeof globalThis & { React: typeof React }).React = React;
@@ -43,6 +50,8 @@ describe('signed-in locale restoration', () => {
     localStorage.clear();
     mocks.fetchMyRoles.mockReset();
     mocks.fetchMyRoles.mockResolvedValue([]);
+    mocks.isProjectMember.mockReset();
+    mocks.isProjectMember.mockReturnValue(false);
     mocks.routerPush.mockReset();
   });
 
@@ -68,6 +77,24 @@ describe('signed-in locale restoration', () => {
 
     expect(container.textContent).toBe('es');
     expect(mocks.fetchMyRoles).toHaveBeenCalledWith('jwt');
+    await act(async () => root.unmount());
+  });
+
+  it('exposes the typed project membership helper through context', async () => {
+    mocks.isProjectMember.mockReturnValue(true);
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <TokenProvider locale="en">
+          <ProjectMemberProbe />
+        </TokenProvider>
+      );
+    });
+
+    expect(container.textContent).toBe('true');
+    expect(mocks.isProjectMember).toHaveBeenLastCalledWith([], 10);
     await act(async () => root.unmount());
   });
 });

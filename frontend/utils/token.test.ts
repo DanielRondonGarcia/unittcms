@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { isPrivatePath, checkSignInPage, isAdmin } from './token';
+import { isPrivatePath, checkSignInPage, isAdmin, isProjectMember } from './token';
 
 describe('check account path', () => {
   test('"account/" is private', () => {
@@ -86,6 +86,21 @@ describe('check user is admin or not', () => {
 
   test('user with user role is not admin', () => {
     expect(isAdmin(validUserToken)).toBe(false);
+  });
+});
+
+describe('check project membership', () => {
+  test('project owners count as members', () => {
+    expect(isProjectMember([{ projectId: 10, isOwner: true, isMember: false, role: 0 }], 10)).toBe(true);
+  });
+
+  test('project members are allowed regardless of their member role', () => {
+    expect(isProjectMember([{ projectId: 10, isOwner: false, isMember: true, role: 2 }], 10)).toBe(true);
+  });
+
+  test('users without a project membership are not allowed', () => {
+    expect(isProjectMember([{ projectId: 10, isOwner: false, isMember: false, role: 2 }], 10)).toBe(false);
+    expect(isProjectMember([], 10)).toBe(false);
   });
 });
 

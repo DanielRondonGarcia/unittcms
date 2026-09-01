@@ -1,32 +1,93 @@
 import { getFilenameFromContentDisposition } from '@/utils/request';
 import { logError } from '@/utils/errorHandler';
+import { requestJson, type ApiResult } from '@/utils/apiResult';
 import { CaseType } from '@/types/case';
-import { RunType, RunCaseType } from '@/types/run';
+import { RunDetailsResponse, RunType, RunCaseType } from '@/types/run';
 import Config from '@/config/config';
 import { testRunCaseStatus } from '@/config/selection';
 const apiServer = Config.apiServer;
 
-async function fetchRun(jwt: string, runId: number) {
+function isIntegerLike(value: unknown): boolean {
+  return (
+    (typeof value === 'number' && Number.isInteger(value)) ||
+    (typeof value === 'string' && value.trim() !== '' && Number.isInteger(Number(value)))
+  );
+}
+
+function isIntegerLikeInRange(value: unknown, minimum: number, maximum: number): boolean {
+  return isIntegerLike(value) && Number(value) >= minimum && Number(value) <= maximum;
+}
+
+function isNullableString(value: unknown): boolean {
+  return value === null || value === undefined || typeof value === 'string';
+}
+
+function isRunDetailsPayload(value: unknown): value is RunDetailsResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const payload = value as { run?: unknown; statusCounts?: unknown };
+  if (!payload.run || typeof payload.run !== 'object' || Array.isArray(payload.run)) return false;
+
+  const run = payload.run as {
+    id?: unknown;
+    name?: unknown;
+    configurations?: unknown;
+    description?: unknown;
+    state?: unknown;
+    projectId?: unknown;
+  };
+  if (
+    !isIntegerLikeInRange(run.id, 1, Number.MAX_SAFE_INTEGER) ||
+    typeof run.name !== 'string' ||
+    !isIntegerLikeInRange(run.projectId, 1, Number.MAX_SAFE_INTEGER) ||
+    !isNullableString(run.configurations) ||
+    !isNullableString(run.description) ||
+    (run.state !== undefined && run.state !== null && !isIntegerLikeInRange(run.state, 0, 5)) ||
+    !Array.isArray(payload.statusCounts)
+  ) {
+    return false;
+  }
+
+  return payload.statusCounts.every((statusCount) => {
+    if (!statusCount || typeof statusCount !== 'object' || Array.isArray(statusCount)) return false;
+    const entry = statusCount as { status?: unknown; count?: unknown };
+    return isIntegerLikeInRange(entry.status, 0, 4) && isIntegerLikeInRange(entry.count, 0, Number.MAX_SAFE_INTEGER);
+  });
+}
+
+function normalizeRunDetailsPayload(data: RunDetailsResponse): RunDetailsResponse {
+  return {
+    run: {
+      ...data.run,
+      id: Number(data.run.id),
+      configurations: Number(data.run.configurations) || 0,
+      state: Number(data.run.state) || 0,
+      projectId: Number(data.run.projectId),
+      description: data.run.description ?? '',
+    },
+    statusCounts: data.statusCounts.map((statusCount) => ({
+      ...statusCount,
+      status: Number(statusCount.status),
+      count: Number(statusCount.count),
+    })),
+  };
+}
+
+export async function fetchRun(jwt: string, runId: number): Promise<ApiResult<RunDetailsResponse>> {
   const url = `${apiServer}/runs/${runId}`;
 
-  try {
-    const response = await fetch(url, {
+  const result = await requestJson<RunDetailsResponse>(
+    url,
+    {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${jwt}`,
       },
-    });
+    },
+    isRunDetailsPayload
+  );
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error: unknown) {
-    logError('Error fetching data:', error);
-  }
+  return result.ok ? { ok: true, data: normalizeRunDetailsPayload(result.data) } : result;
 }
 
 async function fetchRuns(jwt: string, projectId: number) {
@@ -425,7 +486,6 @@ async function fetchProjectMembersForRun(jwt: string, projectId: string) {
 }
 
 export {
-  fetchRun,
   fetchRuns,
   createRun,
   updateRun,

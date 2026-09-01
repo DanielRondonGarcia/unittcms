@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   deleteGherkinCaseStep,
+  fetchCase,
   hasValidGherkinExamples,
   hasValidGherkinKeywords,
   hasValidGherkinStepOrder,
@@ -10,6 +11,42 @@ import {
 } from './caseControl';
 import type { GherkinKeyword, GherkinSection } from '@/types/base';
 import type { StepType } from '@/types/case';
+
+const fetchMock = vi.fn();
+
+function response(status: number, body: unknown, headers: Record<string, string> = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(headers),
+    json: vi.fn().mockResolvedValue(body),
+  } as never;
+}
+
+const validCasePayload = {
+  id: 7,
+  title: 'Login',
+  state: 0,
+  priority: 1,
+  type: 0,
+  automationStatus: 0,
+  description: null,
+  template: 0,
+  preConditions: null,
+  expectedResults: null,
+  folderId: 3,
+  Steps: [],
+  RunCases: [],
+};
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', fetchMock);
+  fetchMock.mockReset();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function step(id: number, stepNo: number, keyword: GherkinKeyword, section: GherkinSection): StepType {
   return {
@@ -164,5 +201,52 @@ describe('Gherkin case step controls', () => {
         { headers: ['user'], rows: [['Ada']] }
       ).issues
     ).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'example_placeholder', stepIndex: 0 })]));
+  });
+});
+
+describe('fetchCase request outcomes', () => {
+  it('returns a typed success and normalizes nullable case text', async () => {
+    fetchMock.mockResolvedValue(response(200, validCasePayload));
+
+    const result = await fetchCase('jwt', 7);
+
+    expect(result).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        id: 7,
+        description: '',
+        preConditions: '',
+        expectedResults: '',
+      }),
+    });
+  });
+
+  it('preserves status, correlation, and Retry-After on a throttled response', async () => {
+    fetchMock.mockResolvedValue(
+      response(429, { error: 'Too many requests.' }, { 'X-Correlation-Id': 'corr-case-7', 'Retry-After': '30' })
+    );
+
+    const result = await fetchCase('jwt', 7);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        status: 429,
+        code: 'http_429',
+        message: 'Too many requests.',
+        correlationId: 'corr-case-7',
+        retryAfterSeconds: 30,
+      },
+    });
+  });
+
+  it('turns malformed success payloads and aborted requests into safe errors', async () => {
+    fetchMock.mockResolvedValueOnce(response(200, null));
+    const malformed = await fetchCase('jwt', 7);
+    expect(malformed).toMatchObject({ ok: false, error: { status: 200, code: 'malformed_response' } });
+
+    fetchMock.mockRejectedValueOnce(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    const timedOut = await fetchCase('jwt', 7);
+    expect(timedOut).toMatchObject({ ok: false, error: { status: 0, code: 'timeout' } });
   });
 });

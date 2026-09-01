@@ -91,6 +91,7 @@ function defineCase(sequelize, DataTypes) {
     });
     Case.hasMany(models.AutomationDefinition, { foreignKey: 'caseId', onDelete: 'CASCADE' });
     Case.hasMany(models.AutomationExecution, { foreignKey: 'caseId', onDelete: 'CASCADE' });
+    Case.hasMany(models.ManualExecution, { foreignKey: 'caseId', onDelete: 'SET NULL' });
   };
 
   return Case;

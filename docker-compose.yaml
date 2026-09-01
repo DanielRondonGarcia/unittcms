@@ -17,6 +17,8 @@ services:
       - IS_DEMO=false # set to true to seed the database
       - API_PATH=${API_PATH:-/api}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:8000}
+      - MANUAL_EXECUTION_ENABLED=${MANUAL_EXECUTION_ENABLED:-true}
+      - MANUAL_EXECUTION_EVIDENCE_ROOT=/app/backend/private/manual-execution-evidence
       - AUTOMATION_EXECUTION_MODE=${AUTOMATION_EXECUTION_MODE:-disabled}
       - AUTOMATION_PHASE0_READY=false
       - AUTOMATION_REDIS_URL=redis://redis:6379
@@ -24,6 +26,7 @@ services:
     volumes:
       - db-data:/app/backend/database
       - ./backend/public/uploads:/app/backend/public/uploads
+      - manual-execution-evidence:/app/backend/private/manual-execution-evidence
       - automation-artifacts:/app/backend/private/automation-artifacts
     healthcheck:
       test:
@@ -120,6 +123,7 @@ services:
 volumes:
   db-data:
   redis-data:
+  manual-execution-evidence:
   automation-artifacts:
   hercules-work:
     name: ${AUTOMATION_HERCULES_VOLUME:-unittcms_hercules-work}

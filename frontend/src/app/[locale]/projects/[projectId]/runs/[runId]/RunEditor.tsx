@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useRef } from 'react';
 import {
   Button,
   Input,
@@ -67,6 +67,8 @@ import { RunStatusMessages, TestRunCaseStatusMessages } from '@/types/status';
 import { TestTypeMessages } from '@/types/testType';
 import { MemberType } from '@/types/user';
 import { logError } from '@/utils/errorHandler';
+import { toApiError, type ApiError } from '@/utils/apiResult';
+import { LoadingState, RequestErrorState } from '@/components/RequestState';
 import TreeItem from '@/components/TreeItem';
 import { buildFolderTree } from '@/utils/buildFolderTree';
 
@@ -80,6 +82,11 @@ const defaultTestRun = {
   createdAt: '',
   updatedAt: '',
 };
+
+function isPositiveIdentifier(value: string): boolean {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0;
+}
 
 type Props = {
   projectId: string;
@@ -114,6 +121,8 @@ export default function RunEditor({
   const [filteredTestCases, setFilteredTestCases] = useState<CaseType[]>([]);
   const [isNameInvalid] = useState<boolean>(false);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
+  const [isFetchingRun, setIsFetchingRun] = useState(true);
+  const [runError, setRunError] = useState<ApiError | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<number[]>([]);
@@ -121,28 +130,53 @@ export default function RunEditor({
   const [assigneeFilter, setAssigneeFilter] = useState<string>('');
   const [members, setMembers] = useState<MemberType[]>([]);
   const [pendingAssignees, setPendingAssignees] = useState<Map<number, number | null>>(new Map());
+  const hasInitializedDependentData = useRef(false);
+  const dependentDataRequest = useRef<Promise<void> | null>(null);
   const router = useRouter();
   const isManager = tokenContext.isProjectManager(Number(projectId));
 
   // not show warning when navigating to test case detail page
   useFormGuard(isDirty, messages.areYouSureLeave, [`/projects/${projectId}/runs/${runId}/cases/\\d+`]);
 
-  const fetchRunAndStatusCount = async () => {
-    const { run, statusCounts } = await fetchRun(tokenContext.token.access_token, Number(runId));
-    setTestRun(run);
-    setRunStatusCounts(statusCounts);
+  const fetchRunAndStatusCount = async (): Promise<boolean> => {
+    setIsFetchingRun(true);
+    setRunError(null);
+    if (!isPositiveIdentifier(projectId) || !isPositiveIdentifier(runId)) {
+      setRunError({ status: 400, code: 'invalid_route', message: messages.errorTitle });
+      setIsFetchingRun(false);
+      return false;
+    }
+
+    try {
+      const result = await fetchRun(tokenContext.token.access_token, Number(runId));
+      if (!result.ok) {
+        setRunError(result.error);
+        return false;
+      }
+
+      setTestRun(result.data.run);
+      setRunStatusCounts(result.data.statusCounts);
+      return true;
+    } catch (error: unknown) {
+      logError('Error fetching run data', error);
+      setRunError(toApiError(error));
+      return false;
+    } finally {
+      setIsFetchingRun(false);
+    }
   };
 
   const initTestCases = async (search?: string, status?: string[], tag?: string[], assignee?: string) => {
-    const casesData = await fetchProjectCases(
-      tokenContext.token.access_token,
-      Number(projectId),
-      Number(runId),
-      search,
-      status,
-      tag,
-      assignee
-    );
+    const casesData =
+      (await fetchProjectCases(
+        tokenContext.token.access_token,
+        Number(projectId),
+        Number(runId),
+        search,
+        status,
+        tag,
+        assignee
+      )) ?? [];
     casesData.forEach((testCase: CaseType) => {
       if (testCase.RunCases && testCase.RunCases.length > 0) {
         testCase.RunCases[0].editState = 'notChanged';
@@ -152,35 +186,56 @@ export default function RunEditor({
     if (!search && !status?.length && !tag?.length && !assignee) setAllTestCases(casesData);
   };
 
+  const initializeDependentData = async (): Promise<void> => {
+    if (hasInitializedDependentData.current) return;
+    if (dependentDataRequest.current) {
+      await dependentDataRequest.current;
+      return;
+    }
+
+    const request = (async () => {
+      const foldersData = await fetchFolders(tokenContext.token.access_token, Number(projectId));
+      const tree = buildFolderTree(foldersData);
+      setTreeData(tree);
+      setSelectedFolder(foldersData[0]);
+      await initTestCases();
+      const membersData = await fetchProjectMembersForRun(tokenContext.token.access_token, projectId);
+      setMembers(membersData || []);
+      hasInitializedDependentData.current = true;
+    })();
+
+    dependentDataRequest.current = request;
+    try {
+      await request;
+    } finally {
+      if (dependentDataRequest.current === request) {
+        dependentDataRequest.current = null;
+      }
+    }
+  };
+
   const mergeCaseChanges = (nextCases: CaseType[]) => {
     setTestCases(nextCases);
     setAllTestCases((current) => mergeRunCaseChanges(current, nextCases));
   };
 
   const isSignedIn = tokenContext.isSignedIn();
+  const fetchRunScreenData = async () => {
+    if (!tokenContext.isSignedIn()) return;
+
+    try {
+      const hasRun = await fetchRunAndStatusCount();
+      if (!hasRun) return;
+      await initializeDependentData();
+    } catch (error: unknown) {
+      logError('Error fetching run data', error);
+    }
+  };
+
   useEffect(() => {
     if (!isSignedIn) return;
 
-    async function fetchDataEffect() {
-      if (!tokenContext.isSignedIn()) {
-        return;
-      }
-
-      try {
-        await fetchRunAndStatusCount();
-        const foldersData = await fetchFolders(tokenContext.token.access_token, Number(projectId));
-        const tree = buildFolderTree(foldersData);
-        setTreeData(tree);
-        setSelectedFolder(foldersData[0]);
-        initTestCases();
-        const membersData = await fetchProjectMembersForRun(tokenContext.token.access_token, projectId);
-        setMembers(membersData || []);
-      } catch (error: unknown) {
-        logError('Error fetching run data', error);
-      }
-    }
-
-    fetchDataEffect();
+    void fetchRunScreenData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn]);
 
@@ -340,8 +395,18 @@ export default function RunEditor({
     await initTestCases(search, status.map(String), tag.map(String), resolvedAssignee || undefined);
   };
 
+  if (isFetchingRun) return <LoadingState message={messages.loading} />;
+  if (runError)
+    return (
+      <RequestErrorState
+        error={runError}
+        messages={messages}
+        onRetry={runError.code === 'invalid_route' ? undefined : () => void fetchRunScreenData()}
+      />
+    );
+
   return (
-    <div className="h-full min-h-0 min-w-0 max-w-full overflow-auto">
+    <div className="h-full min-h-0 min-w-0 max-w-full overflow-x-hidden overflow-y-auto">
       <div className="flex w-full flex-wrap items-center justify-between gap-2 border-b-1 p-3 dark:border-neutral-700">
         <div className="flex min-w-0 items-center">
           <Tooltip content={messages.backToRuns}>
@@ -448,7 +513,7 @@ export default function RunEditor({
         </div>
       </div>
 
-      <div className="container mx-auto min-w-0 w-full max-w-5xl flex-grow px-6 pt-6">
+      <div className="container mx-auto min-w-0 w-full max-w-5xl px-6 pb-6 pt-6">
         <div className="flex flex-col gap-4 md:flex-row">
           <div className="min-w-0">
             <div className="h-72 w-full max-w-96 md:w-96">
@@ -460,7 +525,7 @@ export default function RunEditor({
                     size="sm"
                     className="rounded-full bg-transparent ms-1 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                     aria-label={messages.refresh}
-                    onPress={fetchRunAndStatusCount}
+                    onPress={() => void fetchRunAndStatusCount()}
                   >
                     <RotateCw size={16} />
                   </Button>
@@ -584,7 +649,7 @@ export default function RunEditor({
           </div>
         </div>
 
-        <div className="mt-3 mb-12 flex min-w-0 flex-col rounded-small border-2 dark:border-neutral-700 md:flex-row">
+        <div className="mt-3 flex min-w-0 flex-col rounded-small border-2 dark:border-neutral-700 md:flex-row">
           <div className="w-full shrink-0 border-b-1 dark:border-neutral-700 md:w-3/12 md:border-b-0 md:border-r-1">
             <Tree
               data={treeData}

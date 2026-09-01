@@ -135,6 +135,11 @@ type CasesMessages = {
 
 type CaseMessages = {
   backToCases: string;
+  loading: string;
+  requestError: string;
+  retry: string;
+  retryAfter: string;
+  correlationId: string;
   updating: string;
   update: string;
   updatedTestCase: string;

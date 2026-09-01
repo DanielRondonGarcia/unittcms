@@ -3,6 +3,8 @@ import DetailPane from './DetailPane';
 import type { RunDetailMessages } from '@/types/run';
 import type { PriorityMessages } from '@/types/priority';
 import type { TestTypeMessages } from '@/types/testType';
+import type { ManualExecutionMessages } from '@/types/manualExecution';
+import Config from '@/config/config';
 
 export default function Page({
   params,
@@ -13,6 +15,7 @@ export default function Page({
   const ui = useTranslations('UI');
   const gherkinT = useTranslations('Gherkin');
   const caseT = useTranslations('Case');
+  const manualExecutionEnabled = Config.manualExecutionEnabled;
   const messages: RunDetailMessages = {
     title: t('title'),
     description: t('description'),
@@ -25,9 +28,15 @@ export default function Page({
     expectedResult: t('expected_result'),
     detailsOfTheStep: t('details_of_the_step'),
     caseDetail: t('case_detail'),
+    metadata: t('metadata'),
     comments: t('comments'),
     history: t('history'),
     loading: ui('loading_lowercase'),
+    requestError: t('request_error'),
+    retry: t('retry'),
+    retryAfter: t('retry_after'),
+    correlationId: t('correlation_id'),
+    noCaseSelected: t('no_case_selected'),
     historyUnavailable: ui('history_unavailable'),
     historyNotice: ui('history_notice'),
     options: ui('options'),
@@ -108,6 +117,77 @@ export default function Page({
     low: pt('low'),
   };
 
+  const manualExecutionMessages: ManualExecutionMessages = {
+    requestError: t('request_error'),
+    retry: t('retry'),
+    retryAfter: t('retry_after'),
+    correlationId: t('correlation_id'),
+    manualExecution: caseT('manual_execution'),
+    manualExecutionStart: caseT('manual_execution_start'),
+    manualExecutionLoading: caseT('manual_execution_loading'),
+    manualExecutionEmpty: caseT('manual_execution_empty'),
+    manualExecutionRunning: caseT('manual_execution_running'),
+    manualExecutionPassed: caseT('manual_execution_passed'),
+    manualExecutionFailed: caseT('manual_execution_failed'),
+    manualExecutionCancelled: caseT('manual_execution_cancelled'),
+    manualExecutionFinished: caseT('manual_execution_finished'),
+    manualExecutionStatus: caseT('manual_execution_status'),
+    manualExecutionResult: caseT('manual_execution_result'),
+    manualExecutionExpand: caseT('manual_execution_expand'),
+    manualExecutionCollapse: caseT('manual_execution_collapse'),
+    manualExecutionFinishPassed: caseT('manual_execution_finish_passed'),
+    manualExecutionFinishFailed: caseT('manual_execution_finish_failed'),
+    manualExecutionFinishFailedConfirm: caseT('manual_execution_finish_failed_confirm'),
+    manualExecutionReportBack: caseT('manual_execution_report_back'),
+    manualExecutionCancel: caseT('manual_execution_cancel'),
+    manualExecutionActor: caseT('manual_execution_actor'),
+    manualExecutionAssignee: caseT('manual_execution_assignee'),
+    manualExecutionStartedAt: caseT('manual_execution_started_at'),
+    manualExecutionFinishedAt: caseT('manual_execution_finished_at'),
+    manualExecutionRevision: caseT('manual_execution_revision'),
+    manualExecutionStale: caseT('manual_execution_stale'),
+    manualExecutionHistorical: caseT('manual_execution_historical'),
+    manualExecutionSourceDeleted: caseT('manual_execution_source_deleted'),
+    manualExecutionEvidence: caseT('manual_execution_evidence'),
+    manualExecutionEvidencePrivate: caseT('manual_execution_evidence_private'),
+    manualExecutionEvidenceEmpty: caseT('manual_execution_evidence_empty'),
+    manualExecutionEvidenceUpload: caseT('manual_execution_evidence_upload'),
+    manualExecutionEvidenceDownload: caseT('manual_execution_evidence_download'),
+    manualExecutionEvidenceDelete: caseT('manual_execution_evidence_delete'),
+    manualExecutionEvidenceDeleteConfirm: caseT('manual_execution_evidence_delete_confirm'),
+    manualExecutionEvidenceDeleteCancel: t('close'),
+    manualExecutionUnavailable: caseT('manual_execution_unavailable'),
+    manualExecutionUnauthorized: caseT('manual_execution_unauthorized'),
+    manualExecutionEvidenceType: caseT('manual_execution_evidence_type'),
+    manualExecutionEvidenceSize: caseT('manual_execution_evidence_size'),
+    manualExecutionEvidenceLimit: caseT('manual_execution_evidence_limit'),
+    manualExecutionReport: caseT('manual_execution_report'),
+    manualExecutionReportDescription: caseT('manual_execution_report_description'),
+    manualExecutionReportFailureReason: caseT('manual_execution_report_failure_reason'),
+    manualExecutionReportHowToFix: caseT('manual_execution_report_how_to_fix'),
+    manualExecutionReportReproductionSteps: caseT('manual_execution_report_reproduction_steps'),
+    manualExecutionReportBrowser: caseT('manual_execution_report_browser'),
+    manualExecutionReportEnvironment: caseT('manual_execution_report_environment'),
+    manualExecutionReportFieldLimit: caseT('manual_execution_report_field_limit'),
+    manualExecutionReportSave: caseT('manual_execution_report_save'),
+    manualExecutionReportSaving: caseT('manual_execution_report_saving'),
+    manualExecutionReportSaved: caseT('manual_execution_report_saved'),
+    manualExecutionReportUnsaved: caseT('manual_execution_report_unsaved'),
+    manualExecutionReportEmpty: caseT('manual_execution_report_empty'),
+    manualExecutionReportComments: caseT('manual_execution_report_comments'),
+    manualExecutionReportTooLong: caseT('manual_execution_report_too_long'),
+    manualExecutionActorHint: caseT('manual_execution_actor_hint'),
+    manualExecutionEvidencePaste: caseT('manual_execution_evidence_paste'),
+    manualExecutionEvidenceDrop: caseT('manual_execution_evidence_drop'),
+    manualExecutionEvidenceUploading: caseT('manual_execution_evidence_uploading'),
+    manualExecutionEvidenceUploaded: caseT('manual_execution_evidence_uploaded'),
+    manualExecutionEvidenceUploadFailed: caseT('manual_execution_evidence_upload_failed'),
+    manualExecutionEvidencePreview: caseT('manual_execution_evidence_preview'),
+    manualExecutionEvidenceOpen: caseT('manual_execution_evidence_open'),
+    manualExecutionEvidenceClose: caseT('manual_execution_evidence_close'),
+    manualExecutionReportUnavailable: caseT('manual_execution_report_unavailable'),
+  };
+
   const tt = useTranslations('Type');
   const testTypeMessages: TestTypeMessages = {
     other: tt('other'),
@@ -154,6 +234,8 @@ export default function Page({
       caseId={params.caseId}
       locale={params.locale}
       messages={messages}
+      manualExecutionMessages={manualExecutionMessages}
+      manualExecutionEnabled={manualExecutionEnabled}
       priorityMessages={priorityMessages}
       testTypeMessages={testTypeMessages}
       commentMessages={commentMessages}

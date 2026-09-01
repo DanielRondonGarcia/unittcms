@@ -1,3 +1,60 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* HeroUI adds scrollbar-hide to tab lists by default; keep this override scoped to run-case tabs. */
+.run-case-tab-list {
+  -ms-overflow-style: auto;
+  scrollbar-color: hsl(var(--heroui-default-400, 215 20% 65%)) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+}
+
+.run-case-tab-list.run-case-tab-list::-webkit-scrollbar {
+  display: block;
+  height: 0.375rem;
+}
+
+.run-case-tab-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.run-case-tab-list::-webkit-scrollbar-thumb {
+  background-clip: padding-box;
+  background-color: hsl(var(--heroui-default-400, 215 20% 65%) / 0.7);
+  border: 1px solid transparent;
+  border-radius: 9999px;
+}
+
+.run-case-tab-list:hover,
+.run-case-tab-list:focus-within {
+  scrollbar-color: hsl(var(--heroui-default-500, 215 20% 55%)) transparent;
+}
+
+.run-case-tab-list:focus-within {
+  outline: 2px solid hsl(var(--heroui-focus, 215 20% 45%));
+  outline-offset: 1px;
+}
+
+.run-case-tab-list::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--heroui-default-500, 215 20% 55%) / 0.9);
+}
+
+.dark .run-case-tab-list {
+  scrollbar-color: hsl(var(--heroui-default-500, 215 20% 45%)) transparent;
+}
+
+.dark .run-case-tab-list::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--heroui-default-500, 215 20% 45%) / 0.75);
+}
+
+.dark .run-case-tab-list::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--heroui-default-400, 215 20% 60%) / 0.9);
+}
+
+@media (pointer: coarse) {
+  .run-case-tab-list.run-case-tab-list::-webkit-scrollbar {
+    height: 0.5rem;
+  }
+}

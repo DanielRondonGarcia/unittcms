@@ -34,6 +34,11 @@ type RunStatusCountType = {
   count: number;
 };
 
+type RunDetailsResponse = {
+  run: RunType;
+  statusCounts: RunStatusCountType[];
+};
+
 type ProgressSeriesType = {
   name: string;
   data: number[];
@@ -65,6 +70,11 @@ type RunsMessages = {
 
 type RunMessages = {
   backToRuns: string;
+  loading: string;
+  requestError: string;
+  retry: string;
+  retryAfter: string;
+  correlationId: string;
   updating: string;
   update: string;
   updatedTestRun: string;
@@ -165,6 +175,12 @@ type RunDetailMessages = {
   comments: string;
   history: string;
   loading: string;
+  requestError: string;
+  retry: string;
+  retryAfter: string;
+  correlationId: string;
+  noCaseSelected: string;
+  metadata: string;
   historyUnavailable: string;
   historyNotice: string;
   options: string;
@@ -242,6 +258,7 @@ export type {
   RunCaseType,
   RunCaseStepType,
   RunStatusCountType,
+  RunDetailsResponse,
   ProgressSeriesType,
   RunsMessages,
   RunMessages,

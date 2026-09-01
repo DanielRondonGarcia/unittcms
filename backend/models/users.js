@@ -33,6 +33,8 @@ function defineUser(sequelize, DataTypes) {
   User.associate = (models) => {
     User.hasMany(models.Project, { foreignKey: 'userId' });
     User.hasMany(models.Organization, { foreignKey: 'ownerUserId' });
+    User.hasMany(models.ManualExecution, { as: 'manualExecutions', foreignKey: 'actorUserId' });
+    User.hasMany(models.ManualExecutionEvidence, { as: 'manualEvidence', foreignKey: 'uploaderUserId' });
   };
 
   return User;

@@ -4,6 +4,7 @@ import { addToast } from '@heroui/react';
 import {
   isSignedIn as tokenIsSinedIn,
   isAdmin as tokenIsAdmin,
+  isProjectMember as tokenIsProjectMember,
   isProjectOnwer as tokenIsProjectOnwer,
   isProjectManager as tokenIsProjectManager,
   isProjectDeveloper as tokenIsProjectDeveloper,
@@ -33,6 +34,9 @@ const defaultContext = {
   },
   isSignedIn: () => false,
   isAdmin: () => false,
+  isProjectMember: () => {
+    return false;
+  },
   isProjectOwner: () => {
     return false;
   },
@@ -72,6 +76,10 @@ const TokenProvider = ({ toastMessages, locale, children }: TokenProps) => {
     return tokenIsAdmin(token);
   };
 
+  const isProjectMember = (projectId: number) => {
+    return tokenIsProjectMember(projectRoles, projectId);
+  };
+
   const isProjectOwner = (projectId: number) => {
     return tokenIsProjectOnwer(projectRoles, projectId);
   };
@@ -106,6 +114,7 @@ const TokenProvider = ({ toastMessages, locale, children }: TokenProps) => {
     projectRoles,
     isSignedIn,
     isAdmin,
+    isProjectMember,
     isProjectOwner,
     isProjectManager,
     isProjectDeveloper,

@@ -18,6 +18,11 @@ type Props = {
   priorityMessages: PriorityMessages;
 };
 
+function isPositiveIdentifier(value: string | number): boolean {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0;
+}
+
 export default function CaseDetail({
   projectId,
   testCase,
@@ -26,53 +31,80 @@ export default function CaseDetail({
   testTypeMessages,
   priorityMessages,
 }: Props) {
+  const canNavigateToCase =
+    isPositiveIdentifier(projectId) && isPositiveIdentifier(testCase.folderId) && isPositiveIdentifier(testCase.id);
+  const caseLabel = `#${testCase.id} ${testCase.title}`;
+  const selectedTemplate = templates[testCase.template];
+  const selectedType = testTypes[testCase.type];
+  const activeSteps = (testCase.Steps ?? [])
+    .filter((step) => step.editState !== 'deleted')
+    .slice()
+    .sort((a, b) => a.caseSteps.stepNo - b.caseSteps.stepNo);
+
   return (
-    <div className="h-full min-w-0 p-4 text-default-500">
+    <div className="min-w-0 p-3 text-default-500 sm:p-4">
       <div className="mb-4 min-w-0">
-        <Link
-          href={`/projects/${projectId}/folders/${testCase.folderId}/cases/${testCase.id}`}
-          locale={locale}
-          className={`${NextUiLinkClasses}`}
-        >
-          <span className="break-words">
-            #{testCase.id} {testCase.title}
+        {canNavigateToCase ? (
+          <Link
+            href={`/projects/${projectId}/folders/${testCase.folderId}/cases/${testCase.id}`}
+            locale={locale}
+            className={`${NextUiLinkClasses} block min-w-0 max-w-full`}
+            aria-label={caseLabel}
+            title={caseLabel}
+          >
+            <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{caseLabel}</span>
+          </Link>
+        ) : (
+          <span className="block break-words text-sm text-default-500" role="status">
+            {messages.noCaseSelected}
           </span>
-        </Link>
+        )}
       </div>
 
-      <div className="mb-4">
-        <p className="font-bold">{messages.description}</p>
-        <div className="break-words whitespace-pre-wrap">{testCase.description}</div>
-      </div>
-
-      <div className="mb-4">
-        <p className="font-bold">{messages.priority}</p>
-        <TestCasePriority priorityValue={testCase.priority} priorityMessages={priorityMessages} />
-      </div>
-
-      <div className="mb-4">
-        <p className="font-bold">{messages.type}</p>
-        <div>{testTypeMessages[testTypes[testCase.type].uid]}</div>
-      </div>
-
-      <div className="mb-4">
-        <p className="font-bold">{messages.tags}</p>
-        <div className="flex gap-1 flex-wrap mt-1">
-          {testCase.Tags &&
-            testCase.Tags.length > 0 &&
-            testCase.Tags.map((tag) => (
-              <Chip key={tag.id} size="sm" variant="flat">
-                {tag.name}
-              </Chip>
-            ))}
+      <dl className="grid min-w-0 gap-3">
+        <div className="min-w-0 rounded-lg border border-default-200 p-3">
+          <dt className="font-bold">{messages.description}</dt>
+          <dd className="mt-1 break-words whitespace-pre-wrap">{testCase.description || '-'}</dd>
         </div>
-      </div>
+      </dl>
 
-      {templates[testCase.template].uid === 'text' ? (
+      <details className="mt-3 min-w-0 rounded-lg border border-default-200">
+        <summary className="cursor-pointer break-words p-3 font-bold outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset">
+          {messages.metadata}
+        </summary>
+        <dl className="grid min-w-0 gap-3 border-t border-default-200 p-3 sm:grid-cols-2">
+          <div className="min-w-0">
+            <dt className="font-bold">{messages.priority}</dt>
+            <dd className="mt-1">
+              <TestCasePriority priorityValue={testCase.priority} priorityMessages={priorityMessages} />
+            </dd>
+          </div>
+
+          <div className="min-w-0">
+            <dt className="font-bold">{messages.type}</dt>
+            <dd className="mt-1 break-words">{selectedType ? testTypeMessages[selectedType.uid] : '-'}</dd>
+          </div>
+
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="font-bold">{messages.tags}</dt>
+            <dd className="mt-1 flex min-w-0 flex-wrap gap-1">
+              {testCase.Tags && testCase.Tags.length > 0
+                ? testCase.Tags.map((tag) => (
+                    <Chip key={tag.id} size="sm" variant="flat">
+                      <span className="break-words">{tag.name}</span>
+                    </Chip>
+                  ))
+                : '-'}
+            </dd>
+          </div>
+        </dl>
+      </details>
+
+      {selectedTemplate?.uid === 'text' ? (
         <>
-          <p className="font-bold mt-2">{messages.testDetail}</p>
-          <div className="my-2 flex flex-col gap-2 sm:flex-row">
-            <div className="w-full sm:w-1/2">
+          <p className="mt-2 font-bold">{messages.testDetail}</p>
+          <div className="my-2 min-w-0 flex flex-col gap-2 sm:flex-row">
+            <div className="min-w-0 w-full sm:w-1/2">
               <Textarea
                 isReadOnly
                 size="sm"
@@ -81,7 +113,7 @@ export default function CaseDetail({
                 value={testCase.preConditions}
               />
             </div>
-            <div className="w-full sm:w-1/2">
+            <div className="min-w-0 w-full sm:w-1/2">
               <Textarea
                 isReadOnly
                 size="sm"
@@ -96,18 +128,15 @@ export default function CaseDetail({
         <>
           {testCase.template === gherkinTemplate ? (
             <section className="mt-4" aria-labelledby="scenario-detail-heading">
-              <div className="mb-3 flex flex-wrap items-baseline gap-2">
-                <h3 id="scenario-detail-heading" className="text-base font-bold text-foreground">
+              <div className="mb-3 flex min-w-0 flex-wrap items-baseline gap-2">
+                <h3 id="scenario-detail-heading" className="min-w-0 text-base font-bold text-foreground">
                   {messages.scenario}:
                 </h3>
-                <span className="break-words text-base text-foreground">{testCase.title}</span>
+                <span className="min-w-0 break-words text-base text-foreground">{testCase.title}</span>
               </div>
               <div className="space-y-2">
-                {(testCase.Steps ?? [])
-                  .filter((step) => step.editState !== 'deleted')
-                  .slice()
-                  .sort((a, b) => a.caseSteps.stepNo - b.caseSteps.stepNo)
-                  .map((step) => {
+                {activeSteps.length > 0 ? (
+                  activeSteps.map((step) => {
                     const keyword = step.caseSteps.keyword;
                     const keywordLabel = keyword ? messages[keyword] : messages.steps;
                     return (
@@ -124,7 +153,12 @@ export default function CaseDetail({
                         </p>
                       </article>
                     );
-                  })}
+                  })
+                ) : (
+                  <p className="rounded-lg border border-dashed p-3 text-sm text-default-500">
+                    {messages.noScenarioSteps}
+                  </p>
+                )}
               </div>
               {testCase.gherkinExamples && (
                 <div className="mt-5 min-w-0 overflow-x-auto rounded-lg border p-3">
@@ -157,12 +191,12 @@ export default function CaseDetail({
           ) : (
             <>
               <p className="mt-2 font-bold">{messages.steps}</p>
-              {testCase.Steps?.map((step) => (
-                <div key={step.id} className="my-2 flex flex-col gap-2 sm:flex-row">
-                  <div className="w-full sm:w-1/2">
+              {(testCase.Steps ?? []).map((step) => (
+                <div key={step.id} className="my-2 min-w-0 flex flex-col gap-2 sm:flex-row">
+                  <div className="min-w-0 w-full sm:w-1/2">
                     <Textarea isReadOnly size="sm" variant="flat" label={messages.detailsOfTheStep} value={step.step} />
                   </div>
-                  <div className="w-full sm:w-1/2">
+                  <div className="min-w-0 w-full sm:w-1/2">
                     <Textarea isReadOnly size="sm" variant="flat" label={messages.expectedResult} value={step.result} />
                   </div>
                 </div>

@@ -18,6 +18,11 @@ export default function Page({
   const ui = useTranslations('UI');
   const messages = {
     backToCases: t('back_to_cases'),
+    loading: t('loading'),
+    requestError: t('request_error'),
+    retry: t('retry'),
+    retryAfter: t('retry_after'),
+    correlationId: t('correlation_id'),
     updating: t('updating'),
     update: t('update'),
     updatedTestCase: t('updated_test_case'),

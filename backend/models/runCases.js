@@ -38,6 +38,7 @@ function defineRunCase(sequelize, DataTypes) {
       onDelete: 'SET NULL',
     });
     RunCase.hasMany(models.AutomationExecution, { foreignKey: 'runCaseId', onDelete: 'SET NULL' });
+    RunCase.hasMany(models.ManualExecution, { foreignKey: 'runCaseId', onDelete: 'SET NULL' });
   };
 
   return RunCase;

@@ -34,6 +34,67 @@ describe('Locale message keys consistency', () => {
   if (!legacyBase) throw new Error('Legacy base locale not found');
 
   const translatedCaseKeys = [
+    'manual_execution',
+    'manual_execution_start',
+    'manual_execution_loading',
+    'manual_execution_empty',
+    'manual_execution_running',
+    'manual_execution_passed',
+    'manual_execution_failed',
+    'manual_execution_cancelled',
+    'manual_execution_finished',
+    'manual_execution_status',
+    'manual_execution_result',
+    'manual_execution_expand',
+    'manual_execution_collapse',
+    'manual_execution_finish_passed',
+    'manual_execution_finish_failed',
+    'manual_execution_cancel',
+    'manual_execution_actor',
+    'manual_execution_assignee',
+    'manual_execution_started_at',
+    'manual_execution_finished_at',
+    'manual_execution_revision',
+    'manual_execution_stale',
+    'manual_execution_historical',
+    'manual_execution_source_deleted',
+    'manual_execution_evidence',
+    'manual_execution_evidence_private',
+    'manual_execution_evidence_empty',
+    'manual_execution_evidence_upload',
+    'manual_execution_evidence_download',
+    'manual_execution_evidence_delete',
+    'manual_execution_evidence_delete_confirm',
+    'manual_execution_unavailable',
+    'manual_execution_unauthorized',
+    'manual_execution_evidence_type',
+    'manual_execution_evidence_size',
+    'manual_execution_evidence_limit',
+    'manual_execution_report',
+    'manual_execution_report_description',
+    'manual_execution_report_failure_reason',
+    'manual_execution_report_how_to_fix',
+    'manual_execution_report_reproduction_steps',
+    'manual_execution_report_browser',
+    'manual_execution_report_environment',
+    'manual_execution_report_field_limit',
+    'manual_execution_report_save',
+    'manual_execution_report_saving',
+    'manual_execution_report_saved',
+    'manual_execution_report_unsaved',
+    'manual_execution_report_empty',
+    'manual_execution_report_comments',
+    'manual_execution_report_too_long',
+    'manual_execution_actor_hint',
+    'manual_execution_evidence_paste',
+    'manual_execution_evidence_drop',
+    'manual_execution_evidence_uploading',
+    'manual_execution_evidence_uploaded',
+    'manual_execution_evidence_upload_failed',
+    'manual_execution_evidence_preview',
+    'manual_execution_evidence_open',
+    'manual_execution_evidence_close',
+    'manual_execution_report_unavailable',
     'automation_retrying',
     'automation_timeline',
     'automation_diagnostics',
@@ -69,7 +130,7 @@ describe('Locale message keys consistency', () => {
   ] as const;
 
   it('keeps the complete automation feedback catalog contract', () => {
-    expect(baseKeys).toHaveLength(572);
+    expect(baseKeys).toHaveLength(646);
   });
 
   it('provides translated retry and timeout feedback for every locale', () => {
@@ -85,6 +146,14 @@ describe('Locale message keys consistency', () => {
       expect(catalog.Case.automation_generic_failure).toBeTruthy();
       expect(catalog.Case.automation_diagnostics_available).toBeTruthy();
       expect(catalog.Case.automation_video_description).toBeTruthy();
+      expect(catalog.Case.request_error).toBeTruthy();
+      expect(catalog.Case.retry).toBeTruthy();
+      expect(catalog.Case.retry_after).toBeTruthy();
+      expect(catalog.Case.correlation_id).toBeTruthy();
+      expect(catalog.Run.request_error).toBeTruthy();
+      expect(catalog.Run.retry).toBeTruthy();
+      expect(catalog.Run.retry_after).toBeTruthy();
+      expect(catalog.Run.correlation_id).toBeTruthy();
       expect(catalog.Run.automation_technical_failure).toBeTruthy();
       expect(catalog.Run.automation_functional_failure).toBeTruthy();
       expect(catalog.Run.automation_evidence_failure).toBeTruthy();
@@ -104,6 +173,22 @@ describe('Locale message keys consistency', () => {
       for (const key of translatedSettingsKeys) {
         expect(catalog.Settings[key], `${locale.name}.Settings.${key}`).not.toBe(en.Settings[key]);
       }
+    }
+  });
+
+  it('keeps folder disclosure labels readable for every active locale', () => {
+    for (const locale of locales) {
+      const catalog = locale.data as typeof en;
+      expect(catalog.Run.expand_folder, `${locale.name}.Run.expand_folder`).toBeTruthy();
+      expect(catalog.Run.collapse_folder, `${locale.name}.Run.collapse_folder`).toBeTruthy();
+    }
+  });
+
+  it('uses typographic ellipses for manual execution loading messages', () => {
+    for (const locale of locales) {
+      const loading = (locale.data as typeof en).Case.manual_execution_loading;
+      expect(loading, `${locale.name}.Case.manual_execution_loading`).toContain('…');
+      expect(loading, `${locale.name}.Case.manual_execution_loading`).not.toContain('...');
     }
   });
 

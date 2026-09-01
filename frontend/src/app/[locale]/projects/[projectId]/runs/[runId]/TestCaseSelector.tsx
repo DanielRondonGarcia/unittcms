@@ -143,13 +143,21 @@ export default function TestCaseSelector({
     const commentCount = testCase.RunCases && testCase.RunCases.length > 0 ? testCase.RunCases[0].commentCount || 0 : 0;
 
     switch (columnKey) {
+      case 'id':
+        return (
+          <span className="font-mono" title={String(testCase.id)} aria-label={`${messages.id}: ${testCase.id}`}>
+            {testCase.id}
+          </span>
+        );
       case 'title':
         return (
           <div className={isIncluded ? '' : notIncludedCaseClass}>
             <Link
               href={`/projects/${projectId}/runs/${runId}/cases/${testCase.id}`}
               locale={locale}
-              className={`${NextUiLinkClasses} block max-w-24 truncate`}
+              className={`${NextUiLinkClasses} block min-w-0 max-w-48 truncate`}
+              aria-label={`${messages.title}: ${cellValue as string}`}
+              title={cellValue as string}
               onPointerDown={(e) => e.stopPropagation()}
             >
               {cellValue as string}

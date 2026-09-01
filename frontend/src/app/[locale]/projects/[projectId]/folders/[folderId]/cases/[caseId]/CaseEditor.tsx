@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useContext, ChangeEvent, DragEvent } from 'react';
+import { useState, useEffect, useContext, useCallback, ChangeEvent, DragEvent } from 'react';
 import { Input, Textarea, Select, SelectItem, Button, Divider, Tooltip, addToast, Badge } from '@heroui/react';
 import { Save, Plus, ArrowLeft, Circle } from 'lucide-react';
 import CaseStepsEditor from './CaseStepsEditor';
@@ -26,6 +26,8 @@ import type { GherkinValidationIssue } from '@/utils/caseControl';
 import { PriorityMessages } from '@/types/priority';
 import { TestTypeMessages } from '@/types/testType';
 import { logError } from '@/utils/errorHandler';
+import { toApiError, type ApiError } from '@/utils/apiResult';
+import { LoadingState, RequestErrorState } from '@/components/RequestState';
 import { updateCaseTags } from '@/utils/caseTagsControls';
 
 const defaultTestCase = {
@@ -111,6 +113,8 @@ export default function CaseEditor({
   const [testCase, setTestCase] = useState<CaseType>(defaultTestCase);
   const [isTitleInvalid] = useState<boolean>(false);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
+  const [isFetching, setIsFetching] = useState(true);
+  const [fetchError, setFetchError] = useState<ApiError | null>(null);
   const [idCounter, setIdCounter] = useState<number>(0);
   const [isDirty, setIsDirty] = useState(false);
   const [selectedTags, setSelectedTags] = useState<{ id: number; name: string }[]>([]);
@@ -127,6 +131,53 @@ export default function CaseEditor({
 
   const router = useRouter();
   useFormGuard(isDirty, messages.areYouSureLeave);
+
+  const fetchAndSetCase = useCallback(async () => {
+    if (!tokenContext.isSignedIn()) {
+      setIsFetching(false);
+      return;
+    }
+
+    const parsedCaseId = Number(caseId);
+    if (!Number.isInteger(parsedCaseId) || parsedCaseId <= 0) {
+      setFetchError({ status: 400, code: 'invalid_route', message: messages.errorTitle });
+      setIsFetching(false);
+      return;
+    }
+
+    setIsFetching(true);
+    setFetchError(null);
+    try {
+      const result = await fetchCase(tokenContext.token.access_token, parsedCaseId);
+      if (!result.ok) {
+        setFetchError(result.error);
+        return;
+      }
+
+      const data = result.data;
+      const steps = (data.Steps ?? []).map((step: StepType) => ({
+        ...step,
+        editState: 'notChanged' as const,
+      }));
+      const normalized =
+        data.template === gherkinTemplate ? normalizeGherkinCaseSteps(steps) : { steps, migrated: false };
+
+      // set idCounter to the max step id to avoid id conflict for new steps
+      // id is not reflected on database
+      const maxStepId = steps.reduce((maxId: number, step: StepType) => Math.max(maxId, step.id), 0);
+      setIdCounter(maxStepId);
+      setTestCase({ ...data, Steps: normalized.steps });
+      setIsDirty(normalized.migrated);
+      if (data.Tags) {
+        setSelectedTags(Array.isArray(data.Tags) ? data.Tags : []);
+      }
+    } catch (error: unknown) {
+      logError('Error fetching case data', error);
+      setFetchError(toApiError(error));
+    } finally {
+      setIsFetching(false);
+    }
+  }, [caseId, messages.errorTitle, tokenContext]);
 
   const onPlusClick = (newStepNo: number, section?: GherkinSection) => {
     if (!testCase.Steps) {
@@ -303,32 +354,18 @@ export default function CaseEditor({
   };
 
   useEffect(() => {
-    const fetchAndSetCase = async () => {
-      if (!tokenContext.isSignedIn()) return;
-      try {
-        const data = await fetchCase(tokenContext.token.access_token, Number(caseId));
-        const steps = (Array.isArray(data.Steps) ? data.Steps : []).map((step: StepType) => ({
-          ...step,
-          editState: 'notChanged' as const,
-        }));
-        const normalized =
-          data.template === gherkinTemplate ? normalizeGherkinCaseSteps(steps) : { steps, migrated: false };
+    void fetchAndSetCase();
+  }, [fetchAndSetCase]);
 
-        // set idCounter to the max step id to avoid id conflict for new steps
-        // id is not reflected on database
-        const maxStepId = steps.reduce((maxId: number, step: StepType) => Math.max(maxId, step.id), 0);
-        setIdCounter(maxStepId);
-        setTestCase({ ...data, Steps: normalized.steps });
-        setIsDirty(normalized.migrated);
-        if (data.Tags) {
-          setSelectedTags(Array.isArray(data.Tags) ? data.Tags : []);
-        }
-      } catch (error: unknown) {
-        logError('Error fetching case data', error);
-      }
-    };
-    fetchAndSetCase();
-  }, [tokenContext, caseId]);
+  if (isFetching) return <LoadingState message={messages.loading} />;
+  if (fetchError)
+    return (
+      <RequestErrorState
+        error={fetchError}
+        messages={messages}
+        onRetry={fetchError.code === 'invalid_route' ? undefined : fetchAndSetCase}
+      />
+    );
 
   return (
     <>

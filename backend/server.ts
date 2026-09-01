@@ -7,8 +7,10 @@ import cors from 'cors';
 import RateLimit from 'express-rate-limit';
 import { Sequelize } from 'sequelize';
 import { RegisterRoutes } from './routes.js';
-import { FRONTEND_ORIGIN } from './config/config.js';
+import { FRONTEND_ORIGIN, MANUAL_EXECUTION_ENABLED, registerManualExecutionRoute } from './config/config.js';
 import { configureAutomationApplication } from './controllers/AutomationController.js';
+import requestContext from './middleware/requestContext.js';
+import manualExecutionsRoute from './routes/manualExecutions/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +20,7 @@ const app: Application = express();
 const corsOptions = {
   origin: FRONTEND_ORIGIN,
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  exposedHeaders: ['X-Correlation-Id', 'Retry-After'],
 };
 app.use(cors(corsOptions));
 
@@ -25,6 +28,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // enable rate limiter
+app.use(requestContext);
 const limiter = RateLimit({
   windowMs: 60 * 60 * 1000, // 1h
   max: 1000, // 1000 requests per hour
@@ -162,6 +166,9 @@ import runCaseAssigneeRoute from './routes/runcases/assignee.js';
 app.use('/runcases', runCaseIndexRoute(sequelize));
 app.use('/runcases', runCaseEditRoute(sequelize));
 app.use('/runcases', runCaseAssigneeRoute(sequelize));
+
+// Manual execution and private evidence are kept outside generated TSOA and legacy attachment routes.
+registerManualExecutionRoute(app, sequelize, manualExecutionsRoute, MANUAL_EXECUTION_ENABLED);
 
 // "/members"
 import membersIndexRoute from './routes/members/index.js';

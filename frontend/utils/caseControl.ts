@@ -1,5 +1,6 @@
 import { getFilenameFromContentDisposition } from '@/utils/request';
 import { logError } from '@/utils/errorHandler';
+import { requestJson, type ApiResult } from '@/utils/apiResult';
 import Config from '@/config/config';
 const apiServer = Config.apiServer;
 import { CaseType, GherkinExamples, StepType } from '@/types/case';
@@ -435,27 +436,170 @@ export const hasValidGherkinExamples = (examples: GherkinExamples | null | undef
   return isValidExamplesShape(examples);
 };
 
-async function fetchCase(jwt: string, caseId: number) {
+function isIntegerLike(value: unknown): boolean {
+  return (
+    (typeof value === 'number' && Number.isInteger(value)) ||
+    (typeof value === 'string' && value.trim() !== '' && Number.isInteger(Number(value)))
+  );
+}
+
+function isIntegerLikeInRange(value: unknown, minimum: number, maximum: number): boolean {
+  return isIntegerLike(value) && Number(value) >= minimum && Number(value) <= maximum;
+}
+
+function isNullableString(value: unknown): boolean {
+  return value === null || value === undefined || typeof value === 'string';
+}
+
+function isPositiveIntegerLike(value: unknown): boolean {
+  return isIntegerLikeInRange(value, 1, Number.MAX_SAFE_INTEGER);
+}
+
+function isCaseStepPayload(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !isPositiveIntegerLike(value.id) ||
+    typeof value.step !== 'string' ||
+    typeof value.result !== 'string'
+  ) {
+    return false;
+  }
+
+  return (
+    isRecord(value.caseSteps) &&
+    isPositiveIntegerLike(value.caseSteps.stepNo) &&
+    (value.caseSteps.keyword === undefined ||
+      value.caseSteps.keyword === null ||
+      isGherkinKeyword(value.caseSteps.keyword)) &&
+    isGherkinSection(value.caseSteps.section)
+  );
+}
+
+function isCaseRunCasePayload(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isPositiveIntegerLike(value.id) &&
+    isPositiveIntegerLike(value.runId) &&
+    isPositiveIntegerLike(value.caseId) &&
+    isIntegerLikeInRange(value.status, 0, 4) &&
+    (value.assigneeUserId === undefined || value.assigneeUserId === null || isPositiveIntegerLike(value.assigneeUserId))
+  );
+}
+
+function isCaseAttachmentPayload(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isPositiveIntegerLike(value.id) &&
+    typeof value.title === 'string' &&
+    typeof value.filename === 'string' &&
+    isNullableString(value.detail)
+  );
+}
+
+function isCasePayload(value: unknown): value is CaseType {
+  if (!isRecord(value)) return false;
+
+  if (
+    !isPositiveIntegerLike(value.id) ||
+    !isIntegerLikeInRange(value.state, 0, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerLikeInRange(value.priority, 0, 3) ||
+    !isIntegerLikeInRange(value.type, 0, 12) ||
+    !isIntegerLikeInRange(value.automationStatus, 0, 3) ||
+    !isIntegerLikeInRange(value.template, 0, 2) ||
+    !isPositiveIntegerLike(value.folderId) ||
+    typeof value.title !== 'string'
+  ) {
+    return false;
+  }
+  if (
+    !isNullableString(value.description) ||
+    !isNullableString(value.preConditions) ||
+    !isNullableString(value.expectedResults) ||
+    !isValidExamplesShape(value.gherkinExamples)
+  ) {
+    return false;
+  }
+
+  if (
+    value.Steps !== undefined &&
+    (!Array.isArray(value.Steps) || value.Steps.some((step) => !isCaseStepPayload(step)))
+  ) {
+    return false;
+  }
+  if (
+    value.RunCases !== undefined &&
+    (!Array.isArray(value.RunCases) || value.RunCases.some((runCase) => !isCaseRunCasePayload(runCase)))
+  ) {
+    return false;
+  }
+  if (
+    value.Tags !== undefined &&
+    (!Array.isArray(value.Tags) ||
+      value.Tags.some((tag) => !isRecord(tag) || !isPositiveIntegerLike(tag.id) || typeof tag.name !== 'string'))
+  ) {
+    return false;
+  }
+  if (
+    value.Attachments !== undefined &&
+    (!Array.isArray(value.Attachments) || value.Attachments.some((attachment) => !isCaseAttachmentPayload(attachment)))
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function normalizeCasePayload(data: CaseType): CaseType {
+  return {
+    ...data,
+    id: Number(data.id),
+    state: Number(data.state),
+    priority: Number(data.priority),
+    type: Number(data.type),
+    automationStatus: Number(data.automationStatus),
+    template: Number(data.template),
+    folderId: Number(data.folderId),
+    description: data.description ?? '',
+    preConditions: data.preConditions ?? '',
+    expectedResults: data.expectedResults ?? '',
+    Steps: data.Steps?.map((step) => ({
+      ...step,
+      id: Number(step.id),
+      caseSteps: { ...step.caseSteps, stepNo: Number(step.caseSteps.stepNo) },
+    })),
+    RunCases: data.RunCases?.map((runCase) => ({
+      ...runCase,
+      id: Number(runCase.id),
+      runId: Number(runCase.runId),
+      caseId: Number(runCase.caseId),
+      status: Number(runCase.status),
+      assigneeUserId: runCase.assigneeUserId == null ? null : Number(runCase.assigneeUserId),
+    })),
+    Tags: data.Tags?.map((tag) => ({ ...tag, id: Number(tag.id) })),
+    Attachments: data.Attachments?.map((attachment) => ({
+      ...attachment,
+      id: Number(attachment.id),
+      detail: attachment.detail ?? '',
+    })),
+  };
+}
+
+export async function fetchCase(jwt: string, caseId: number): Promise<ApiResult<CaseType>> {
   const url = `${apiServer}/cases/${caseId}`;
 
-  try {
-    const response = await fetch(url, {
+  const result = await requestJson<CaseType>(
+    url,
+    {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${jwt}`,
       },
-    });
+    },
+    isCasePayload
+  );
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error: unknown) {
-    logError('Error fetching data', error);
-  }
+  return result.ok ? { ok: true, data: normalizeCasePayload(result.data) } : result;
 }
 
 async function fetchCases(
@@ -698,4 +842,4 @@ async function importCases(jwt: string, folderId: number, file: File) {
   }
 }
 
-export { fetchCase, fetchCases, updateCase, createCase, deleteCases, cloneCases, exportCases, importCases };
+export { fetchCases, updateCase, createCase, deleteCases, cloneCases, exportCases, importCases };

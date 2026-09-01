@@ -8,6 +8,16 @@ export const IS_PROD = process.env.NODE_ENV === 'production';
 export const PORT = process.env.PORT || 8001;
 export const API_PATH = process.env.API_PATH || '/api';
 
+export function isManualExecutionEnabled(value = process.env.MANUAL_EXECUTION_ENABLED) {
+  return typeof value !== 'string' || value.trim().toLowerCase() !== 'false';
+}
+
+export const MANUAL_EXECUTION_ENABLED = isManualExecutionEnabled();
+
+export function registerManualExecutionRoute(app, sequelize, routeFactory, enabled = MANUAL_EXECUTION_ENABLED) {
+  if (enabled) app.use('/manual-executions', routeFactory(sequelize));
+}
+
 const databasePath = process.env.DATABASE_PATH ?? path.resolve(process.cwd(), 'database/database.sqlite');
 
 export default {

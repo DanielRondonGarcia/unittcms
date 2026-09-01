@@ -40,6 +40,7 @@ function defineProject(sequelize, DataTypes) {
     Project.hasMany(models.AutomationDefinition, { foreignKey: 'projectId', onDelete: 'CASCADE' });
     Project.hasMany(models.AutomationExecution, { foreignKey: 'projectId', onDelete: 'CASCADE' });
     Project.hasMany(models.TestEnvironment, { foreignKey: 'projectId', onDelete: 'CASCADE' });
+    Project.hasMany(models.ManualExecution, { foreignKey: 'projectId', onDelete: 'CASCADE' });
   };
 
   return Project;

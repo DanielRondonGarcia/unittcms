@@ -93,7 +93,7 @@ export default function ResizablePanes({
   return (
     <div
       ref={containerRef}
-      className="flex h-full min-h-0 min-w-0 max-w-full flex-col overflow-x-auto md:flex-row"
+      className="flex h-full min-h-0 min-w-0 max-w-full flex-col overflow-hidden md:flex-row"
       style={{ ...paneStyle, userSelect: isDragging ? 'none' : 'auto' }}
     >
       <div className="h-1/2 min-h-0 min-w-0 w-full flex-none overflow-auto border-b dark:border-neutral-700 md:h-full md:w-[var(--left-pane-width)] md:min-w-[var(--min-left-pane-width)] md:border-b-0">

@@ -31,6 +31,7 @@ export type TokenContextType = {
   };
   isSignedIn: () => boolean;
   isAdmin: () => boolean;
+  isProjectMember: (projectId: number) => boolean;
   isProjectOwner: (projectId: number) => boolean;
   isProjectManager: (projectId: number) => boolean;
   isProjectDeveloper: (projectId: number) => boolean;

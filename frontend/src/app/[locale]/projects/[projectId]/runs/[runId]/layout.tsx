@@ -18,6 +18,11 @@ export default function RunLayout({
   const gherkin = useTranslations('Gherkin');
   const messages: RunMessages = {
     backToRuns: t('back_to_runs'),
+    loading: t('loading'),
+    requestError: t('request_error'),
+    retry: t('retry'),
+    retryAfter: t('retry_after'),
+    correlationId: t('correlation_id'),
     updating: t('updating'),
     update: t('update'),
     updatedTestRun: t('updated_test_run'),
@@ -90,8 +95,8 @@ export default function RunLayout({
     errorTitle: ui('error'),
     saveError: ui('save_run_error'),
     exportOptions: ui('export_options'),
-    expandFolder: ui('expand_folder'),
-    collapseFolder: ui('collapse_folder'),
+    expandFolder: t('expand_folder'),
+    collapseFolder: t('collapse_folder'),
     testCaseActions: ui('test_case_actions'),
     testCaseSelectActions: ui('test_case_select_actions'),
     includeExcludeActions: ui('include_exclude_actions'),
@@ -149,6 +154,9 @@ export default function RunLayout({
 
   return (
     <ResizablePanes
+      defaultLeftWidth={60}
+      minLeftWidth={50}
+      minRightWidth={30}
       leftPane={
         <RunEditor
           projectId={projectId}

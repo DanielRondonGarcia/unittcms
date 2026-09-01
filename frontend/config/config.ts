@@ -21,6 +21,10 @@ const Config = {
     return process.env.NEXT_PUBLIC_BACKEND_ORIGIN || '/api';
   },
 
+  get manualExecutionEnabled() {
+    return process.env.MANUAL_EXECUTION_ENABLED?.trim().toLowerCase() !== 'false';
+  },
+
   // set 'NEXT_PUBLIC_IS_DEMO=true' in frontend/.env
   isDemoSite: process.env.NEXT_PUBLIC_IS_DEMO === 'true' || false,
 };

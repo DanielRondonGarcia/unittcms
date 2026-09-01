@@ -62,6 +62,22 @@ async function fetchMyRoles(jwt: string) {
   }
 }
 
+function isProjectMember(projectRoles: ProjectRoleType[], projectId: number): boolean {
+  if (!projectRoles) {
+    return false;
+  }
+
+  const found = projectRoles.find((role) => {
+    return role.projectId === projectId;
+  });
+
+  if (!found) {
+    return false;
+  }
+
+  return found.isOwner === true || found.isMember === true;
+}
+
 function isProjectOnwer(projectRoles: ProjectRoleType[], projectId: number) {
   if (!projectRoles) {
     return false;
@@ -193,6 +209,7 @@ function checkSignInPage(token: TokenType, pathname: string) {
 export {
   isSignedIn,
   isAdmin,
+  isProjectMember,
   isProjectOnwer,
   isProjectManager,
   isProjectDeveloper,

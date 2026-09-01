@@ -1,6 +1,7 @@
-import { describe, expect, test, assert } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, assert, vi } from 'vitest';
 import {
   changeStatus,
+  fetchRun,
   getPersistedRunCase,
   hasUnsavedRunCaseChanges,
   includeExcludeTestCases,
@@ -8,6 +9,26 @@ import {
   mergeRunCaseChanges,
 } from './runsControl';
 import { CaseType } from '@/types/case';
+
+const fetchMock = vi.fn();
+
+function response(status: number, body: unknown, headers: Record<string, string> = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(headers),
+    json: vi.fn().mockResolvedValue(body),
+  } as never;
+}
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', fetchMock);
+  fetchMock.mockReset();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const sampleTestCase: CaseType = {
   id: 1,
@@ -237,5 +258,41 @@ describe('runsControl', () => {
     expect(mergedCases[0].RunCases?.[0].editState).toBe('deleted');
     expect(mergedCases[1].RunCases?.[0].editState).toBe('changed');
     expect(currentCases[0].RunCases?.[0].editState).toBe('changed');
+  });
+
+  test('returns a typed run success and normalizes aggregate counts', async () => {
+    fetchMock.mockResolvedValue(
+      response(200, {
+        run: { id: 2, name: 'Release', configurations: '0', state: 1, projectId: 4, description: null },
+        statusCounts: [{ status: '1', count: '3' }],
+      })
+    );
+
+    const result = await fetchRun('jwt', 2);
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        run: expect.objectContaining({ id: 2, name: 'Release', configurations: 0, description: '' }),
+        statusCounts: [{ status: 1, count: 3 }],
+      },
+    });
+  });
+
+  test('returns a safe error for non-OK run responses', async () => {
+    fetchMock.mockResolvedValue(response(503, { error: 'Service unavailable' }, { 'X-Correlation-Id': 'corr-run-2' }));
+
+    const result = await fetchRun('jwt', 2);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        status: 503,
+        code: 'http_503',
+        message: 'Service unavailable',
+        correlationId: 'corr-run-2',
+        retryAfterSeconds: undefined,
+      },
+    });
   });
 });
