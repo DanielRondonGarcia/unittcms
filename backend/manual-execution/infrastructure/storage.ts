@@ -30,6 +30,14 @@ export type ManualEvidenceRef = {
   expiresAt: Date;
 };
 
+export type ManualEvidenceProbeInput = {
+  storageKey: string;
+  expectedSha256: string;
+  expiresAt: Date;
+};
+
+export type ManualEvidenceProbeResult = 'available' | 'expired' | 'missing' | 'unavailable';
+
 export class EvidenceStorageError extends Error {
   code: string;
 
@@ -176,6 +184,22 @@ export class ManualEvidenceStorage {
       if (error instanceof EvidenceStorageError) throw error;
       if ((error as { code?: string }).code === 'ENOENT') throw new EvidenceStorageError('evidence_not_found');
       throw new EvidenceStorageError('evidence_storage_failed');
+    }
+  }
+
+  /**
+   * Verify an evidence object for an authenticated caller without returning its bytes.
+   * The report layer receives only a bounded availability state.
+   */
+  async probe(input: ManualEvidenceProbeInput): Promise<ManualEvidenceProbeResult> {
+    try {
+      await this.get(input.storageKey, input.expectedSha256, input.expiresAt);
+      return 'available';
+    } catch (error) {
+      const code = error instanceof EvidenceStorageError ? error.code : 'evidence_storage_failed';
+      if (code === 'evidence_expired') return 'expired';
+      if (code === 'evidence_not_found') return 'missing';
+      return 'unavailable';
     }
   }
 
