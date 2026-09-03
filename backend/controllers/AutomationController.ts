@@ -1,19 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import jwt from 'jsonwebtoken';
-import {
-  Body,
-  Controller,
-  Get,
-  Header,
-  Path,
-  Post,
-  Query,
-  Request,
-  Route,
-  Security,
-  SuccessResponse,
-  Tags,
-} from 'tsoa';
 import type { Request as ExpressRequest } from 'express';
 import { SECRET_KEY } from '../config/config.js';
 import {
@@ -27,6 +14,9 @@ import type {
   AutomationErrorResponse,
   AutomationResponse,
 } from '../automation/api/dto.js';
+
+const { Body, Controller, Get, Header, Path, Post, Query, Request, Route, Security, SuccessResponse, Tags } =
+  createRequire(import.meta.url)('tsoa/dist/index.js') as typeof import('tsoa');
 
 let application: AutomationApplication = createAutomationApplication({ registry: new NeutralExecutorRegistry() });
 export function configureAutomationApplication(next: AutomationApplication): void {

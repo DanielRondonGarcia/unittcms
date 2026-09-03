@@ -1,4 +1,6 @@
-import { Get, Route, Tags } from 'tsoa';
+import { createRequire } from 'node:module';
+
+const { Get, Route, Tags } = createRequire(import.meta.url)('tsoa/dist/index.js') as typeof import('tsoa');
 
 @Route('')
 @Tags('index')

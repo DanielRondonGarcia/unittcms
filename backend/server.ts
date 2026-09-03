@@ -11,6 +11,7 @@ import { FRONTEND_ORIGIN, MANUAL_EXECUTION_ENABLED, registerManualExecutionRoute
 import { configureAutomationApplication } from './controllers/AutomationController.js';
 import requestContext from './middleware/requestContext.js';
 import manualExecutionsRoute from './routes/manualExecutions/index.js';
+import reportsRoute from './routes/reports/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -97,6 +98,7 @@ app.use('/projects', projectsEditRoute(sequelize));
 app.use('/projects', projectsDeleteRoute(sequelize));
 app.use('/projects', projectsAutomationEnvironmentRoute(sequelize));
 app.use('/projects', projectsHerculesModelRoute(sequelize));
+app.use('/projects', reportsRoute(sequelize));
 
 // "/folders"
 import foldersIndexRoute from './routes/folders/index.js';

@@ -1,4 +1,8 @@
-import { Controller, Get, Route, Tags, Response } from 'tsoa';
+import { createRequire } from 'node:module';
+
+const { Controller, Get, Route, Tags, Response } = createRequire(import.meta.url)(
+  'tsoa/dist/index.js'
+) as typeof import('tsoa');
 
 interface HealthResponse {
   status: 'ok';

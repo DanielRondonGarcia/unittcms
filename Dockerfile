@@ -65,6 +65,8 @@ RUN mkdir -p dist/models && \
 FROM base AS runner
 WORKDIR /app
 
+RUN apk add --no-cache font-noto
+
 ENV NODE_ENV=production
 ENV PORT=8000
 ENV FRONTEND_ORIGIN=http://localhost:8000
