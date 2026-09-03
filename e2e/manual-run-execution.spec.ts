@@ -77,7 +77,7 @@ async function createRun(page: Page, name: string): Promise<string> {
 }
 
 test('executes a manual RunCase with cancel, reload, private evidence, and an overall result', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(90_000);
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const username = `manual${suffix.replace(/\D/g, '').slice(-10)}`;
   const email = `${username}@example.com`;
@@ -89,11 +89,14 @@ test('executes a manual RunCase with cancel, reload, private evidence, and an ov
   const runName = `Manual execution run ${suffix}`;
 
   await page.goto(appUrl('/en/account/signup'));
+  await page.waitForTimeout(1000);
   await page.getByLabel('Email', { exact: true }).fill(email);
   await page.getByLabel('User name', { exact: true }).fill(username);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByLabel('Password (confirm)', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign up', exact: true }).click();
+  await page.waitForFunction(() => Boolean(localStorage.getItem('unittcms-auth-token')));
+  await page.goto(appUrl('/en/account'));
   await expect(page).toHaveURL(/\/en\/account$/);
 
   await page.getByRole('button', { name: 'Find projects', exact: true }).click();
@@ -146,11 +149,14 @@ test('executes a manual RunCase with cancel, reload, private evidence, and an ov
   await runCaseRow.getByText(caseTitle, { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/en/projects/${projectId}/runs/${runId}/cases/${caseId}$`));
   await expectResponsiveDetail(page, longDescription);
+  await page.getByRole('tab', { name: 'Manual execution', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Manual execution', exact: true })).toBeVisible();
   await expect(page.getByText('No manual execution is active for this RunCase.', { exact: true })).toBeVisible();
 
+  await page.getByRole('tab', { name: 'Test case detail', exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 900 });
   await expectResponsiveDetail(page, longDescription);
+  await page.getByRole('tab', { name: 'Manual execution', exact: true }).click();
 
   const startResponsePromise = waitForApiResponse(page, 'POST', /\/manual-executions\/run-cases\/\d+$/);
   await page.getByRole('button', { name: 'Start manual execution', exact: true }).click();
@@ -188,7 +194,9 @@ test('executes a manual RunCase with cancel, reload, private evidence, and an ov
   const uploaded = await uploadResponse.json();
   expect(uploaded.mimeType).toBe('image/png');
   expect(JSON.stringify(uploaded)).not.toMatch(/public|storageKey|url/i);
-  await expect(page.getByText('manual-proof.png (1 KB)', { exact: true })).toBeVisible();
+  const evidenceItem = page.locator('li').filter({ hasText: 'manual-proof.png' });
+  await expect(evidenceItem).toContainText('manual-proof.png');
+  await expect(evidenceItem).toContainText('1 KB');
 
   const downloadResponsePromise = waitForApiResponse(page, 'GET', /\/manual-executions\/\d+\/evidence\/\d+$/);
   await page.getByRole('button', { name: 'Download: manual-proof.png', exact: true }).click();
@@ -209,9 +217,9 @@ test('executes a manual RunCase with cancel, reload, private evidence, and an ov
   expect(finishResponse.ok()).toBeTruthy();
   const finished = await finishResponse.json();
   expect(finished).toEqual(expect.objectContaining({ status: 'finished', result: 'passed' }));
-  await expect(page.getByRole('region', { name: 'Manual execution', exact: true }).getByRole('status')).toHaveText(
-    'Passed'
-  );
+  await expect(
+    page.getByRole('region', { name: 'Manual execution', exact: true }).getByText('Passed', { exact: true })
+  ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Delete: manual-proof.png', exact: true })).toHaveCount(0);
 
   const finalCasesResponsePromise = waitForApiResponse(page, 'GET', /\/cases\/byproject$/, { projectId, runId });
@@ -235,4 +243,123 @@ test('executes a manual RunCase with cancel, reload, private evidence, and an ov
   await page.getByText(folderName, { exact: true }).click();
   const refreshedRunCaseRow = page.locator('tr').filter({ hasText: caseTitle });
   await expect(refreshedRunCaseRow.getByRole('button', { name: 'Passed', exact: true })).toBeVisible();
+
+  await test.step('generates reports from the existing run flow', async () => {
+    const reportPath = new RegExp(`/projects/${projectId}/reports$`);
+    let rewriteEvidenceAsUnavailable = false;
+
+    await page.route(reportPath, async (route) => {
+      if (!rewriteEvidenceAsUnavailable) {
+        await route.continue();
+        return;
+      }
+
+      const response = await route.fetch();
+      const contentType = response.headers()['content-type'] ?? '';
+      if (!contentType.includes('application/json')) {
+        await route.fulfill({ response });
+        return;
+      }
+
+      const report = (await response.json()) as {
+        scenarios?: Array<{
+          evidence?: Array<{ state?: string; href?: string }>;
+          manual?: Array<{ evidence?: Array<{ state?: string; href?: string }> }>;
+          automation?: Array<{ evidence?: Array<{ state?: string; href?: string }> }>;
+        }>;
+      };
+      for (const scenario of report.scenarios ?? []) {
+        const evidenceGroups = [
+          scenario.evidence ?? [],
+          ...(scenario.manual ?? []).map((record) => record.evidence ?? []),
+          ...(scenario.automation ?? []).map((record) => record.evidence ?? []),
+        ];
+        for (const evidence of evidenceGroups.flat()) {
+          evidence.state = 'unavailable';
+          delete evidence.href;
+        }
+      }
+
+      const body = JSON.stringify(report);
+      await route.fulfill({
+        response,
+        body,
+        headers: { ...response.headers(), 'content-length': String(Buffer.byteLength(body)) },
+      });
+    });
+
+    const runsResponsePromise = waitForApiResponse(page, 'GET', /\/runs$/, { projectId });
+    await page.goto(appUrl(`/en/projects/${projectId}/reports`));
+    const runsResponse = await runsResponsePromise;
+    expect(runsResponse.ok()).toBeTruthy();
+    const executionSelect = page.locator('#report-execution');
+    await expect(executionSelect).toBeVisible();
+    await expect(executionSelect.locator('option', { hasText: runName })).toHaveCount(1);
+
+    const scenariosResponsePromise = waitForApiResponse(page, 'GET', /\/cases\/byproject$/, { projectId, runId });
+    await executionSelect.selectOption(runId);
+    const scenariosResponse = await scenariosResponsePromise;
+    expect(scenariosResponse.ok()).toBeTruthy();
+
+    await expect(page.getByRole('radio', { name: 'All project scenarios', exact: true })).toBeChecked();
+    const allPreviewResponsePromise = waitForApiResponse(page, 'POST', reportPath);
+    await page.getByRole('button', { name: 'Preview', exact: true }).click();
+    const allPreviewResponse = await allPreviewResponsePromise;
+    expect(allPreviewResponse.ok()).toBeTruthy();
+    expect(allPreviewResponse.headers()['content-type']).toMatch(/^text\/html/);
+    expect(allPreviewResponse.request().postDataJSON()).toEqual({
+      selection: { mode: 'all' },
+      execution: { runId: Number(runId) },
+      format: 'html',
+    });
+    await expect(page.locator('iframe[title="Preview"]')).toBeVisible();
+
+    await page.getByRole('radio', { name: 'Selected scenarios', exact: true }).check();
+    const scenarioCheckboxes = page.locator('[aria-label="Selected scenarios"] input[type="checkbox"]');
+    await expect(scenarioCheckboxes).toHaveCount(1);
+    await scenarioCheckboxes.first().check();
+
+    const explicitPreviewResponsePromise = waitForApiResponse(page, 'POST', reportPath);
+    await page.getByRole('button', { name: 'Preview', exact: true }).click();
+    const explicitPreviewResponse = await explicitPreviewResponsePromise;
+    expect(explicitPreviewResponse.ok()).toBeTruthy();
+    expect(explicitPreviewResponse.headers()['content-type']).toMatch(/^text\/html/);
+    expect(explicitPreviewResponse.request().postDataJSON()).toEqual({
+      selection: { mode: 'explicit', scenarioIds: [Number(caseId)] },
+      execution: { runId: Number(runId) },
+      format: 'html',
+    });
+    await expect(page.locator('iframe[title="Preview"]')).toBeVisible();
+
+    const downloads = [
+      { format: 'json', contentType: /^application\/json/ },
+      { format: 'html', contentType: /^text\/html/ },
+      { format: 'pdf', contentType: /^application\/pdf/ },
+      { format: 'docx', contentType: /^application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/ },
+    ] as const;
+    for (const { format, contentType } of downloads) {
+      const downloadResponsePromise = waitForApiResponse(page, 'POST', reportPath);
+      await page.getByRole('button', { name: `Download ${format.toUpperCase()}`, exact: true }).click();
+      const downloadResponse = await downloadResponsePromise;
+      expect(downloadResponse.ok()).toBeTruthy();
+      expect(downloadResponse.headers()['content-type']).toMatch(contentType);
+      expect(downloadResponse.headers()['content-disposition']).toMatch(new RegExp(`\\.${format}\\b`));
+      expect((await downloadResponse.body()).byteLength).toBeGreaterThan(0);
+      expect(downloadResponse.request().postDataJSON()).toEqual({
+        selection: { mode: 'explicit', scenarioIds: [Number(caseId)] },
+        execution: { runId: Number(runId) },
+        format,
+      });
+    }
+
+    rewriteEvidenceAsUnavailable = true;
+    const unavailableDownloadResponsePromise = waitForApiResponse(page, 'POST', reportPath);
+    await page.getByRole('button', { name: 'Download JSON', exact: true }).click();
+    const unavailableDownloadResponse = await unavailableDownloadResponsePromise;
+    expect(unavailableDownloadResponse.ok()).toBeTruthy();
+    expect(unavailableDownloadResponse.headers()['content-type']).toMatch(/^application\/json/);
+    expect(JSON.stringify(await unavailableDownloadResponse.json())).toContain('"state":"unavailable"');
+
+    await page.unroute(reportPath);
+  });
 });

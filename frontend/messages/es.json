@@ -192,6 +192,23 @@
     "members": "Miembros",
     "settings": "Configuración"
   },
+  "Reports": {
+    "title": "Informes",
+    "selection": "Selección de escenarios",
+    "all_scenarios": "Todos los escenarios del proyecto",
+    "selected_scenarios": "Escenarios seleccionados",
+    "execution": "Ejecución",
+    "choose_execution": "Elige exactamente una ejecución",
+    "format": "Formato de exportación",
+    "preview": "Vista previa",
+    "download": "Descargar",
+    "loading": "Cargando...",
+    "request_error": "No se pudo completar la solicitud del informe.",
+    "correlation_id": "ID de correlación",
+    "no_runs": "No se encontraron ejecuciones",
+    "no_scenarios": "No se encontraron escenarios",
+    "preview_unavailable": "Este formato no se puede previsualizar en el navegador. Descárgalo para abrir el archivo."
+  },
   "Home": {
     "home": "Inicio",
     "Folders": "Carpetas",

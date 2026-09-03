@@ -192,6 +192,23 @@
     "members": "成员",
     "settings": "设置"
   },
+  "Reports": {
+    "title": "报告",
+    "selection": "场景选择",
+    "all_scenarios": "项目中的所有场景",
+    "selected_scenarios": "已选场景",
+    "execution": "执行",
+    "choose_execution": "请选择一个执行",
+    "format": "导出格式",
+    "preview": "预览",
+    "download": "下载",
+    "loading": "正在加载...",
+    "request_error": "无法完成报告请求。",
+    "correlation_id": "关联 ID",
+    "no_runs": "未找到运行",
+    "no_scenarios": "未找到场景",
+    "preview_unavailable": "此格式无法在浏览器中预览。请下载后打开文件。"
+  },
   "Home": {
     "home": "首页",
     "Folders": "文件夹",

@@ -5,6 +5,7 @@ import ptBR from './pt-BR.json';
 import zhCN from './zh-CN.json';
 import ja from './ja.json';
 import es from './es.json';
+import { REPORT_MESSAGE_KEYS, REPORT_SHARED_MESSAGE_KEYS } from '@/utils/reportControl';
 
 function getAllKeys(obj: unknown, prefix = ''): string[] {
   if (typeof obj !== 'object' || obj === null) return [];
@@ -128,9 +129,42 @@ describe('Locale message keys consistency', () => {
     'automation_model_saved',
     'automation_model_error',
   ] as const;
+  const reportUiKeys = [
+    'title',
+    'selection',
+    'all_scenarios',
+    'selected_scenarios',
+    'execution',
+    'choose_execution',
+    'format',
+    'preview',
+    'download',
+    'loading',
+    'request_error',
+    'correlation_id',
+    'no_runs',
+    'no_scenarios',
+    'preview_unavailable',
+  ] as const;
 
   it('keeps the complete automation feedback catalog contract', () => {
-    expect(baseKeys).toHaveLength(646);
+    expect(baseKeys).toHaveLength(661);
+  });
+
+  it('provides localized report workflow content for every active locale', () => {
+    for (const locale of locales) {
+      const catalog = locale.data as typeof en;
+      for (const key of reportUiKeys) expect(catalog.Reports[key], `${locale.name}.Reports.${key}`).toBeTruthy();
+    }
+  });
+
+  it('keeps report-control message keys locale-safe across all six locales', () => {
+    expect(new Set(Object.values(REPORT_MESSAGE_KEYS)).size).toBe(Object.values(REPORT_MESSAGE_KEYS).length);
+    for (const key of Object.values(REPORT_MESSAGE_KEYS)) expect(key).toMatch(/^report_[a-z_]+$/);
+    for (const locale of locales) {
+      const catalog = locale.data as typeof en;
+      for (const key of REPORT_SHARED_MESSAGE_KEYS) expect(catalog.Run[key], `${locale.name}.Run.${key}`).toBeTruthy();
+    }
   });
 
   it('provides translated retry and timeout feedback for every locale', () => {

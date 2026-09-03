@@ -192,6 +192,23 @@
     "members": "Members",
     "settings": "Settings"
   },
+  "Reports": {
+    "title": "Reports",
+    "selection": "Scenario selection",
+    "all_scenarios": "All project scenarios",
+    "selected_scenarios": "Selected scenarios",
+    "execution": "Execution",
+    "choose_execution": "Choose exactly one execution",
+    "format": "Export format",
+    "preview": "Preview",
+    "download": "Download",
+    "loading": "Loading...",
+    "request_error": "The report request could not be completed.",
+    "correlation_id": "Correlation ID",
+    "no_runs": "No runs found",
+    "no_scenarios": "No scenarios found",
+    "preview_unavailable": "This format cannot be previewed in the browser. Download it to open the file."
+  },
   "Home": {
     "home": "Home",
     "Folders": "Folders",

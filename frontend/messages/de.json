@@ -192,6 +192,23 @@
     "members": "Mitglieder",
     "settings": "Einstellungen"
   },
+  "Reports": {
+    "title": "Berichte",
+    "selection": "Szenarioauswahl",
+    "all_scenarios": "Alle Projektszenarien",
+    "selected_scenarios": "Ausgewählte Szenarien",
+    "execution": "Ausführung",
+    "choose_execution": "Genau eine Ausführung auswählen",
+    "format": "Exportformat",
+    "preview": "Vorschau",
+    "download": "Herunterladen",
+    "loading": "Wird geladen...",
+    "request_error": "Der Bericht konnte nicht geladen werden.",
+    "correlation_id": "Korrelations-ID",
+    "no_runs": "Keine Testläufe gefunden",
+    "no_scenarios": "Keine Szenarien gefunden",
+    "preview_unavailable": "Dieses Format kann im Browser nicht in der Vorschau angezeigt werden. Lade es herunter, um die Datei zu öffnen."
+  },
   "Home": {
     "home": "Startseite",
     "Folders": "Ordner",

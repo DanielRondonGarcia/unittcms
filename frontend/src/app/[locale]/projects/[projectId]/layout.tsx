@@ -10,11 +10,13 @@ export default function SidebarLayout({
   params: { locale: string };
 }) {
   const t = useTranslations('Project');
+  const reportT = useTranslations('Reports');
   const messages: ProjectMessages = {
     toggleSidebar: t('toggle_sidebar'),
     home: t('home'),
     testCases: t('test_cases'),
     testRuns: t('test_runs'),
+    reports: reportT('title'),
     members: t('members'),
     settings: t('settings'),
   };

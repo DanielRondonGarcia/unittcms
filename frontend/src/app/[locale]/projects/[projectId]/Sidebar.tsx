@@ -7,6 +7,7 @@ import {
   ChartColumnStacked,
   ClipboardList,
   FlaskConical,
+  FileText,
   UserRound,
   Settings,
 } from 'lucide-react';
@@ -39,6 +40,8 @@ export default function Sidebar({ messages, locale }: Props) {
       router.push(`/projects/${projectId}/folders`, { locale: locale });
     } else if (key === 'runs') {
       router.push(`/projects/${projectId}/runs`, { locale: locale });
+    } else if (key === 'reports') {
+      router.push(`/projects/${projectId}/reports`, { locale: locale });
     } else if (key === 'members') {
       router.push(`/projects/${projectId}/members`, { locale: locale });
     } else if (key === 'settings') {
@@ -54,6 +57,8 @@ export default function Sidebar({ messages, locale }: Props) {
         setCurrentKey('cases');
       } else if (currentPath.includes('runs')) {
         setCurrentKey('runs');
+      } else if (currentPath.includes('reports')) {
+        setCurrentKey('reports');
       } else if (currentPath.includes('members')) {
         setCurrentKey('members');
       } else if (currentPath.includes('settings')) {
@@ -79,6 +84,11 @@ export default function Sidebar({ messages, locale }: Props) {
       key: 'runs',
       text: messages.testRuns,
       startContent: <FlaskConical strokeWidth={ICON_STROKE_WIDTH} size={ICON_SIZE} />,
+    },
+    {
+      key: 'reports',
+      text: messages.reports,
+      startContent: <FileText strokeWidth={ICON_STROKE_WIDTH} size={ICON_SIZE} />,
     },
     {
       key: 'members',
