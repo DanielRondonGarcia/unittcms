@@ -18,6 +18,11 @@ import defineStep from '../../models/steps.js';
 import defineUser from '../../models/users.js';
 import authMiddleware from '../../middleware/auth.js';
 import {
+  createManualExecutionService,
+  type ManualExecutionModels,
+} from '../../manual-execution/application/service.js';
+import type { ManualExecutionServicePort } from '../../manual-execution/api/types.js';
+import {
   createReportService,
   ReportError,
   resolveReportLimits,
@@ -39,6 +44,7 @@ import { ManualEvidenceStorage } from '../../manual-execution/infrastructure/sto
 import {
   assertRenderedOutput,
   ReportRenderError,
+  type ReportEvidenceByteReader,
   type ReportRenderOptions,
   wrapRenderError,
 } from '../../reports/infrastructure/render-common.js';
@@ -49,12 +55,14 @@ import { PDF_REPORT_CONTENT_TYPE, renderPdf } from '../../reports/infrastructure
 import { contentDisposition, toSafeFileName } from '../../config/contentDisposition.js';
 
 type ReportServicePort = Pick<ReportService, 'build'>;
+type ReportManualEvidenceService = Pick<ManualExecutionServicePort, 'downloadEvidence'>;
 export type ReportRenderer = (report: ReportModel, options?: ReportRenderOptions) => Buffer | Promise<Buffer>;
 
 export type ReportRouteOptions = {
   service?: ReportServicePort;
   limits?: ReportLimits;
   renderers?: Partial<Record<ReportFormat, ReportRenderer>>;
+  manualEvidenceService?: ReportManualEvidenceService;
 };
 
 type RequestWithContext = Request & {
@@ -123,7 +131,12 @@ function sendError(res: Response, error: unknown, correlationId: string): void {
   res.status(status).json(body);
 }
 
-function createDefaultStore(sequelize: unknown) {
+type DefaultReportContext = {
+  service: ReportServicePort;
+  manualEvidenceService: ReportManualEvidenceService;
+};
+
+function createDefaultContext(sequelize: unknown, limits: ReportLimits): DefaultReportContext {
   const evidenceStorage = new ManualEvidenceStorage({ rootDir: process.env.MANUAL_EXECUTION_EVIDENCE_ROOT });
   const models = {
     Project: defineProject(sequelize, DataTypes),
@@ -140,17 +153,35 @@ function createDefaultStore(sequelize: unknown) {
     AutomationExecution: defineAutomationExecution(sequelize, DataTypes),
     AutomationDefinition: defineAutomationDefinition(sequelize, DataTypes),
     ExecutionArtifact: defineExecutionArtifact(sequelize, DataTypes),
-  } as unknown as ReportModels;
-  return createSequelizeReportStore({
+  };
+  const reportModels = models as unknown as ReportModels;
+  const store = createSequelizeReportStore({
     sequelize: sequelize as SequelizeReportStoreOptions['sequelize'],
-    models,
+    models: reportModels,
     evidenceProbe: (input) => evidenceStorage.probe(input),
   });
+  const manualEvidenceService = createManualExecutionService({
+    sequelize: sequelize as never,
+    models: {
+      ManualExecution: models.ManualExecution,
+      ManualExecutionEvidence: models.ManualExecutionEvidence,
+      RunCase: models.RunCase,
+      Run: models.Run,
+      Case: models.Case,
+      Folder: models.Folder,
+      Project: models.Project,
+      Member: models.Member,
+    } as unknown as ManualExecutionModels,
+    storage: evidenceStorage,
+  });
+  return { service: createReportService({ store, limits }), manualEvidenceService };
 }
 
-function createService(sequelize: unknown, options: ReportRouteOptions, limits: ReportLimits): ReportServicePort {
-  if (options.service) return options.service;
-  return createReportService({ store: createDefaultStore(sequelize), limits });
+function createEvidenceReader(service: ReportManualEvidenceService, userId: number): ReportEvidenceByteReader {
+  return async ({ executionId, evidenceId }) => {
+    const result = await service.downloadEvidence(Number(executionId), evidenceId, userId);
+    return { bytes: result.bytes, mimeType: result.evidence.mimeType };
+  };
 }
 
 async function renderReport(
@@ -179,7 +210,16 @@ function reportFilename(report: ReportModel, format: ReportFormat): string {
 export default function reportsRoute(sequelize: unknown, options: ReportRouteOptions = {}) {
   const router = express.Router();
   const limits = resolveReportLimits(options.limits);
-  const service = createService(sequelize, options, limits);
+  let service: ReportServicePort;
+  let defaultManualEvidenceService: ReportManualEvidenceService | undefined;
+  if (options.service) {
+    service = options.service;
+  } else {
+    const defaultContext = createDefaultContext(sequelize, limits);
+    service = defaultContext.service;
+    defaultManualEvidenceService = defaultContext.manualEvidenceService;
+  }
+  const manualEvidenceService = options.manualEvidenceService ?? defaultManualEvidenceService;
   const renderers = { ...DEFAULT_RENDERERS, ...options.renderers };
   const { verifySignedIn } = authMiddleware(sequelize);
 
@@ -194,8 +234,11 @@ export default function reportsRoute(sequelize: unknown, options: ReportRouteOpt
       if (!isReportFormat(formatValue)) throw new ReportError('format_invalid');
       const input = { userId, projectId, request: req.body } as BuildReportInput;
       const report = await service.build(input);
+      const evidenceReader = manualEvidenceService ? createEvidenceReader(manualEvidenceService, userId) : undefined;
       const output = await renderReport(formatValue, report, renderers[formatValue], {
         maxBytes: limits.maxSerializedBytes,
+        locale: req.get('Accept-Language') ?? undefined,
+        ...(evidenceReader ? { evidenceReader } : {}),
       });
       res.setHeader('Content-Type', CONTENT_TYPES[formatValue]);
       res.setHeader('Content-Disposition', contentDisposition(reportFilename(report, formatValue)));

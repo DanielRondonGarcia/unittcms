@@ -134,17 +134,19 @@ describe('HTML and JSON report renderers', () => {
     expect(JSON.parse(output.toString('utf8'))).toEqual(report);
   });
 
-  it('renders escaped report content and only safe evidence references in HTML', () => {
+  it('renders escaped human content and only safe manual evidence references in HTML', () => {
     const html = renderHtml(report).toString('utf8');
 
     expect(html).toContain('<!doctype html>');
+    expect(html).toContain('<html lang="en">');
     expect(html).toContain('Reports &lt;project&gt;');
     expect(html).toContain('Checkout &lt;alpha&gt;');
-    expect(html).toContain('Details &amp; context');
+    expect(html).not.toContain('Details &amp; context');
     expect(html).toContain('href="/manual-executions/20/evidence/90"');
     expect(html).toContain('expired.png');
-    expect(html).toContain('Unavailable');
+    expect(html).toContain('Expired');
     expect(html).not.toContain('javascript:alert(1)');
+    expect(html).not.toMatch(/metadata|automation|correlation-20|snapshot hash/i);
   });
 
   it('enforces the configured output bound for both renderers', () => {

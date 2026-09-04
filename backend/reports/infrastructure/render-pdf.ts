@@ -1,19 +1,24 @@
 import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
-import type {
-  ReportAutomationExecution,
-  ReportCounts,
-  ReportEvidenceRef,
-  ReportManualExecution,
-  ReportModel,
-  ReportScenario,
-} from '../api/types.js';
+import { MAX_EVIDENCE_BYTES } from '../../manual-execution/infrastructure/storage.js';
+import type { ReportEvidenceRef, ReportModel, ReportScenario, ReportStep } from '../api/types.js';
 import {
   assertRenderedOutput,
-  displayValue,
+  hasExpectedResults,
+  humanDate,
+  humanExpectedResult,
+  humanStatus,
+  humanStepKeyword,
+  humanUserName,
+  latestManualExecution,
+  manualNoteEntries,
   outputLimit,
-  safeEvidenceHref,
+  reportCopy,
+  scenarioEvidence,
+  scenarioStatus,
+  statusTone,
+  type ReportCopy,
   type ReportRenderOptions,
   ReportRenderError,
   wrapRenderError,
@@ -25,6 +30,8 @@ export type PdfRenderOptions = ReportRenderOptions & {
   fontPath?: string;
 };
 
+export const MAX_EMBEDDED_EVIDENCE_BYTES = MAX_EVIDENCE_BYTES;
+
 const FONT_CANDIDATES = [
   'C:\\Windows\\Fonts\\arial.ttf',
   'C:\\Windows\\Fonts\\segoeui.ttf',
@@ -34,24 +41,42 @@ const FONT_CANDIDATES = [
   '/usr/share/fonts/noto/NotoSans-Regular.ttf',
 ];
 
-function stringify(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? displayValue(value);
-  } catch {
-    return 'Unavailable';
-  }
-}
+const COLORS = {
+  ink: '#17233c',
+  navy: '#23456f',
+  teal: '#0f766e',
+  surface: '#f6f8fb',
+  border: '#d7e0ea',
+  muted: '#66758a',
+  positive: '#0f766e',
+  positiveSoft: '#e8f6f1',
+  negative: '#b42318',
+  negativeSoft: '#fff0ee',
+  warning: '#a15c07',
+  warningSoft: '#fff6e5',
+  infoSoft: '#edf4fb',
+  white: '#ffffff',
+} as const;
 
-function validateReport(report: ReportModel, format: 'pdf'): void {
+type PdfDocument = InstanceType<typeof PDFDocument>;
+type PdfCell = string | PDFKit.Mixins.CellOptions;
+type PdfRow = PdfCell[];
+type StatusTone = 'positive' | 'negative' | 'warning' | 'info' | 'neutral';
+type SupportedEvidenceMime = 'image/png' | 'image/jpeg';
+
+const EVIDENCE_IMAGE_BOX_HEIGHT = 240;
+const EVIDENCE_IMAGE_GAP = 12;
+
+function validateReport(report: ReportModel): void {
   try {
-    if (JSON.stringify(report) === undefined) throw new ReportRenderError(format, 'report_output_invalid');
+    if (JSON.stringify(report) === undefined) throw new ReportRenderError('pdf', 'report_output_invalid');
   } catch (error) {
-    throw error instanceof ReportRenderError ? error : new ReportRenderError(format, 'report_render_failed', error);
+    throw error instanceof ReportRenderError ? error : new ReportRenderError('pdf', 'report_render_failed', error);
   }
 }
 
 function hasUnicode(report: ReportModel): boolean {
-  const value = stringify(report);
+  const value = JSON.stringify(report) ?? '';
   for (let index = 0; index < value.length; index += 1) {
     if (value.charCodeAt(index) > 127) return true;
   }
@@ -68,189 +93,392 @@ function resolveFontPath(fontPath: string | undefined, report: ReportModel): str
   return candidate;
 }
 
-type PdfDocument = InstanceType<typeof PDFDocument>;
-
-function width(document: PdfDocument): number {
+function contentWidth(document: PdfDocument): number {
   return document.page.width - document.page.margins.left - document.page.margins.right;
 }
 
-function line(document: PdfDocument, label: string, value: unknown): void {
+function coverTextHeight(document: PdfDocument, text: string, width: number, fontSize: number): number {
+  document.fontSize(fontSize);
+  return document.heightOfString(text, { width, align: 'center' });
+}
+
+function coverLineHeight(document: PdfDocument, width: number, fontSize: number): number {
+  return coverTextHeight(document, 'M', width, fontSize);
+}
+
+function coverContext(report: ReportModel, copy: ReportCopy): string {
+  return `${copy.project}: ${value(report.project.name, copy)} · ${copy.execution}: ${value(report.execution.name, copy)}`;
+}
+
+function coverStartY(
+  document: PdfDocument,
+  report: ReportModel,
+  copy: ReportCopy,
+  width: number
+): {
+  startY: number;
+  eyebrowGap: number;
+  leadGap: number;
+} {
+  const eyebrowHeight = coverTextHeight(document, copy.coverEyebrow, width, 8);
+  const eyebrowGap = coverLineHeight(document, width, 8) * 0.25;
+  const titleHeight = coverTextHeight(document, copy.title, width, 24);
+  const leadHeight = coverTextHeight(document, copy.coverLead, width, 10);
+  const leadGap = coverLineHeight(document, width, 10) * 0.5;
+  const contextHeight = coverTextHeight(document, coverContext(report, copy), width, 9);
+  const blockHeight = eyebrowHeight + eyebrowGap + titleHeight + leadHeight + leadGap + contextHeight;
+  const contentTop = document.page.margins.top;
+  const contentBottom = document.page.height - document.page.margins.bottom;
+  const availableHeight = contentBottom - contentTop;
+  return {
+    startY: contentTop + Math.max(0, (availableHeight - blockHeight) / 2),
+    eyebrowGap,
+    leadGap,
+  };
+}
+
+function fitColumnWidths(
+  document: PdfDocument,
+  columnWidths: readonly (number | string)[] | undefined
+): readonly (number | string)[] | undefined {
+  if (!columnWidths) return undefined;
+
+  const numericWidths = columnWidths.filter((width): width is number => typeof width === 'number');
+  if (numericWidths.length !== columnWidths.length) return columnWidths;
+
+  const availableWidth = contentWidth(document);
+  const requestedWidth = numericWidths.reduce((total, width) => total + width, 0);
+  if (requestedWidth <= availableWidth || requestedWidth <= 0) return columnWidths;
+
+  const scale = availableWidth / requestedWidth;
+  let usedWidth = 0;
+  return numericWidths.map((width, index) => {
+    if (index === numericWidths.length - 1) return availableWidth - usedWidth;
+    const fittedWidth = width * scale;
+    usedWidth += fittedWidth;
+    return fittedWidth;
+  });
+}
+
+function value(valueToRender: unknown, copy: ReportCopy): string {
+  return valueToRender === null || valueToRender === undefined || valueToRender === ''
+    ? copy.notAvailable
+    : String(valueToRender);
+}
+
+function statusCell(valueToRender: unknown, copy: ReportCopy): PDFKit.Mixins.CellOptions {
+  const tone = statusTone(valueToRender);
+  const colors: Record<StatusTone, { backgroundColor: string; textColor: string }> = {
+    positive: { backgroundColor: COLORS.positiveSoft, textColor: COLORS.positive },
+    negative: { backgroundColor: COLORS.negativeSoft, textColor: COLORS.negative },
+    warning: { backgroundColor: COLORS.warningSoft, textColor: COLORS.warning },
+    info: { backgroundColor: COLORS.infoSoft, textColor: COLORS.navy },
+    neutral: { backgroundColor: COLORS.surface, textColor: COLORS.muted },
+  };
+  return { text: humanStatus(valueToRender, copy), ...colors[tone] };
+}
+
+function table(
+  document: PdfDocument,
+  caption: string,
+  headers: readonly string[],
+  rows: readonly PdfRow[],
+  columnWidths?: readonly (number | string)[]
+): void {
+  document
+    .fontSize(7.5)
+    .fillColor(COLORS.muted)
+    .text(caption.toUpperCase(), { width: contentWidth(document) })
+    .moveDown(0.15);
+  const header = headers.map<PDFKit.Mixins.CellOptions>((headerText) => ({
+    text: headerText,
+    type: 'TH',
+    backgroundColor: COLORS.navy,
+    textColor: COLORS.white,
+    padding: 5,
+  }));
+  document.table({
+    data: [header, ...rows],
+    maxWidth: contentWidth(document),
+    columnStyles: fitColumnWidths(document, columnWidths)?.map((width) => ({ width })),
+    defaultStyle: {
+      border: 0.5,
+      borderColor: COLORS.border,
+      padding: 5,
+      textColor: COLORS.ink,
+    },
+    rowStyles: (row) => (row > 0 && row % 2 === 0 ? { backgroundColor: COLORS.surface } : undefined),
+  });
+  document.moveDown(0.4);
+}
+
+function sectionHeading(document: PdfDocument, text: string): void {
+  document
+    .fontSize(10.5)
+    .fillColor(COLORS.navy)
+    .text(text.toUpperCase(), { width: contentWidth(document) });
+  const lineY = document.y + 3;
+  document
+    .save()
+    .strokeColor(COLORS.teal)
+    .lineWidth(1.2)
+    .moveTo(document.page.margins.left, lineY)
+    .lineTo(document.page.margins.left + contentWidth(document), lineY)
+    .stroke()
+    .restore();
+  document.moveDown(0.45);
+}
+
+function emptyState(document: PdfDocument, text: string): void {
   document
     .fontSize(9)
-    .fillColor('black')
-    .text(`${label}: ${displayValue(value)}`, { width: width(document) });
+    .fillColor(COLORS.muted)
+    .text(text, { width: contentWidth(document) })
+    .moveDown(0.35);
 }
 
-function heading(document: PdfDocument, value: string, size = 13): void {
+function drawPageChrome(
+  document: PdfDocument,
+  report: ReportModel,
+  copy: ReportCopy,
+  fontPath: string | undefined,
+  pageNumber: number
+): void {
+  const left = document.page.margins.left;
+  const width = contentWidth(document);
   document
-    .fontSize(size)
-    .fillColor('black')
-    .text(value, { width: width(document) })
-    .moveDown(0.2);
+    .save()
+    .font(fontPath ?? 'Helvetica')
+    .fontSize(7)
+    .fillColor(COLORS.muted)
+    .text(`${value(report.project.name, copy)} · ${copy.title}`, left, 22, { width, lineBreak: false })
+    .text(`${copy.page} ${pageNumber}`, left, 22, { width, align: 'right', lineBreak: false })
+    .strokeColor(COLORS.border)
+    .lineWidth(0.5)
+    .moveTo(left, 36)
+    .lineTo(left + width, 36)
+    .stroke()
+    .restore();
+  document.x = left;
+  document.y = document.page.margins.top;
 }
 
-function fields(document: PdfDocument, entries: ReadonlyArray<readonly [string, unknown]>): void {
-  entries.forEach(([label, value]) => line(document, label, value));
+function cover(document: PdfDocument, report: ReportModel, copy: ReportCopy): void {
+  const left = document.page.margins.left;
+  const width = contentWidth(document);
+  const layout = coverStartY(document, report, copy, width);
+  document.x = left;
+  document.y = layout.startY;
+  document.fontSize(8).fillColor(COLORS.teal).text(copy.coverEyebrow, { width, align: 'center' });
+  document.y += layout.eyebrowGap;
+  document.fontSize(24).fillColor(COLORS.navy).text(copy.title, { width, align: 'center' });
+  document.fontSize(10).fillColor(COLORS.muted).text(copy.coverLead, { width, align: 'center' });
+  document.y += layout.leadGap;
+  document.fontSize(9).fillColor(COLORS.ink).text(coverContext(report, copy), { width, align: 'center' });
 }
 
-function userName(user: { username?: string; email?: string } | null, id: number | null): string {
-  return user?.username ?? user?.email ?? (id === null ? 'Unavailable' : `User #${id}`);
+function supportedEvidenceMime(valueToCheck: unknown): valueToCheck is SupportedEvidenceMime {
+  return valueToCheck === 'image/png' || valueToCheck === 'image/jpeg';
 }
 
-function evidence(document: PdfDocument, item: ReportEvidenceRef): void {
-  const href = safeEvidenceHref(item.href);
-  const label = `${displayValue(item.source)} evidence #${item.id} for ${displayValue(item.executionId)}: ${displayValue(
-    item.label
-  )} [${displayValue(item.state)}]${href ? ` - ${href}` : ''}`;
-  if (href) {
-    document
-      .fillColor('blue')
-      .text(label, { link: href, underline: true, width: width(document) })
-      .fillColor('black');
-  } else {
-    document.fillColor('black').text(label, { width: width(document) });
+function hasImageMagic(bytes: Buffer, mimeType: SupportedEvidenceMime): boolean {
+  if (mimeType === 'image/png') return bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'));
+  return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+}
+
+function evidenceBuffer(result: unknown): Buffer | null {
+  if (!result || typeof result !== 'object') return null;
+  const candidate = result as { bytes?: unknown; mimeType?: unknown };
+  if (!supportedEvidenceMime(candidate.mimeType) || !(candidate.bytes instanceof Uint8Array)) return null;
+  if (candidate.bytes.byteLength === 0 || candidate.bytes.byteLength > MAX_EMBEDDED_EVIDENCE_BYTES) return null;
+  const bytes = Buffer.from(candidate.bytes);
+  if (bytes.length === 0 || bytes.length > MAX_EMBEDDED_EVIDENCE_BYTES) return null;
+  return hasImageMagic(bytes, candidate.mimeType) ? bytes : null;
+}
+
+async function readEvidenceImage(
+  reader: ReportRenderOptions['evidenceReader'],
+  item: ReportEvidenceRef
+): Promise<Buffer | null> {
+  if (!reader || item.source !== 'manual' || item.state !== 'available') return null;
+  if (item.mimeType !== undefined && !supportedEvidenceMime(item.mimeType)) return null;
+  try {
+    return evidenceBuffer(await reader({ executionId: item.executionId, evidenceId: item.id }));
+  } catch {
+    return null;
   }
 }
 
-function manual(document: PdfDocument, record: ReportManualExecution): void {
-  fields(document, [
-    ['Manual execution', record.id],
-    ['Status', record.status],
-    ['Result', record.result],
-    ['Actor ID', record.actorUserId],
-    ['Actor', userName(record.actor, record.actorUserId)],
-    ['Assignee ID', record.assigneeUserId],
-    ['Assignee', userName(record.assignee, record.assigneeUserId)],
-    ['Started', record.startedAt],
-    ['Finished', record.finishedAt],
-    ['Case revision', record.caseRevision],
-    ['Snapshot hash', record.caseSnapshotHash],
-    ['Correlation', record.correlationId],
-    ['Snapshot', record.stale ? 'stale' : record.sourceDeleted ? 'deleted' : 'current'],
-  ]);
-  if (record.report) line(document, 'Report details', stringify(record.report));
-  record.evidence.forEach((item) => evidence(document, item));
+function evidenceContentBottom(document: PdfDocument): number {
+  return document.page.height - document.page.margins.bottom;
 }
 
-function automation(document: PdfDocument, record: ReportAutomationExecution): void {
-  fields(document, [
-    ['Automation execution', record.id],
-    ['Status', record.status],
-    ['Attempt', record.attempt],
-    ['Example', record.exampleIndex],
-    ['Engine', record.engine],
-    ['Model', record.model],
-    ['Assignee ID', record.assigneeUserId],
-    ['Assignee', userName(record.assignee, record.assigneeUserId)],
-    ['Queued', record.queuedAt],
-    ['Started', record.startedAt],
-    ['Finished', record.finishedAt],
-    ['Duration ms', record.durationMs],
-    ['Summary', record.summary],
-    ['Error', record.error],
-    ['Error kind', record.errorKind],
-    ['Correlation', record.correlationId],
-    ['Snapshot hash', record.snapshotHash],
-  ]);
-  if (record.snapshot) line(document, 'Snapshot details', stringify(record.snapshot));
-  record.evidence.forEach((item) => evidence(document, item));
-}
+async function embedEvidenceImages(
+  document: PdfDocument,
+  evidence: ReportEvidenceRef[],
+  reader: ReportRenderOptions['evidenceReader']
+): Promise<void> {
+  if (!reader) return;
+  for (const item of evidence) {
+    const image = await readEvidenceImage(reader, item);
+    if (!image) continue;
 
-function counts(document: PdfDocument, label: string, value: ReportCounts): void {
-  heading(document, label, 11);
-  fields(document, Object.entries(value));
-}
-
-function scenario(document: PdfDocument, value: ReportScenario, index: number): void {
-  if (index > 0) document.addPage();
-  heading(document, `Scenario ${value.id}: ${displayValue(value.title)}`, 15);
-  fields(document, [
-    ['Path', value.path],
-    ['Folder ID', value.folderId],
-    ['State', value.state],
-    ['Priority', value.priority],
-    ['Type', value.type],
-    ['Automation status', value.automationStatus],
-    ['Template', value.template],
-    ['Automation version', value.automationVersion],
-    ['Created', value.createdAt],
-    ['Updated', value.updatedAt],
-    ['Description', value.description],
-    ['Preconditions', value.preConditions],
-    ['Expected results', value.expectedResults],
-    ['Snapshot source', value.snapshot.source],
-    ['Snapshot revision', value.snapshot.revision],
-    ['Snapshot hash', value.snapshot.hash],
-    ['Stale', value.stale],
-    ['Deleted', value.deleted],
-  ]);
-  if (value.runCase) {
-    fields(document, [
-      ['Run case ID', value.runCase.id],
-      ['Run ID', value.runCase.runId],
-      ['Run case scenario ID', value.runCase.caseId],
-      ['Run status', value.runCase.status],
-      ['Run assignee ID', value.runCase.assigneeUserId],
-      ['Run assignee', userName(value.runCase.assignee, value.runCase.assigneeUserId)],
-    ]);
+    const imageHeight = EVIDENCE_IMAGE_BOX_HEIGHT;
+    if (document.y + imageHeight + EVIDENCE_IMAGE_GAP > evidenceContentBottom(document)) document.addPage();
+    const imageTop = document.y;
+    try {
+      document.image(image, {
+        fit: [contentWidth(document), imageHeight],
+        align: 'center',
+        valign: 'center',
+      });
+    } catch {
+      document.y = imageTop;
+      continue;
+    }
+    document.y = imageTop + imageHeight + EVIDENCE_IMAGE_GAP;
   }
-  heading(document, 'Steps', 11);
-  if (value.steps.length === 0) line(document, 'Steps', 'None');
-  value.steps.forEach((step) =>
-    line(
+}
+
+function stepTable(document: PdfDocument, steps: ReportStep[], copy: ReportCopy): void {
+  if (steps.length === 0) {
+    emptyState(document, copy.noSteps);
+    return;
+  }
+  const includeExpectedResults = hasExpectedResults(steps);
+  const headers = [copy.stepNumber, copy.action];
+  const columnWidths = includeExpectedResults ? [45, 225, 230] : [45, contentWidth(document) - 45];
+  if (includeExpectedResults) headers.push(copy.expectedResult);
+  const rows = steps.map<PdfRow>((step) => {
+    const row: PdfRow = [value(step.position, copy), `${humanStepKeyword(step, copy)} ${value(step.text, copy)}`];
+    if (includeExpectedResults) row.push(humanExpectedResult(step.expectedResult, copy));
+    return row;
+  });
+  table(document, copy.steps, headers, rows, columnWidths);
+}
+
+async function manualSection(
+  document: PdfDocument,
+  scenario: ReportScenario,
+  copy: ReportCopy,
+  reader: ReportRenderOptions['evidenceReader']
+): Promise<void> {
+  const latest = latestManualExecution(scenario.manual);
+  if (!latest) {
+    emptyState(document, copy.noManualExecution);
+    return;
+  }
+  const tester = humanUserName(latest.actor);
+  const assignee = humanUserName(latest.assignee);
+  const headers = [copy.result, copy.status, copy.tester, copy.assignee, copy.started, copy.finished];
+  const row: PdfRow = [
+    statusCell(latest.result, copy),
+    statusCell(latest.status, copy),
+    tester ? tester : copy.notAvailable,
+    assignee ? assignee : copy.notAvailable,
+    latest.startedAt ? humanDate(latest.startedAt, copy) : copy.notAvailable,
+    latest.finishedAt ? humanDate(latest.finishedAt, copy) : copy.notAvailable,
+  ];
+  table(document, copy.latestManualExecution, headers, [row], [78, 88, 100, 100, 95, 95]);
+
+  const notes = manualNoteEntries(latest, copy);
+  if (notes.length > 0)
+    table(
       document,
-      `Step ${step.position}`,
-      `${displayValue(step.keyword)} ${displayValue(step.text)} -> ${displayValue(step.expectedResult)}`
-    )
+      copy.manualNotes,
+      [copy.titleLabel, copy.content],
+      notes.map<PdfRow>(([label, content]) => [label, content]),
+      [125, 375]
+    );
+  await embedEvidenceImages(document, scenarioEvidence(scenario), reader);
+}
+
+async function scenario(
+  document: PdfDocument,
+  valueToRender: ReportScenario,
+  index: number,
+  total: number,
+  copy: ReportCopy,
+  reader: ReportRenderOptions['evidenceReader']
+): Promise<void> {
+  if (index > 0) document.addPage();
+  document
+    .fontSize(8)
+    .fillColor(COLORS.teal)
+    .text(copy.scenarioProgress(index + 1, total), { width: contentWidth(document) });
+  document
+    .fontSize(21)
+    .fillColor(COLORS.navy)
+    .text(`${copy.scenario} ${value(valueToRender.id, copy)} — ${value(valueToRender.title, copy)}`, {
+      width: contentWidth(document),
+    })
+    .moveDown(0.35);
+
+  table(
+    document,
+    copy.scenario,
+    [copy.scenarioNumber, copy.titleLabel, copy.path, copy.status],
+    [
+      [
+        value(valueToRender.id, copy),
+        value(valueToRender.title, copy),
+        value(valueToRender.path, copy),
+        statusCell(scenarioStatus(valueToRender), copy),
+      ],
+    ],
+    [75, 175, 205, 95]
   );
-  heading(document, 'Manual source', 11);
-  if (value.manual.length === 0) line(document, 'Manual executions', 'None');
-  value.manual.forEach((record) => manual(document, record));
-  heading(document, 'Automation source', 11);
-  if (value.automation.length === 0) line(document, 'Automation executions', 'None');
-  value.automation.forEach((record) => automation(document, record));
-  heading(document, 'Evidence', 11);
-  if (value.evidence.length === 0) line(document, 'Evidence references', 'None');
-  value.evidence.forEach((item) => evidence(document, item));
+
+  sectionHeading(document, copy.steps);
+  stepTable(document, valueToRender.steps, copy);
+
+  sectionHeading(document, copy.latestManualExecution);
+  await manualSection(document, valueToRender, copy, reader);
 }
 
-function writeReport(document: PdfDocument, report: ReportModel): void {
-  heading(document, 'Functional scenario report', 18);
-  fields(document, [
-    ['Project', report.project.name],
-    ['Project ID', report.project.id],
-    ['Project detail', report.project.detail],
-    ['Project visibility', report.project.isPublic ? 'public' : 'private'],
-    ['Project owner ID', report.project.ownerUserId],
-    ['Project created', report.project.createdAt],
-    ['Project updated', report.project.updatedAt],
-    ['Execution', `${report.execution.name} (#${report.execution.id})`],
-    ['Execution description', report.execution.description],
-    ['Execution state', report.execution.state],
-    ['Execution created', report.execution.createdAt],
-    ['Execution updated', report.execution.updatedAt],
-    ['Scenario count', report.scenarios.length],
-  ]);
-  heading(document, 'Aggregates', 13);
-  counts(document, 'Manual source', report.aggregates.manual);
-  counts(document, 'Automation source', report.aggregates.automation);
-  line(document, 'Combined', report.aggregates.combined);
-  heading(document, 'Scenarios', 13);
-  if (report.scenarios.length === 0) line(document, 'Scenarios', 'None');
-  report.scenarios.forEach((value, index) => scenario(document, value, index));
+async function writeReport(
+  document: PdfDocument,
+  report: ReportModel,
+  copy: ReportCopy,
+  reader: ReportRenderOptions['evidenceReader']
+): Promise<void> {
+  cover(document, report, copy);
+  if (report.scenarios.length === 0) {
+    sectionHeading(document, copy.scenarios);
+    emptyState(document, copy.noScenarios);
+    return;
+  }
+  document.addPage();
+  sectionHeading(document, copy.scenarios);
+  for (const [index, scenarioValue] of report.scenarios.entries()) {
+    await scenario(document, scenarioValue, index, report.scenarios.length, copy, reader);
+  }
 }
 
-function createPdf(report: ReportModel, fontPath: string | undefined): Promise<Buffer> {
+function createPdf(
+  report: ReportModel,
+  copy: ReportCopy,
+  fontPath: string | undefined,
+  reader: ReportRenderOptions['evidenceReader']
+): Promise<Buffer> {
   const document = new PDFDocument({ size: 'A4', margin: 48 });
   const chunks: Buffer[] = [];
+  let pageNumber = 0;
+  document.on('pageAdded', () => {
+    pageNumber += 1;
+    drawPageChrome(document, report, copy, fontPath, pageNumber);
+  });
   return new Promise((resolve, reject) => {
     document.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
     document.once('error', reject);
     document.once('end', () => resolve(Buffer.concat(chunks)));
     try {
       document.font(fontPath ?? 'Helvetica').fontSize(9);
-      writeReport(document, report);
-      document.end();
+      pageNumber += 1;
+      drawPageChrome(document, report, copy, fontPath, pageNumber);
+      writeReport(document, report, copy, reader)
+        .then(() => document.end())
+        .catch(reject);
     } catch (error) {
       reject(error);
     }
@@ -260,8 +488,9 @@ function createPdf(report: ReportModel, fontPath: string | undefined): Promise<B
 export async function renderPdf(report: ReportModel, options: PdfRenderOptions = {}): Promise<Buffer> {
   try {
     outputLimit('pdf', options);
-    validateReport(report, 'pdf');
-    const output = await createPdf(report, resolveFontPath(options.fontPath, report));
+    validateReport(report);
+    const copy = reportCopy(options.locale);
+    const output = await createPdf(report, copy, resolveFontPath(options.fontPath, report), options.evidenceReader);
     return assertRenderedOutput('pdf', output, options);
   } catch (error) {
     throw wrapRenderError('pdf', error);

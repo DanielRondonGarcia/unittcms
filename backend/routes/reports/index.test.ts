@@ -1,10 +1,11 @@
 import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ReportCounts, ReportModel, ReportStore } from '../../reports/api/types.js';
+import type { ReportCounts, ReportFormat, ReportModel, ReportStore } from '../../reports/api/types.js';
 import { ReportService } from '../../reports/application/service.js';
-import { ReportRenderError } from '../../reports/infrastructure/render-common.js';
-import reportsRoute from './index.js';
+import { ReportRenderError, type ReportRenderOptions } from '../../reports/infrastructure/render-common.js';
+import type { ManualEvidenceView, ManualExecutionServicePort } from '../../manual-execution/api/types.js';
+import reportsRoute, { type ReportRenderer, type ReportRouteOptions } from './index.js';
 
 const verifySignedIn = vi.fn((req: { userId?: number }, _res: unknown, next: () => void) => {
   req.userId = 7;
@@ -28,10 +29,21 @@ const renderers: Record<string, ReturnType<typeof vi.fn>> = {
   docx: vi.fn(() => Buffer.from('PK report', 'utf8')),
 };
 
-function makeApp(options: { service?: { build: typeof service.build } } = {}) {
+function makeApp(
+  options: {
+    service?: { build: typeof service.build };
+    renderers?: Partial<Record<ReportFormat, ReportRenderer>>;
+    manualEvidenceService?: Pick<ManualExecutionServicePort, 'downloadEvidence'>;
+  } = {}
+) {
   const app = express();
   app.use(express.json());
-  app.use('/projects', reportsRoute({} as never, { service: options.service ?? service, renderers }));
+  const routeOptions: ReportRouteOptions = {
+    service: options.service ?? service,
+    renderers: options.renderers ?? renderers,
+    ...(options.manualEvidenceService ? { manualEvidenceService: options.manualEvidenceService } : {}),
+  };
+  app.use('/projects', reportsRoute({} as never, routeOptions));
   return app;
 }
 
@@ -84,6 +96,57 @@ describe('project report route security and export boundary', () => {
     expect(response.headers['content-disposition']).toMatch(/attachment; filename="Q1 _ Unsafe Project\.json"/);
     expect(service.build).toHaveBeenCalledWith({ userId: 7, projectId: 17, request: body() });
     expect(renderers.json).toHaveBeenCalledWith(report, expect.objectContaining({ maxBytes: expect.any(Number) }));
+  });
+
+  it('passes the UI locale through Accept-Language without adding it to the canonical request', async () => {
+    const response = await request(makeApp())
+      .post('/projects/17/reports')
+      .set('Accept-Language', 'es-ES,es;q=0.9')
+      .send(body('html'));
+
+    expect(response.status).toBe(200);
+    expect(service.build).toHaveBeenCalledWith({ userId: 7, projectId: 17, request: body('html') });
+    expect(renderers.html).toHaveBeenCalledWith(
+      report,
+      expect.objectContaining({ maxBytes: expect.any(Number), locale: 'es-ES,es;q=0.9' })
+    );
+  });
+
+  it('binds the render reader to the authenticated user through manual evidence authorization', async () => {
+    const downloadedEvidence: ManualEvidenceView = {
+      id: 9,
+      executionId: 20,
+      uploaderUserId: 7,
+      filename: 'proof.png',
+      mimeType: 'image/png',
+      size: 1,
+      sha256: 'a'.repeat(64),
+      expiresAt: '2026-09-30T00:00:00.000Z',
+      createdAt: '2026-09-01T00:00:00.000Z',
+    };
+    const downloadEvidence = vi.fn(async () => ({ bytes: Buffer.from([1]), evidence: downloadedEvidence }));
+    const pdfRenderer = vi.fn(async (_report: ReportModel, options?: ReportRenderOptions) => {
+      const reader = options?.evidenceReader;
+      if (!reader) throw new Error('expected a bound evidence reader');
+      await reader({ executionId: 20, evidenceId: 9 });
+      return Buffer.from('%PDF-1.7 report', 'utf8');
+    });
+    const customService = { build: vi.fn(async () => report) };
+
+    const response = await request(
+      makeApp({
+        service: customService,
+        renderers: { pdf: pdfRenderer },
+        manualEvidenceService: { downloadEvidence },
+      })
+    )
+      .post('/projects/17/reports')
+      .send(body('pdf'));
+
+    expect(response.status).toBe(200);
+    expect(customService.build).toHaveBeenCalledOnce();
+    expect(pdfRenderer).toHaveBeenCalledOnce();
+    expect(downloadEvidence).toHaveBeenCalledWith(20, 9, 7);
   });
 
   it('deduplicates explicit IDs and rejects bounds or foreign selections without output', async () => {
