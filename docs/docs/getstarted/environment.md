@@ -14,7 +14,7 @@ It is strongly recommended to change `SECRET_KEY` from the default value in prod
 
 ## Docker
 
-If you are self-hosting UnitTCMS with Docker, you can customize the environment using the `environment` section in `docker-compose.yaml`.
+If you are self-hosting UnitTCMS with Docker, you can customize the environment using the `environment` section in `docker-compose.yaml`. For a server installation without a source checkout or build, use `docker-compose.production.yaml` and its published GHCR image variables.
 
 ```yaml title="docker-compose.yaml"
 services:
@@ -69,7 +69,7 @@ opt-in, set `AUTOMATION_EXECUTION_MODE=real` in the ignored `.env` file and
 recreate the API stack. This enables Redis/store/resolver access and environment
 listing only; it does not start the worker or bypass its Phase 0 gate. Use `fake`
 only through an injected test or development harness; production startup rejects
-it. Real compatibility runs require the pinned image, an approved HTTP(S)
+it. Real compatibility runs require the published image, an approved HTTP(S)
 endpoint, provider authentication when the selected route requires it (Ollama
 normally does not), the mandatory UnitTCMS worker secret, and an explicit target
 allowlist. Do not put credentials in source, `.env.example`, cases, logs,

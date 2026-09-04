@@ -12,7 +12,7 @@ records. Localized labels are presentation-only.
 :::warning Readiness gate
 
 The repository does **not** claim production readiness until the isolated
-compatibility job passes with the pinned image, real evidence, resource limits,
+compatibility job passes with the published image, real evidence, resource limits,
 telemetry policy, timeout/cancellation proof, and target allowlist proof. The
 default API registry is empty and the default execution mode is `disabled`; an
 explicit API `real` override only wires Redis/store/resolver access and does
@@ -164,7 +164,7 @@ named-volume run uses the run directory below `AUTOMATION_HERCULES_WORKDIR`,
 mapped to the corresponding safe subdirectory under
 `/testzeus-hercules/opt`; host paths are never passed as Hercules paths. The
 worker creates the run-local `test-data` directory before starting Hercules,
-and collection happens before the run workspace is removed. The pinned image's
+and collection happens before the run workspace is removed. The published image's
 entrypoint does not forward arguments after the image, so the invocation does
 not use the ignored path CLI arguments.
 
@@ -355,10 +355,10 @@ keyless Ollama does not read or pass either optional provider key. A configured
 provider/model/endpoint does not prove Hercules readiness; the Phase-0
 compatibility evidence and the separate worker gate are still required.
 
-The pinned compatibility image is:
+The published Hercules compatibility image is:
 
 ```text
-testzeus/hercules:0.1.2@sha256:11ff3700104f92230bafdff1e85f43b8932e8a7df5ab85b7f7d00d3cea61f52c
+ghcr.io/danielrondongarcia/testzeus-hercules:latest
 ```
 
 Run the fake/injected browser smoke path locally with:
@@ -379,7 +379,7 @@ HERCULES_ALLOWED_HOSTS=example.com \
 npm run hercules:compatibility:real
 ```
 
-The GitHub workflow requires a manual boolean approval, pinned image contract,
+The GitHub workflow requires the published image contract,
 LLM/LiteLLM variables from Actions secrets, and the Phase-0 target allowlist
 from an Actions variable. Product executions do not consume this global value;
 they derive the host from the saved project environment. No real browser or LLM

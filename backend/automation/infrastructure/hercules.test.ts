@@ -45,7 +45,7 @@ function llmConfig(
 const compatibilityEnvironment = { baseUrl: 'https://example.com', allowedHosts: ['example.com'], secretRefs: [] };
 
 describe('Hercules automation executor', () => {
-  it('passes the canonical feature through the pinned, bounded, secret-safe boundary', async () => {
+  it('passes the canonical feature through the published-image, bounded, secret-safe boundary', async () => {
     const workdir = root();
     let observed!: {
       invocation: { file: string; cwd: string; argv: string[] };
@@ -233,8 +233,8 @@ describe('Hercules automation executor', () => {
     expect(compatibilityGateReady).toBe(false);
   });
 
-  it('uses the explicit local image override and maps Ollama at the process boundary', async () => {
-    const localImage = 'testzeus/hercules:0.1.2-amd64';
+  it('uses the explicit image override and maps Ollama at the process boundary', async () => {
+    const overrideImage = 'ghcr.io/danielrondongarcia/testzeus-hercules:1.0.1';
     let observedEnv!: Record<string, string>;
     let observedImage = '';
     const processRunner = vi.fn(async (invocation, options) => {
@@ -246,7 +246,7 @@ describe('Hercules automation executor', () => {
     });
     const executor = new HerculesAutomationExecutor({
       workdir: root(),
-      image: localImage,
+      image: overrideImage,
       llmConfig: llmConfig(undefined, 'ollama'),
       processRunner,
     });
@@ -258,7 +258,7 @@ describe('Hercules automation executor', () => {
         environment: compatibilityEnvironment,
       })
     ).resolves.toMatchObject({ outcome: 'passed' });
-    expect(observedImage).toBe(localImage);
+    expect(observedImage).toBe(overrideImage);
     expect(processRunner.mock.calls[0][0].argv).not.toContain('LLM_MODEL_API_KEY');
     expect(observedEnv).toMatchObject({
       LLM_MODEL_NAME: 'fixture-model',

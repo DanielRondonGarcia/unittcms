@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       run_real_hercules:
-        description: Run the pinned browser/LLM compatibility gate
+        description: Run the published browser/LLM compatibility gate
         required: true
         default: false
         type: boolean
@@ -35,5 +35,5 @@ jobs:
         run: npm ci
       - name: Verify Docker is available
         run: docker version
-      - name: Run the opt-in pinned compatibility gate
+      - name: Run the opt-in published compatibility gate
         run: npm run hercules:compatibility:real

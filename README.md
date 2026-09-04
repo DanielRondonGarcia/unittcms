@@ -22,6 +22,8 @@ UnitTCMS is an open source test case management system. The application is free 
 
 ## Getting Started
 
+### Local development (builds from source)
+
 Clone the repository, create a local environment file, and start the default
 API stack:
 
@@ -41,6 +43,58 @@ the LLM profile values in `.env`.
 You can access the app at `http://localhost:8000`.
 
 [Looking for a non-Docker way?](https://kimatata.github.io/unittcms/docs/getstarted/from-source)
+
+## Production Docker deployment
+
+The production Compose file uses prebuilt images from GHCR. It does not clone
+the source repository or build on the server. The default `up -d` starts only
+UnitTCMS and Redis; the automation worker remains opt-in.
+
+Create a deployment directory, download only the Compose file and environment
+template, replace `SECRET_KEY` with a strong value, and start the stack:
+
+```bash
+mkdir unittcms-production
+cd unittcms-production
+curl -fsSLO https://raw.githubusercontent.com/DanielRondonGarcia/unittcms/main/docker-compose.production.yaml
+curl -fsSLO https://raw.githubusercontent.com/DanielRondonGarcia/unittcms/main/.env.example
+cp .env.example .env
+# Edit .env and replace SECRET_KEY outside source control.
+docker compose --env-file .env -f docker-compose.production.yaml pull
+docker compose --env-file .env -f docker-compose.production.yaml up -d
+```
+
+The production defaults are
+`ghcr.io/danielrondongarcia/unittcms:latest` and
+`ghcr.io/danielrondongarcia/unittcms-automation-worker:latest`. Set
+`UNITTCMS_IMAGE` and `UNITTCMS_WORKER_IMAGE` in `.env` to matching published
+version tags when an immutable application release is preferred. GHCR packages
+must be public for an unauthenticated server; otherwise log in to `ghcr.io`
+with a read-only package credential supplied by your secret manager. The
+release workflow uses the repository `GITHUB_TOKEN` and requires no new secret.
+Database, uploads, private evidence, and automation work use Docker volumes.
+Set `UNITTCMS_UPLOADS_VOLUME` only when a different safe Docker volume name is
+needed for persisted uploads.
+
+Hercules is launched by the worker as a child container through the Docker
+socket, not as a Compose service. Before enabling the worker, pull its image on
+the same Docker host:
+
+```bash
+docker pull ghcr.io/danielrondongarcia/testzeus-hercules:latest
+```
+
+After creating the mandatory worker secret file and configuring the worker-only
+LLM values in `.env`, pull and start the optional profile explicitly:
+
+```bash
+docker compose --env-file .env -f docker-compose.production.yaml --profile automation-worker pull
+docker compose --env-file .env -f docker-compose.production.yaml --profile automation-worker up -d
+```
+
+Set `AUTOMATION_PHASE0_READY=true` only after the separate compatibility proof
+has been reviewed. The worker invocation intentionally does not use Docker's
+per-execution `--pull`; pre-pull the published Hercules image after upgrades.
 
 ## Hercules LLM configuration
 
@@ -69,10 +123,15 @@ explicit opt-in and is not a readiness proof. Do not set
 `AUTOMATION_PHASE0_READY=true` or start that profile before the compatibility
 test succeeds.
 
+The `--build` commands in this local configuration are for development only.
+Production uses `docker-compose.production.yaml` and prebuilt registry images.
+
 For local Hercules development, set `AUTOMATION_HERCULES_IMAGE` in `.env` to
-one validated image reference such as `testzeus/hercules:0.1.2-amd64`. Leave it
-empty to retain the official pinned digest. This override is passed only to the
-opt-in worker; it must not contain whitespace or shell/argv fragments.
+one validated image reference such as
+`ghcr.io/danielrondongarcia/testzeus-hercules:1.0.1`. Leave it empty to use the
+published `ghcr.io/danielrondongarcia/testzeus-hercules:latest` default. This
+override is passed only to the opt-in worker; it must not contain whitespace or
+shell/argv fragments.
 
 ### Provider profiles
 

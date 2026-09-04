@@ -11,7 +11,7 @@ const roots: string[] = [];
 
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
 
-describeReal('isolated pinned Hercules compatibility gate', () => {
+describeReal('isolated published Hercules compatibility gate', () => {
   it('requires injected LLM settings and target allowlist, then proves the complete gate', async () => {
     const apiType = process.env.LLM_MODEL_API_TYPE || 'openai';
     const model = process.env.LLM_MODEL_NAME;
@@ -51,7 +51,8 @@ describeReal('isolated pinned Hercules compatibility gate', () => {
       proofFactory: createCompatibilityProof,
     });
 
-    expect(HERCULES_CONTRACT.image).toContain('@sha256:');
+    expect(HERCULES_CONTRACT.release).toBe('1.0.1');
+    expect(HERCULES_CONTRACT.image).toBe('ghcr.io/danielrondongarcia/testzeus-hercules:latest');
     expect(result).toMatchObject({ ready: true, skipped: false });
     if (llmApiKey) {
       expect(result.invocation.argv).toContain('LLM_MODEL_API_KEY');

@@ -3,8 +3,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'n
 import { isIP } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
 import { containsSecretBytes, containsSecretMaterial } from './diagnostics.js';
-const HERCULES_IMAGE =
-  'testzeus/hercules:0.1.2@sha256:11ff3700104f92230bafdff1e85f43b8932e8a7df5ab85b7f7d00d3cea61f52c';
+const HERCULES_IMAGE = 'ghcr.io/danielrondongarcia/testzeus-hercules:latest';
 const HERCULES_IMAGE_COMPONENT = '[a-z0-9]+(?:[._]|__|[-]*[a-z0-9]+)*';
 const HERCULES_IMAGE_PATTERN = new RegExp(
   `^(?=.{1,255}$)(?:${HERCULES_IMAGE_COMPONENT}(?::[0-9]+)?\\/)?${HERCULES_IMAGE_COMPONENT}(?:\\/${HERCULES_IMAGE_COMPONENT})*(?::[\\w][\\w.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$`
@@ -123,7 +122,7 @@ export function hasExplicitUrlPort(value) {
 }
 
 export const HERCULES_CONTRACT = Object.freeze({
-  release: '0.1.2',
+  release: '1.0.1',
   image: HERCULES_IMAGE,
   argv: Object.freeze(FIXED_DOCKER_ARGS),
   timeoutMs: 300_000,

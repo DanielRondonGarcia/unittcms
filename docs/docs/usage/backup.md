@@ -21,3 +21,6 @@ In a docker environment, DB file is stored in a Docker named volume (`db-data`).
 Uploaded files are managed separately from the database. If you have uploaded files, you need to back them up too.
 
 Please back up the files under the `backend/public/uploads` directory.
+
+In the production Compose deployment, these files are stored in the named
+`uploads-data` volume, or in the volume selected by `UNITTCMS_UPLOADS_VOLUME`.

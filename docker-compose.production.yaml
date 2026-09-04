@@ -1,0 +1,121 @@
+services:
+  unittcms:
+    image: ${UNITTCMS_IMAGE:-ghcr.io/danielrondongarcia/unittcms:latest}
+    ports:
+      - '8000:8000'
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - PORT=8000
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY outside source before starting UnitTCMS}
+      - IS_DEMO=false # set to true to seed the database
+      - API_PATH=${API_PATH:-/api}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:8000}
+      - MANUAL_EXECUTION_ENABLED=${MANUAL_EXECUTION_ENABLED:-true}
+      - MANUAL_EXECUTION_EVIDENCE_ROOT=/app/backend/private/manual-execution-evidence
+      - AUTOMATION_EXECUTION_MODE=${AUTOMATION_EXECUTION_MODE:-disabled}
+      - AUTOMATION_PHASE0_READY=false
+      - AUTOMATION_REDIS_URL=redis://redis:6379
+      - AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
+    volumes:
+      - db-data:/app/backend/database
+      - uploads-data:/app/backend/public/uploads
+      - manual-execution-evidence:/app/backend/private/manual-execution-evidence
+      - automation-artifacts:/app/backend/private/automation-artifacts
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:8000/api/health/').then((r) => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+
+  redis:
+    image: redis:7.4-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  automation-worker:
+    image: ${UNITTCMS_WORKER_IMAGE:-ghcr.io/danielrondongarcia/unittcms-automation-worker:latest}
+    profiles: ['automation-worker']
+    depends_on:
+      unittcms:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ['node', 'entrypoint.js']
+    environment:
+      - SERVICE_ROLE=worker
+      - AUTOMATION_EXECUTION_MODE=real
+      - AUTOMATION_PHASE0_READY=${AUTOMATION_PHASE0_READY:-false}
+      - UNITTCMS_HERCULES_COMPAT_REAL=${UNITTCMS_HERCULES_COMPAT_REAL:-0}
+      - AUTOMATION_REDIS_URL=redis://redis:6379
+      - AUTOMATION_WORKER_MODULE=./backend/automation/worker-bootstrap.js
+      - AUTOMATION_ARTIFACT_ROOT=/app/backend/private/automation-artifacts
+      - AUTOMATION_HERCULES_WORKDIR=/app/backend/private/hercules-work
+      - AUTOMATION_HERCULES_VOLUME=${AUTOMATION_HERCULES_VOLUME:-unittcms_hercules-work}
+      - AUTOMATION_HERCULES_IMAGE=${AUTOMATION_HERCULES_IMAGE:-ghcr.io/danielrondongarcia/testzeus-hercules:latest}
+      - AUTOMATION_WORKER_SECRET_FILE=/run/secrets/automation_worker_secret
+      - HERCULES_LLM_PROVIDER=${HERCULES_LLM_PROVIDER:-openai-compatible}
+      - HERCULES_LLM_MODEL=${HERCULES_LLM_MODEL:-}
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-}
+      - LITELLM_API_KEY_FILE=/run/secrets/litellm_api_key
+      - OLLAMA_API_KEY_FILE=/run/secrets/ollama_api_key
+    volumes:
+      - db-data:/app/backend/database
+      - automation-artifacts:/app/backend/private/automation-artifacts
+      - hercules-work:/app/backend/private/hercules-work
+      # The worker secret is mandatory; provider key files are optional and selected
+      # by the worker provider. These files are never mounted into the API service.
+      - type: bind
+        source: ${AUTOMATION_SECRETS_DIR_HOST:-./.secrets}
+        target: /run/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      # This trusted, opt-in worker invokes the host Docker CLI for Hercules.
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+
+volumes:
+  db-data:
+  redis-data:
+  uploads-data:
+    name: ${UNITTCMS_UPLOADS_VOLUME:-unittcms_uploads}
+  manual-execution-evidence:
+  automation-artifacts:
+  hercules-work:
+    name: ${AUTOMATION_HERCULES_VOLUME:-unittcms_hercules-work}

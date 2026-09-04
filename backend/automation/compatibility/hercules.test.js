@@ -40,12 +40,11 @@ function writeEvidence(root, secret) {
 }
 const childProcess = (pid = 41) => Object.assign(new EventEmitter(), { pid });
 describe('Hercules compatibility contract', () => {
-  it('pins the release, digest, English feature, and fixed container argv', () => {
+  it('uses the published Hercules release, English feature, and fixed container argv', () => {
     const root = makeRoot();
     const invocation = hercules.buildHerculesInvocation(root);
-    expect(hercules.HERCULES_CONTRACT.image).toBe(
-      'testzeus/hercules:0.1.2@sha256:11ff3700104f92230bafdff1e85f43b8932e8a7df5ab85b7f7d00d3cea61f52c'
-    );
+    expect(hercules.HERCULES_CONTRACT.release).toBe('1.0.1');
+    expect(hercules.HERCULES_CONTRACT.image).toBe('ghcr.io/danielrondongarcia/testzeus-hercules:latest');
     expect(hercules.validateCanonicalFeature(hercules.CANONICAL_FEATURE).valid).toBe(true);
     expect(
       hercules.validateCanonicalFeature(
@@ -97,13 +96,14 @@ describe('Hercules compatibility contract', () => {
     expect(invocation.argv).not.toContain('--output-path');
     expect(invocation.argv).not.toContain('--test-data-path');
     expect(invocation.argv).not.toContain('--project-base');
+    expect(invocation.argv).not.toContain('--pull');
     expect(invocation.argv).not.toContain('HERCULES_LLM_PROVIDER');
     expect(invocation.argv).not.toContain('HERCULES_LLM_MODEL');
     expect(invocation.argv).not.toContain('LITELLM_BASE_URL');
     expect(invocation.argv).not.toContain('LITELLM_API_KEY');
     expect(hercules.buildHerculesInvocation(root, '').argv).toContain(hercules.HERCULES_CONTRACT.image);
-    const localImage = 'testzeus/hercules:0.1.2-amd64';
-    expect(hercules.buildHerculesInvocation(root, localImage).argv).toEqual(expect.arrayContaining([localImage]));
+    const overrideImage = 'ghcr.io/danielrondongarcia/testzeus-hercules:1.0.1';
+    expect(hercules.buildHerculesInvocation(root, overrideImage).argv).toEqual(expect.arrayContaining([overrideImage]));
   });
   it('uses the supplied named volume instead of a host bind mount', () => {
     const root = makeRoot();
@@ -275,7 +275,7 @@ describe('Hercules compatibility contract', () => {
       evidenceRoot: workspace,
       feature: hercules.CANONICAL_FEATURE,
       allowedHosts: ['example.com'],
-      image: 'testzeus/hercules:0.1.2-amd64',
+      image: 'ghcr.io/danielrondongarcia/testzeus-hercules:1.0.1',
       workVolume: 'unittcms_hercules-work',
       volumeRoot: root,
       runner: async (invocation, options) => {
@@ -293,7 +293,7 @@ describe('Hercules compatibility contract', () => {
     });
     expect(result.ready).toBe(false);
     expect(result.errors).toContain('pass/fail exit semantics proof is required');
-    expect(result.invocation.argv).toContain('testzeus/hercules:0.1.2-amd64');
+    expect(result.invocation.argv).toContain('ghcr.io/danielrondongarcia/testzeus-hercules:1.0.1');
   });
   it.each(['', 'has space', 'has/slash', 'has\\slash', 'has\u0000control', '.hidden', '-leading', 'a'.repeat(256)])(
     'rejects unsafe Hercules volume overrides: %s',
