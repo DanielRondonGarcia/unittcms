@@ -28,5 +28,5 @@ export default function Page({ params }: { params: { projectId: string; locale: 
     previewUnavailable: reports('preview_unavailable'),
   };
 
-  return <ReportsPage projectId={params.projectId} messages={messages} />;
+  return <ReportsPage projectId={params.projectId} locale={params.locale as LocaleCodeType} messages={messages} />;
 }

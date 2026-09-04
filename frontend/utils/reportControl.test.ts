@@ -20,7 +20,7 @@ describe('report control frontend boundary', () => {
   });
 
   it('builds an all-scenarios request with exactly one selected run', () => {
-    expect(buildReportRequest({ selection: { mode: 'all' }, runId: '8', format: 'html' })).toEqual({
+    expect(buildReportRequest({ selection: { mode: 'all' }, runId: '8', format: 'html', locale: 'es' })).toEqual({
       ok: true,
       data: { selection: { mode: 'all' }, execution: { runId: 8 }, format: 'html' },
     });
@@ -127,5 +127,35 @@ describe('report control frontend boundary', () => {
         }),
       })
     );
+  });
+
+  it('sends the UI locale as Accept-Language while keeping the JSON body canonical', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      response('<html lang="es"></html>', 200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="project-report.html"',
+      })
+    );
+
+    const result = await previewReport('jwt', 17, {
+      selection: { mode: 'all' },
+      runId: 8,
+      locale: 'es',
+    });
+
+    expect(result).toMatchObject({ ok: true, data: { format: 'html' } });
+    const [, requestInit] = vi.mocked(fetch).mock.calls[0] ?? [];
+    expect(requestInit?.headers).toEqual(
+      expect.objectContaining({
+        Authorization: 'Bearer jwt',
+        'Content-Type': 'application/json',
+        'Accept-Language': 'es',
+      })
+    );
+    expect(JSON.parse(String(requestInit?.body))).toEqual({
+      selection: { mode: 'all' },
+      execution: { runId: 8 },
+      format: 'html',
+    });
   });
 });

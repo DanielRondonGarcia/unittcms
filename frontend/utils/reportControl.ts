@@ -39,7 +39,7 @@ export type {
 };
 export type ReportControlError = ApiError & { messageKey: ReportMessageKey };
 export type ReportResult<T> = { ok: true; data: T } | { ok: false; error: ReportControlError };
-type ReportPreviewInput = Pick<ReportControlInput, 'selection' | 'runId'>;
+type ReportPreviewInput = Pick<ReportControlInput, 'selection' | 'runId' | 'locale'>;
 
 const apiServer = Config.apiServer;
 const MAX_REPORT_BYTES = 10 * 1024 * 1024;
@@ -173,9 +173,14 @@ export async function requestReport(
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
 
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${jwt}`,
+    };
+    if (typeof input.locale === 'string' && input.locale.trim()) headers['Accept-Language'] = input.locale.trim();
     const response = await fetch(`${apiServer}/projects/${id}/reports`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      headers,
       body: JSON.stringify(request.data),
       signal: controller.signal,
     });

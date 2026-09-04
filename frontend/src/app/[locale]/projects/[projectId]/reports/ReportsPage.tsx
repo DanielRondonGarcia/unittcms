@@ -15,8 +15,9 @@ import {
   type ReportScenarioOption,
   type ReportsMessages,
 } from '@/types/report';
+import type { LocaleCodeType } from '@/types/locale';
 
-type Props = { projectId: string; messages: ReportsMessages };
+type Props = { projectId: string; locale: LocaleCodeType; messages: ReportsMessages };
 type BusyState = 'runs' | 'scenarios' | 'preview' | ReportFormat | null;
 type PageError = { message: string; code?: string; correlationId?: string };
 const apiServer = Config.apiServer;
@@ -49,7 +50,7 @@ function saveOutput(output: ReportOutput): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export default function ReportsPage({ projectId, messages }: Props) {
+export default function ReportsPage({ projectId, locale, messages }: Props) {
   const { token } = useContext(TokenContext);
   const accessToken = token.access_token;
   const [runs, setRuns] = useState<ReportRunOption[]>([]);
@@ -104,6 +105,7 @@ export default function ReportsPage({ projectId, messages }: Props) {
     selection: selectionMode === 'all' ? { mode: 'all' } : { mode: 'explicit', scenarioIds: Array.from(selectedIds) },
     runId: selectedRunId,
     format: requestedFormat,
+    locale,
   });
 
   const runReport = async (intent: 'preview' | 'download', requestedFormat: ReportFormat) => {
@@ -114,7 +116,11 @@ export default function ReportsPage({ projectId, messages }: Props) {
       const input = inputFor(requestedFormat);
       const result =
         intent === 'preview'
-          ? await previewReport(accessToken, projectId, { selection: input.selection, runId: input.runId })
+          ? await previewReport(accessToken, projectId, {
+              selection: input.selection,
+              runId: input.runId,
+              locale: input.locale,
+            })
           : await downloadReport(accessToken, projectId, input);
       if (!result.ok) {
         setError(errorDetails(result.error, messages.requestError));

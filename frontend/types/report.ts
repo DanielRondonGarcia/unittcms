@@ -15,6 +15,8 @@ export type ReportControlInput = {
   runId: ReportIdentifier;
   format: unknown;
   intent?: unknown;
+  /** UI locale used only for human-readable renderer output; never serialized into the canonical report request. */
+  locale?: string;
 };
 export type ReportRequest = {
   selection: ReportSelection;
