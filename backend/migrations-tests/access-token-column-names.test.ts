@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { down, up } from './20260905010000-fix-access-token-column-names.js';
+import { down, up } from '../migrations/20260905010000-fix-access-token-column-names.js';
 
 const camelCaseColumns = {
   userId: {},
