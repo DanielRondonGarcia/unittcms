@@ -346,7 +346,7 @@ describe('ProfileSettingsPage MCP access-token lifecycle', () => {
     expect(second.container.querySelector('[name="mcp-token-secret"]')).toBeNull();
   });
 
-  it('requires revoke confirmation and marks the confirmed token as revoked', async () => {
+  it('requires revoke confirmation and removes the confirmed token from the operational list', async () => {
     mocks.listAccessTokens.mockResolvedValue([metadata]);
     const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
     window.confirm = confirm;
@@ -364,10 +364,22 @@ describe('ProfileSettingsPage MCP access-token lifecycle', () => {
     });
 
     expect(mocks.revokeAccessToken).toHaveBeenCalledWith('jwt', metadata.id);
-    expect(container.textContent).toContain(messages.tokenStatusRevoked);
+    expect(container.textContent).not.toContain(metadata.tokenPrefix);
+    expect(container.textContent).not.toContain(messages.tokenStatusRevoked);
     expect(
       Array.from(container.querySelectorAll('button')).some((button) => button.textContent === messages.tokenRevoke)
     ).toBe(false);
+  });
+
+  it('hides revoked tokens returned by the API while retaining them in backend audit data', async () => {
+    const revokedToken = { ...metadata, revokedAt: '2030-01-02T00:00:00.000Z' };
+    mocks.listAccessTokens.mockResolvedValue([revokedToken]);
+
+    const { container } = await renderPage();
+
+    expect(container.textContent).toContain(messages.tokenNoTokens);
+    expect(container.textContent).not.toContain(revokedToken.tokenPrefix);
+    expect(container.textContent).not.toContain(messages.tokenStatusRevoked);
   });
 
   it('renders API error states for metadata loading, creation, and revocation without logging secrets', async () => {

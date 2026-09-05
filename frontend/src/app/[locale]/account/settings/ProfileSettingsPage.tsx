@@ -131,7 +131,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
       setTokenError('');
       try {
         const tokens = await listAccessTokens(context.token.access_token);
-        if (isMounted) setAccessTokens(tokens);
+        if (isMounted) setAccessTokens(tokens.filter((token) => !token.revokedAt));
       } catch (error) {
         logError('Error loading access tokens:', error);
         if (isMounted) {
@@ -434,12 +434,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
     setTokenError('');
     try {
       await revokeAccessToken(context.token.access_token, token.id);
-      const revokedAt = new Date().toISOString();
-      setAccessTokens((currentTokens) =>
-        currentTokens.map((currentToken) =>
-          currentToken.id === token.id ? { ...currentToken, revokedAt } : currentToken
-        )
-      );
+      setAccessTokens((currentTokens) => currentTokens.filter((currentToken) => currentToken.id !== token.id));
       addToast({ title: messages.successTitle, color: 'success', description: messages.tokenRevokeSuccess });
     } catch (error) {
       logError('Error revoking access token:', error);
