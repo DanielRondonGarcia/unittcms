@@ -174,6 +174,7 @@ const messages = {
   tokenCreated: 'Token created',
   tokenSecretWarning: 'Copy this secret now. It will not be shown again.',
   tokenHeaderGuidance: 'Use this token in the Authorization header.',
+  tokenUsageExample: 'Example MCP initialize request.',
   tokenQueryStringWarning: 'Query-string tokens are not accepted.',
   tokenDismissSecret: 'Dismiss secret',
   tokenMetadata: 'Token metadata',
@@ -286,6 +287,9 @@ describe('ProfileSettingsPage MCP access-token lifecycle', () => {
     });
     expect(container.querySelector<HTMLInputElement>('[name="mcp-token-secret"]')?.value).toBe('mcp-secret-once');
     expect(container.textContent).toContain(messages.tokenSecretWarning);
+    expect(container.textContent).toContain('/api/mcp');
+    expect(container.textContent).toContain('Authorization: Bearer <token>');
+    expect(container.textContent).toContain('"jsonrpc": "2.0"');
     expect(mocks.storeToken).not.toHaveBeenCalledWith(expect.objectContaining({ secret: 'mcp-secret-once' }));
 
     await act(async () => {

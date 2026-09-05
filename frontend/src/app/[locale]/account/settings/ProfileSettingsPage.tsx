@@ -65,6 +65,7 @@ type ProfileSettingsPageMessages = {
   tokenCreated: string;
   tokenSecretWarning: string;
   tokenHeaderGuidance: string;
+  tokenUsageExample: string;
   tokenQueryStringWarning: string;
   tokenDismissSecret: string;
   tokenMetadata: string;
@@ -732,6 +733,26 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
             <code className="mt-2 block break-all rounded bg-default-100 p-3 text-sm" translate="no">
               Authorization: Bearer &lt;your-token&gt;
             </code>
+            <p className="mt-3 text-sm text-gray-500">{messages.tokenUsageExample}</p>
+            <pre className="mt-2 overflow-x-auto rounded bg-default-100 p-3 text-xs leading-5" translate="no">
+              {`curl --request POST https://<your-host>/api/mcp \\
+  --header "Accept: application/json, text/event-stream" \\
+  --header "Authorization: Bearer <token>" \\
+  --header "Content-Type: application/json" \\
+  --data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "<protocol-version>",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "<client-name>",
+        "version": "<client-version>"
+      }
+    }
+  }'`}
+            </pre>
             <p className="mt-3 text-sm text-gray-500">{messages.tokenQueryStringWarning}</p>
           </CardBody>
           <CardFooter className="flex justify-end">

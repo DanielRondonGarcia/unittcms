@@ -49,6 +49,7 @@ export default function Page({ params }: PageType) {
     tokenCreated: t('token_created'),
     tokenSecretWarning: t('token_secret_warning'),
     tokenHeaderGuidance: t('token_header_guidance'),
+    tokenUsageExample: t('token_usage_example'),
     tokenQueryStringWarning: t('token_query_string_warning'),
     tokenDismissSecret: t('token_dismiss_secret'),
     tokenMetadata: t('token_metadata'),

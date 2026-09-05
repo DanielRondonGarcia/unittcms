@@ -19,7 +19,7 @@ function getAllKeys(obj: unknown, prefix = ''): string[] {
 }
 
 describe('Locale message keys consistency', () => {
-  const CANONICAL_LOCALE_KEY_COUNT = 696;
+  const CANONICAL_LOCALE_KEY_COUNT = 697;
   const locales = [
     { name: 'de', data: de },
     { name: 'en', data: en },

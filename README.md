@@ -113,11 +113,34 @@ non-MCP routes; no token is created implicitly for an existing account.
    scope, and save the secret when it is shown. The full secret is shown only
    once; later screens expose metadata only.
 
-MCP clients must call `/mcp` with the bearer header below. Query-string tokens
+MCP clients must call `/api/mcp` with the bearer header below. Query-string tokens
 are not supported and are rejected; never put an access token in a URL.
 
 ```http
 Authorization: Bearer <token>
+```
+
+The generated secret is shown only once in Settings. Copy it before dismissing
+the notice, then replace the placeholders in this concise MCP initialize request:
+
+```bash
+curl --request POST https://<your-host>/api/mcp \
+  --header 'Accept: application/json, text/event-stream' \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "<protocol-version>",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "<client-name>",
+        "version": "<client-version>"
+      }
+    }
+  }'
 ```
 
 Tokens expire after their configured 1–90 day lifetime (30 days by default).
