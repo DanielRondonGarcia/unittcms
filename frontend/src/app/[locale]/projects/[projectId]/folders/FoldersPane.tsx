@@ -132,12 +132,12 @@ export default function FoldersPane({ projectId, messages, locale }: Props) {
 
   return (
     <>
-      <div className="min-h-[calc(100vh-64px)]">
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
         <Button
           startContent={<Plus size={16} />}
           size="sm"
           variant="bordered"
-          className="m-2"
+          className="m-2 shrink-0"
           isDisabled={!context.isProjectDeveloper(Number(projectId))}
           onPress={() => openDialogForCreate()}
         >
@@ -145,35 +145,37 @@ export default function FoldersPane({ projectId, messages, locale }: Props) {
         </Button>
 
         {treeData.length > 0 && (
-          <Tree
-            data={treeData}
-            className="w-full"
-            indent={16}
-            rowHeight={42}
-            overscanCount={5}
-            paddingTop={20}
-            paddingBottom={20}
-            padding={20}
-            width="100%"
-            openByDefault={false}
-            disableDrop={true}
-            disableDrag={true}
-          >
-            {(props) => (
-              <div onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, props.node.id)}>
-                <FolderItem
-                  {...props}
-                  projectId={projectId}
-                  selectedFolder={selectedFolder}
-                  locale={locale}
-                  messages={messages}
-                  openDialogForCreate={openDialogForCreate}
-                  onEditClick={onEditClick}
-                  onDeleteClick={onDeleteClick}
-                />
-              </div>
-            )}
-          </Tree>
+          <div className="min-h-0 min-w-0 flex-1">
+            <Tree
+              data={treeData}
+              className="h-full w-full"
+              indent={16}
+              rowHeight={42}
+              overscanCount={5}
+              paddingTop={20}
+              paddingBottom={20}
+              padding={20}
+              width="100%"
+              openByDefault={false}
+              disableDrop={true}
+              disableDrag={true}
+            >
+              {(props) => (
+                <div onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, props.node.id)}>
+                  <FolderItem
+                    {...props}
+                    projectId={projectId}
+                    selectedFolder={selectedFolder}
+                    locale={locale}
+                    messages={messages}
+                    openDialogForCreate={openDialogForCreate}
+                    onEditClick={onEditClick}
+                    onDeleteClick={onDeleteClick}
+                  />
+                </div>
+              )}
+            </Tree>
+          </div>
         )}
       </div>
 
