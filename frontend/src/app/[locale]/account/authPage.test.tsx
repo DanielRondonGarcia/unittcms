@@ -11,6 +11,7 @@ type InputChange = (event: { target: { value: string } }) => void;
 const mocks = vi.hoisted(() => ({
   signIn: vi.fn(),
   signUp: vi.fn(),
+  fetchRegistrationEnabled: vi.fn(),
   setToken: vi.fn(),
   storeToken: vi.fn(),
   routerPush: vi.fn(),
@@ -22,6 +23,10 @@ vi.mock('./authControl', () => ({
   signIn: mocks.signIn,
   signUp: mocks.signUp,
   signInAsGuest: vi.fn(),
+}));
+
+vi.mock('@/utils/registrationAvailable', () => ({
+  fetchRegistrationEnabled: mocks.fetchRegistrationEnabled,
 }));
 
 vi.mock('@/utils/TokenProvider', async () => {
@@ -60,7 +65,7 @@ vi.mock('@/components/icons', () => ({ OpenIdIcon: () => null }));
 vi.mock('lucide-react', () => ({ ChevronRight: () => null, Eye: () => null, EyeOff: () => null }));
 
 const messageKeys =
-  'title linkTitle submitTitle signInAsGuest signInWithSso or email username password confirmPassword invalidEmail invalidPassword usernameEmpty passwordDoesNotMatch EmailAlreadyExist emailNotExist signupError signinError demoPageWarning'.split(
+  'title linkTitle submitTitle signInAsGuest signInWithSso or email username password confirmPassword invalidEmail invalidPassword usernameEmpty passwordDoesNotMatch EmailAlreadyExist emailNotExist signupError registrationDisabled signinError demoPageWarning'.split(
     ' '
   );
 const messages = Object.fromEntries(messageKeys.map((key) => [key, key])) as Parameters<typeof AuthPage>[0]['messages'];
@@ -109,6 +114,7 @@ describe('authentication locale fallback', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.fetchRegistrationEnabled.mockResolvedValue(true);
     mocks.inputs.clear();
     mocks.buttons.clear();
   });

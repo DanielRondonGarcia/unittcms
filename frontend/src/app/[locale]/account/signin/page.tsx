@@ -33,6 +33,7 @@ export default async function Page({ params }: PageType) {
     EmailAlreadyExist: t('email_already_exist'),
     emailNotExist: t('email_not_exist'),
     signupError: t('signup_error'),
+    registrationDisabled: t('registration_disabled'),
     signinError: t('signin_error'),
     demoPageWarning: t('demo_page_warning'),
   };

@@ -4,20 +4,32 @@ import { DataTypes } from 'sequelize';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import defineUser from '../../models/users.js';
+import { isSelfRegistrationEnabled, isSuperuserConfigured } from '../../config/config.js';
 import { roles, defaultDangerKey } from './authSettings.js';
 
 export default function (sequelize) {
   const User = defineUser(sequelize, DataTypes);
   const secretKey = process.env.SECRET_KEY || defaultDangerKey;
 
+  router.get('/registration-enabled', (req, res) => {
+    res.json({ enabled: isSelfRegistrationEnabled() });
+  });
+
   router.post('/signup', async (req, res) => {
     try {
+      if (!isSelfRegistrationEnabled()) {
+        return res.status(403).json({
+          code: 'self_registration_disabled',
+          error: 'self_registration_disabled',
+        });
+      }
+
       const { email, password, username } = req.body;
       const hashedPassword = await bcrypt.hash(password, 10);
 
       const userCount = await User.count();
       const initialRole =
-        userCount > 0
+        userCount > 0 || isSuperuserConfigured()
           ? roles.findIndex((entry) => entry.uid === 'user')
           : roles.findIndex((entry) => entry.uid === 'administrator');
 

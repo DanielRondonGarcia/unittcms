@@ -110,6 +110,7 @@
     "email_already_exist": "El correo electrónico ya está registrado",
     "email_not_exist": "No se encontró la dirección de correo electrónico",
     "signup_error": "El registro falló",
+    "registration_disabled": "El registro de nuevas cuentas está deshabilitado actualmente.",
     "signin_error": "El inicio de sesión falló",
     "demo_page_warning": "Este es un entorno de demostración; los datos que introduzcas se restablecerán periódicamente.",
     "your_projects": "Tus proyectos",

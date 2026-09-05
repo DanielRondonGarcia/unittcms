@@ -110,6 +110,7 @@
     "email_already_exist": "邮箱已被注册",
     "email_not_exist": "未找到该邮箱地址",
     "signup_error": "注册失败",
+    "registration_disabled": "目前已停用新账户注册。",
     "signin_error": "登录失败",
     "demo_page_warning": "这是一个演示环境，您输入的任何数据都将被定期重置。",
     "your_projects": "您的项目",

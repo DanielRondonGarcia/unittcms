@@ -17,6 +17,10 @@ services:
       - IS_DEMO=false # set to true to seed the database
       - API_PATH=${API_PATH:-/api}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:8000}
+      - ALLOW_SELF_REGISTRATION=${ALLOW_SELF_REGISTRATION:-true}
+      - SUPERUSER_EMAIL=${SUPERUSER_EMAIL:-}
+      - SUPERUSER_USERNAME=${SUPERUSER_USERNAME:-}
+      - SUPERUSER_PASSWORD=${SUPERUSER_PASSWORD:-}
       - MANUAL_EXECUTION_ENABLED=${MANUAL_EXECUTION_ENABLED:-true}
       - MANUAL_EXECUTION_EVIDENCE_ROOT=/app/backend/private/manual-execution-evidence
       - AUTOMATION_EXECUTION_MODE=${AUTOMATION_EXECUTION_MODE:-disabled}

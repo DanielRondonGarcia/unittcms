@@ -1,16 +1,16 @@
 <p align="center">
   <a href="https://www.unittcms.org/en">
-    <img width="20%" src="https://raw.githubusercontent.com/kimatata/unittcms/refs/heads/main/frontend/public/favicon/icon-192.png" alt="UnitTCMS" />
+    <img width="20%" src="https://raw.githubusercontent.com/DanielRondonGarcia/unittcms/refs/heads/main/frontend/public/favicon/icon-192.png" alt="UnitTCMS" />
     <h1 align="center">UnitTCMS</h1>
   </a>
 </p>
 </br>
 <p align="center">
-  <a href="https://github.com/kimatata/unittcms/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/kimatata/unittcms" alt="License">
+  <a href="https://github.com/DanielRondonGarcia/unittcms/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/DanielRondonGarcia/unittcms" alt="License">
   </a>
-  <a href="https://github.com/kimatata/unittcms/releases">
-    <img src="https://img.shields.io/github/v/release/kimatata/unittcms" alt="Release">
+  <a href="https://github.com/DanielRondonGarcia/unittcms/releases">
+    <img src="https://img.shields.io/github/v/release/DanielRondonGarcia/unittcms" alt="Release">
   </a>
 </p>
 
@@ -28,7 +28,7 @@ Clone the repository, create a local environment file, and start the default
 API stack:
 
 ```bash
-git clone https://github.com/kimatata/unittcms.git
+git clone https://github.com/DanielRondonGarcia/unittcms.git
 cd unittcms
 cp .env.example .env
 # Replace SECRET_KEY in .env with a locally generated random value.
@@ -76,6 +76,15 @@ Database, uploads, private evidence, and automation work use Docker volumes.
 Set `UNITTCMS_UPLOADS_VOLUME` only when a different safe Docker volume name is
 needed for persisted uploads.
 
+Set `ALLOW_SELF_REGISTRATION=false` to disable new local accounts. The values
+`false`, `0`, `no`, and `off` are treated as disabled; existing local and SSO
+accounts can still sign in. To bootstrap an administrator, set
+`SUPERUSER_EMAIL`; optionally set `SUPERUSER_USERNAME`, which defaults to the
+email local-part. `SUPERUSER_PASSWORD` is required only when that email does not
+already exist, is bcrypt-hashed at startup, and never replaces an existing
+password. If no superuser email is configured, the first signup keeps the
+existing administrator behavior.
+
 Hercules is launched by the worker as a child container through the Docker
 socket, not as a Compose service. Before enabling the worker, pull its image on
 the same Docker host:
@@ -95,6 +104,40 @@ docker compose --env-file .env -f docker-compose.production.yaml --profile autom
 Set `AUTOMATION_PHASE0_READY=true` only after the separate compatibility proof
 has been reviewed. The worker invocation intentionally does not use Docker's
 per-execution `--pull`; pre-pull the published Hercules image after upgrades.
+
+## Recent product capabilities
+
+### Layered dark mode
+
+The dark theme uses calm blue-gray surfaces, semantic status colors, consistent
+focus states, and darker HeroUI form fields that remain visually distinct from
+their surrounding cards. The same treatment applies to inputs, textareas, and
+selectors across the application, including folder and authentication dialogs.
+
+### Run workspace improvements
+
+- The case selector fills the available viewport height, including its empty
+  state and folder tree.
+- The case-detail pane appears with a soft transition without remounting the
+  run editor or losing focus.
+- A run with no selected case uses the full workspace instead of showing an
+  empty right sidebar.
+- Gherkin steps, examples tables, execution history, and diagnostics use
+  clearer dark-mode hierarchy and softer dividers.
+
+### Reports workspace
+
+Reports can be generated from a selected test execution and either all project
+scenarios or an explicit scenario selection. The workspace supports preview and
+download output in JSON, HTML, PDF, and DOCX formats using the themed HeroUI
+selector and controls.
+
+### Production account policy
+
+Self-registration and automatic OIDC account provisioning can be disabled at
+runtime with `ALLOW_SELF_REGISTRATION=false`. A deployment can also bootstrap
+or promote one administrator using `SUPERUSER_EMAIL`, with optional
+`SUPERUSER_USERNAME` and first-creation-only `SUPERUSER_PASSWORD` values.
 
 ## Hercules LLM configuration
 
@@ -272,6 +315,7 @@ UnitTCMS currently supports the following languages:
 
 - German (de)
 - English (en)
+- Spanish (es)
 - Portuguese (pt-BR)
 - Chinese (zh-CN)
 - Japanese (ja)

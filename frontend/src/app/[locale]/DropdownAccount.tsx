@@ -1,11 +1,12 @@
 'use client';
 import { Button, DropdownTrigger, Dropdown, DropdownMenu, DropdownItem } from '@heroui/react';
 import { ChevronDown, PenTool, ArrowRightFromLine, ArrowRightToLine, Settings } from 'lucide-react';
-import { useContext } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { TokenContext } from '@/utils/TokenProvider';
 import { useRouter } from '@/src/i18n/routing';
 import { AccountDropDownMessages } from '@/types/user';
 import UserAvatar from '@/components/UserAvatar';
+import { fetchRegistrationEnabled } from '@/utils/registrationAvailable';
 
 type Props = {
   messages: AccountDropDownMessages;
@@ -16,6 +17,18 @@ type Props = {
 export default function DropdownAccount({ messages, locale, onItemPress }: Props) {
   const router = useRouter();
   const context = useContext(TokenContext);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    void fetchRegistrationEnabled().then((enabled) => {
+      if (isMounted) setRegistrationEnabled(enabled);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const signOut = () => {
     context.setToken({
@@ -69,15 +82,19 @@ export default function DropdownAccount({ messages, locale, onItemPress }: Props
         onItemPress();
       },
     },
-    {
-      uid: 'signup',
-      title: messages.signUp,
-      icon: <PenTool size={16} />,
-      onPress: () => {
-        router.push('/account/signup', { locale: locale });
-        onItemPress();
-      },
-    },
+    ...(registrationEnabled
+      ? [
+          {
+            uid: 'signup',
+            title: messages.signUp,
+            icon: <PenTool size={16} />,
+            onPress: () => {
+              router.push('/account/signup', { locale: locale });
+              onItemPress();
+            },
+          },
+        ]
+      : []),
   ];
 
   return (

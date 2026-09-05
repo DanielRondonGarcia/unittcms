@@ -110,6 +110,7 @@
     "email_already_exist": "E-mail já cadastrado",
     "email_not_exist": "Endereço de e-mail não encontrado",
     "signup_error": "Falha no cadastro",
+    "registration_disabled": "O cadastro de novas contas está desativado no momento.",
     "signin_error": "Falha no login",
     "demo_page_warning": "Este é um ambiente de demonstração, quaisquer dados que você inserir serão redefinidos periodicamente.",
     "your_projects": "Seus Projetos",

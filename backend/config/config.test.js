@@ -1,19 +1,37 @@
 import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isManualExecutionEnabled, registerManualExecutionRoute } from './config.js';
+import {
+  isFalseLike,
+  isManualExecutionEnabled,
+  isSelfRegistrationEnabled,
+  registerManualExecutionRoute,
+} from './config.js';
 
 describe('manual execution feature flag', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('defaults to enabled and only disables for a false value', () => {
+  it('defaults to enabled and accepts all supported false-like values', () => {
     expect(isManualExecutionEnabled(undefined)).toBe(true);
     expect(isManualExecutionEnabled('true')).toBe(true);
     expect(isManualExecutionEnabled('')).toBe(true);
     expect(isManualExecutionEnabled('invalid')).toBe(true);
     expect(isManualExecutionEnabled(' false ')).toBe(false);
+    expect(isManualExecutionEnabled('0')).toBe(false);
+    expect(isManualExecutionEnabled(' NO ')).toBe(false);
+    expect(isManualExecutionEnabled('off')).toBe(false);
+  });
+
+  it('uses the same false-like parsing for self-registration', () => {
+    expect(isSelfRegistrationEnabled(undefined)).toBe(true);
+    expect(isSelfRegistrationEnabled('true')).toBe(true);
+    expect(isSelfRegistrationEnabled('false')).toBe(false);
+    expect(isSelfRegistrationEnabled('0')).toBe(false);
+    expect(isSelfRegistrationEnabled('no')).toBe(false);
+    expect(isSelfRegistrationEnabled('off')).toBe(false);
+    expect(isFalseLike('invalid')).toBe(false);
   });
 
   it('does not register the manual API when disabled or invoke its service', async () => {

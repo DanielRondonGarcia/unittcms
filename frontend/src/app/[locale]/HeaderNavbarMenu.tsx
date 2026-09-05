@@ -1,5 +1,5 @@
 'use client';
-import { useState, useContext } from 'react';
+import { useState, useContext, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import {
@@ -24,6 +24,7 @@ import { TokenContext } from '@/utils/TokenProvider';
 import UserAvatar from '@/components/UserAvatar';
 import { LocaleCodeType } from '@/types/locale';
 import Config from '@/config/config';
+import { fetchRegistrationEnabled } from '@/utils/registrationAvailable';
 
 type NabbarMenuMessages = {
   projects: string;
@@ -53,7 +54,19 @@ type Props = {
 
 export default function HeaderNavbarMenu({ messages, locale }: Props) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const context = useContext(TokenContext);
+
+  useEffect(() => {
+    let isMounted = true;
+    void fetchRegistrationEnabled().then((enabled) => {
+      if (isMounted) setRegistrationEnabled(enabled);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const commonLinks = [
     {
@@ -137,7 +150,7 @@ export default function HeaderNavbarMenu({ messages, locale }: Props) {
       </NavbarContent>
 
       <NavbarContent className="basis-1 pl-4" justify="end">
-        <NextUiLink isExternal href="https://github.com/kimatata/unittcms" aria-label={messages.github}>
+        <NextUiLink isExternal href="https://github.com/DanielRondonGarcia/unittcms" aria-label={messages.github}>
           <GithubIcon className="text-default-500" />
         </NextUiLink>
         <ThemeSwitch />
@@ -240,24 +253,30 @@ export default function HeaderNavbarMenu({ messages, locale }: Props) {
                   base: 'h-10 text-large',
                 }}
               >
-                <ListboxItem
-                  key="signin"
-                  startContent={<ArrowRightToLine size={16} />}
-                  title={messages.signIn}
-                  onPress={() => {
-                    router.push('/account/signin', { locale: locale });
-                    setIsMenuOpen(false);
-                  }}
-                />
-                <ListboxItem
-                  key="signup"
-                  title={messages.signUp}
-                  startContent={<PenTool size={16} />}
-                  onPress={() => {
-                    router.push('/account/signup', { locale: locale });
-                    setIsMenuOpen(false);
-                  }}
-                />
+                {[
+                  <ListboxItem
+                    key="signin"
+                    startContent={<ArrowRightToLine size={16} />}
+                    title={messages.signIn}
+                    onPress={() => {
+                      router.push('/account/signin', { locale: locale });
+                      setIsMenuOpen(false);
+                    }}
+                  />,
+                  ...(registrationEnabled
+                    ? [
+                        <ListboxItem
+                          key="signup"
+                          title={messages.signUp}
+                          startContent={<PenTool size={16} />}
+                          onPress={() => {
+                            router.push('/account/signup', { locale: locale });
+                            setIsMenuOpen(false);
+                          }}
+                        />,
+                      ]
+                    : []),
+                ]}
               </Listbox>
               <p className="font-bold">{messages.languages}</p>
               <Listbox

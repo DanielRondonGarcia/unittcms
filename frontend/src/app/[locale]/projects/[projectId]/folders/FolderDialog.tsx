@@ -90,6 +90,7 @@ export default function FolderDialog({ isOpen, editingFolder, onCancel, onSubmit
           <Input
             type="text"
             label={messages.folderName}
+            className="dark-form-field"
             value={folderName.text}
             isInvalid={folderName.isValid}
             errorMessage={folderName.errorMessage}
@@ -102,6 +103,7 @@ export default function FolderDialog({ isOpen, editingFolder, onCancel, onSubmit
           />
           <Textarea
             label={messages.folderDetail}
+            className="dark-form-field"
             value={folderDetail.text}
             isInvalid={folderDetail.isValid}
             errorMessage={folderDetail.errorMessage}

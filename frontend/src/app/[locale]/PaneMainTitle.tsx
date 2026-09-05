@@ -56,7 +56,7 @@ export default function MainTitle({ locale }: Props) {
           showAnchorIcon
           as={NextUiLink}
           isExternal
-          href="https://github.com/kimatata/unittcms"
+          href="https://github.com/DanielRondonGarcia/unittcms"
           aria-label={ui('github')}
           color="primary"
           variant="bordered"

@@ -21,37 +21,47 @@ html.dark,
   --run-case-status-skipped: #8a98a6;
 }
 
-/* Keep default HeroUI form fields distinct from surrounding dark surfaces without changing light mode. */
-.dark .dark-form-field [data-slot='input-wrapper'],
-.dark .dark-form-field [data-slot='trigger'] {
+/* Keep all HeroUI form fields distinct from surrounding dark surfaces without changing light mode. */
+.dark [data-slot='input-wrapper'],
+.dark [data-slot='trigger'] {
   background-color: hsl(var(--heroui-background));
   border: 1px solid hsl(var(--heroui-divider));
 }
 
-.dark .dark-form-field [data-slot='input-wrapper'][data-hover='true'],
-.dark .dark-form-field [data-slot='trigger'][data-hover='true'] {
+.dark [data-slot='input-wrapper'][data-hover='true'],
+.dark [data-slot='trigger'][data-hover='true'],
+.dark [data-hover='true'] [data-slot='input-wrapper'],
+.dark [data-hover='true'] [data-slot='trigger'] {
   background-color: hsl(var(--heroui-content2));
 }
 
-.dark .dark-form-field [data-slot='input-wrapper'][data-focus='true'],
-.dark .dark-form-field [data-slot='trigger'][data-focus='true'] {
+.dark [data-slot='input-wrapper'][data-focus='true'],
+.dark [data-slot='trigger'][data-focus='true'],
+.dark [data-focus='true'] [data-slot='input-wrapper'],
+.dark [data-focus='true'] [data-slot='trigger'] {
   background-color: hsl(var(--heroui-content2));
   border-color: hsl(var(--heroui-primary));
 }
 
-.dark .dark-form-field[data-focus-visible='true'] [data-slot='input-wrapper'],
-.dark .dark-form-field [data-slot='trigger'][data-focus-visible='true'] {
+.dark [data-slot='input-wrapper'][data-focus-visible='true'],
+.dark [data-slot='trigger'][data-focus-visible='true'],
+.dark [data-focus-visible='true'] [data-slot='input-wrapper'],
+.dark [data-focus-visible='true'] [data-slot='trigger'] {
   outline: 2px solid hsl(var(--heroui-focus));
   outline-offset: 1px;
 }
 
-.dark .dark-form-field[data-invalid='true'] [data-slot='input-wrapper'],
-.dark .dark-form-field[data-invalid='true'] [data-slot='trigger'] {
+.dark [data-slot='input-wrapper'][data-invalid='true'],
+.dark [data-slot='trigger'][data-invalid='true'],
+.dark [data-invalid='true'] [data-slot='input-wrapper'],
+.dark [data-invalid='true'] [data-slot='trigger'] {
   border-color: hsl(var(--heroui-danger));
 }
 
-.dark .dark-form-field[data-disabled='true'] [data-slot='input-wrapper'],
-.dark .dark-form-field [data-slot='trigger'][data-disabled='true'] {
+.dark [data-slot='input-wrapper'][data-disabled='true'],
+.dark [data-slot='trigger'][data-disabled='true'],
+.dark [data-disabled='true'] [data-slot='input-wrapper'],
+.dark [data-disabled='true'] [data-slot='trigger'] {
   background-color: hsl(var(--heroui-content1));
   border-color: hsl(var(--heroui-divider));
 }

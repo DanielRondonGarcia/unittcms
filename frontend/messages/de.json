@@ -110,6 +110,7 @@
     "email_already_exist": "E-Mail bereits registriert",
     "email_not_exist": "E-Mail-Adresse nicht gefunden",
     "signup_error": "Registrierung fehlgeschlagen",
+    "registration_disabled": "Die Registrierung neuer Konten ist derzeit deaktiviert.",
     "signin_error": "Anmeldung fehlgeschlagen",
     "demo_page_warning": "Dies ist eine Demo-Umgebung. Alle Daten werden regelmäßig zurückgesetzt.",
     "your_projects": "Deine Projekte",

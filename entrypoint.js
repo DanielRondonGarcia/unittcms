@@ -79,6 +79,8 @@ async function startServer() {
     // Import the backend app
     const backendAppModule = await import('./backend/server.js');
     const backendApp = backendAppModule.default || backendAppModule;
+    const { ensureSuperuser } = await import('./backend/superuser.js');
+    await ensureSuperuser(backendAppModule.sequelize);
 
     console.log(`Mounting backend API at: ${API_PATH}`);
     server.use(API_PATH, backendApp);

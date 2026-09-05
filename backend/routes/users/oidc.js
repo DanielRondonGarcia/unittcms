@@ -3,7 +3,15 @@ import { auth } from 'express-openid-connect';
 import jwt from 'jsonwebtoken';
 import { DataTypes } from 'sequelize';
 import defineUser from '../../models/users.js';
-import { API_PATH, FRONTEND_ORIGIN, IS_PROD, PORT, SECRET_KEY } from '../../config/config.js';
+import {
+  API_PATH,
+  FRONTEND_ORIGIN,
+  IS_PROD,
+  PORT,
+  SECRET_KEY,
+  isSelfRegistrationEnabled,
+  isSuperuserConfigured,
+} from '../../config/config.js';
 import { roles } from './authSettings.js';
 
 const router = express.Router();
@@ -75,9 +83,13 @@ export default function (sequelize) {
       let user = await User.findOne({ where: { email } });
 
       if (!user) {
+        if (!isSelfRegistrationEnabled()) {
+          return res.redirect(`${signInURL}?error=registration_disabled`);
+        }
+
         const userCount = await User.count();
         const initialRole =
-          userCount > 0
+          userCount > 0 || isSuperuserConfigured()
             ? roles.findIndex((entry) => entry.uid === 'user')
             : roles.findIndex((entry) => entry.uid === 'administrator');
 

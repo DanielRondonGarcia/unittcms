@@ -8,11 +8,26 @@ export const IS_PROD = process.env.NODE_ENV === 'production';
 export const PORT = process.env.PORT || 8001;
 export const API_PATH = process.env.API_PATH || '/api';
 
+const FALSE_LIKE_VALUES = new Set(['false', '0', 'no', 'off']);
+
+export function isFalseLike(value) {
+  return typeof value === 'string' && FALSE_LIKE_VALUES.has(value.trim().toLowerCase());
+}
+
 export function isManualExecutionEnabled(value = process.env.MANUAL_EXECUTION_ENABLED) {
-  return typeof value !== 'string' || value.trim().toLowerCase() !== 'false';
+  return !isFalseLike(value);
+}
+
+export function isSelfRegistrationEnabled(value = process.env.ALLOW_SELF_REGISTRATION) {
+  return !isFalseLike(value);
+}
+
+export function isSuperuserConfigured(value = process.env.SUPERUSER_EMAIL) {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 export const MANUAL_EXECUTION_ENABLED = isManualExecutionEnabled();
+export const ALLOW_SELF_REGISTRATION = isSelfRegistrationEnabled();
 
 export function registerManualExecutionRoute(app, sequelize, routeFactory, enabled = MANUAL_EXECUTION_ENABLED) {
   if (enabled) app.use('/manual-executions', routeFactory(sequelize));

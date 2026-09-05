@@ -60,6 +60,7 @@ vi.mock('@/components/ThemeSwitch', () => ({ ThemeSwitch: () => null }));
 vi.mock('@/components/icons', () => ({ GithubIcon: () => null }));
 vi.mock('@/components/UserAvatar', () => ({ default: () => null }));
 vi.mock('@/config/config', () => ({ default: { isDemoSite: false } }));
+vi.mock('@/utils/registrationAvailable', () => ({ fetchRegistrationEnabled: () => Promise.resolve(true) }));
 vi.mock('./DropdownAccount', () => ({ default: () => null }));
 vi.mock('./DropdownLanguage', () => ({ default: () => null }));
 

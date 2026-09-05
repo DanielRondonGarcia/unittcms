@@ -67,6 +67,7 @@ export type AuthMessages = {
   EmailAlreadyExist: string;
   emailNotExist: string;
   signupError: string;
+  registrationDisabled: string;
   signinError: string;
   demoPageWarning: string;
 };
