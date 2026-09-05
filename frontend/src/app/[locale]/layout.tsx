@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { getTranslations } from 'next-intl/server';
 import { useTranslations } from 'next-intl';
 import { headers } from 'next/headers';
+import type { Viewport } from 'next';
 import Header from './Header';
 import { Providers } from './providers';
 import { LocaleCodeType } from '@/types/locale';
@@ -29,6 +30,13 @@ export async function generateMetadata({ params: { locale } }: { params: { local
   };
 }
 
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F9FAFB' },
+    { media: '(prefers-color-scheme: dark)', color: '#14181D' },
+  ],
+};
+
 export default function RootLayout({
   children,
   params: { locale },
@@ -50,7 +58,7 @@ export default function RootLayout({
           themeProps={{ attribute: 'class', defaultTheme: 'light' }}
           tokenProps={{ toastMessages: toastMessages, locale: locale }}
         >
-          <div className="relative flex flex-col min-h-screen light:bg-neutral-50 dark:bg-neutral-800">
+          <div className="relative flex flex-col min-h-screen light:bg-neutral-50 dark:bg-background">
             <Header locale={locale} />
             <main>{children}</main>
           </div>

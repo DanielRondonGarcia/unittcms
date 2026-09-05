@@ -6,6 +6,14 @@ import { TestRunCaseStatusMessages } from '@/types/status';
 import { ChartDataType } from '@/types/chart';
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
+const darkStatusChartColors: Record<string, string> = {
+  untested: '#79B8C6',
+  passed: '#79C5A0',
+  failed: '#E2939F',
+  retest: '#D3B276',
+  skipped: '#8A98A6',
+};
+
 type Props = {
   statusCounts: RunStatusCountType[];
   testRunCaseStatusMessages: TestRunCaseStatusMessages;
@@ -30,16 +38,12 @@ export default function RunProgressDounut({ statusCounts, testRunCaseStatusMessa
         });
 
         const labels = testRunCaseStatus.map((entry) => testRunCaseStatusMessages[entry.uid]);
-        const colors = testRunCaseStatus.map((entry) => entry.chartColor);
+        const colors = testRunCaseStatus.map((entry) =>
+          theme === 'dark' ? (darkStatusChartColors[entry.uid] ?? entry.chartColor) : entry.chartColor
+        );
         const legend = {
           labels: {
-            colors: testRunCaseStatus.map(() => {
-              if (theme === 'light') {
-                return 'black';
-              } else {
-                return 'white';
-              }
-            }),
+            colors: testRunCaseStatus.map(() => (theme === 'dark' ? 'hsl(var(--heroui-foreground))' : 'black')),
           },
         };
 

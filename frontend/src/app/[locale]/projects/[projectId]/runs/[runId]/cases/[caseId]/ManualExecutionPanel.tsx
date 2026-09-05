@@ -682,7 +682,10 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
 
   if (isLoading) {
     return (
-      <section className="mt-4 min-w-0 rounded-md border p-3" aria-labelledby="manual-execution-heading">
+      <section
+        className="mt-4 min-w-0 rounded-md border p-3 dark:border-divider dark:bg-content1"
+        aria-labelledby="manual-execution-heading"
+      >
         <h3 id="manual-execution-heading" className="font-bold">
           {messages.manualExecution}
         </h3>
@@ -695,7 +698,10 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
 
   if (loadError) {
     return (
-      <section className="mt-4 min-w-0 rounded-md border p-3" aria-labelledby="manual-execution-heading">
+      <section
+        className="mt-4 min-w-0 rounded-md border p-3 dark:border-divider dark:bg-content1"
+        aria-labelledby="manual-execution-heading"
+      >
         <h3 id="manual-execution-heading" className="font-bold">
           {messages.manualExecution}
         </h3>
@@ -706,7 +712,7 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
 
   return (
     <section
-      className="mt-4 min-w-0 max-w-full overflow-x-hidden rounded-md border p-3"
+      className="mt-4 min-w-0 max-w-full overflow-x-hidden rounded-md border p-3 dark:border-divider dark:bg-content1"
       aria-labelledby="manual-execution-heading"
     >
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -811,7 +817,7 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
             </h4>
             <p className="mt-1 break-words text-xs text-default-500">{messages.manualExecutionEvidencePrivate}</p>
             {execution.status === 'running' && (
-              <div className="mt-3 rounded-md border border-dashed border-default-300 p-3">
+              <div className="mt-3 rounded-md border border-dashed border-default-300 p-3 dark:border-divider dark:bg-content2">
                 <p id="manual-evidence-paste-instructions" className="break-words text-sm">
                   {messages.manualExecutionEvidencePaste}
                 </p>
@@ -859,7 +865,10 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
             ) : (
               <ul className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
                 {evidence.map((item) => (
-                  <li key={item.id} className="min-w-0 rounded-md border border-default-200 p-2">
+                  <li
+                    key={item.id}
+                    className="min-w-0 rounded-md border border-default-200 p-2 dark:border-divider dark:bg-content2"
+                  >
                     <div className="flex min-w-0 items-center gap-3">
                       {previewUrls[item.id] ? (
                         // Blob URLs are already local authenticated bytes and cannot benefit from Next image optimization.
@@ -921,7 +930,7 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
           {execution.status === 'running' && failureFormOpen ? (
             <div
               ref={failureFormRef}
-              className="mt-4 min-w-0 rounded-md border border-default-200 bg-content2/30 p-3"
+              className="mt-4 min-w-0 rounded-md border border-default-200 bg-content2/30 p-3 dark:border-divider"
               data-testid="manual-execution-editor"
             >
               <form
@@ -979,7 +988,7 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
             </div>
           ) : execution.status === 'finished' && execution.result === 'failed' && hasReportContent(execution.report) ? (
             <section
-              className="mt-4 min-w-0 rounded-md border border-default-200 p-3"
+              className="mt-4 min-w-0 rounded-md border border-default-200 p-3 dark:border-divider dark:bg-content2/30"
               aria-labelledby="manual-report-heading"
               data-testid="manual-execution-findings"
             >

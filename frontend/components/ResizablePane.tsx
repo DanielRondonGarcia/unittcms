@@ -16,6 +16,7 @@ type Props = {
   minRightWidth?: number;
   defaultLeftWidth?: number;
   separatorLabel?: string;
+  rightPaneVisible?: boolean;
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -35,6 +36,7 @@ export default function ResizablePanes({
   minRightWidth = 15,
   defaultLeftWidth = 70,
   separatorLabel = 'Resize panes',
+  rightPaneVisible = true,
 }: Props) {
   const bounds = getBounds(minLeftWidth, minRightWidth);
   const [leftWidth, setLeftWidth] = useState(() => clamp(Number(defaultLeftWidth), bounds.min, bounds.max));
@@ -87,6 +89,7 @@ export default function ResizablePanes({
 
   const paneStyle = {
     '--left-pane-width': `${leftWidth}%`,
+    '--right-pane-width': `calc(100% - ${leftWidth}%)`,
     '--min-left-pane-width': `${bounds.min}%`,
   } as CSSProperties;
 
@@ -96,19 +99,28 @@ export default function ResizablePanes({
       className="flex h-full min-h-0 min-w-0 max-w-full flex-col overflow-hidden md:flex-row"
       style={{ ...paneStyle, userSelect: isDragging ? 'none' : 'auto' }}
     >
-      <div className="h-1/2 min-h-0 min-w-0 w-full flex-none overflow-auto border-b dark:border-neutral-700 md:h-full md:w-[var(--left-pane-width)] md:min-w-[var(--min-left-pane-width)] md:border-b-0">
+      <div
+        className={`min-h-0 min-w-0 flex-none overflow-auto border-b transition-[height,width] duration-300 ease-out motion-reduce:transition-none dark:border-divider md:min-h-full md:border-b-0 ${
+          rightPaneVisible
+            ? 'h-1/2 w-full md:h-full md:w-[var(--left-pane-width)] md:min-w-[var(--min-left-pane-width)]'
+            : 'h-full w-full md:h-full md:w-full'
+        }`}
+      >
         {leftPane}
       </div>
 
       <div
-        className="hidden w-1 shrink-0 cursor-col-resize touch-none transition-colors hover:bg-primary/50 active:bg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:block"
+        className={`hidden shrink-0 cursor-col-resize touch-none transition-[width,opacity,background-color] duration-300 ease-out motion-reduce:transition-none hover:bg-primary/50 active:bg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:block ${
+          rightPaneVisible ? 'w-1 opacity-100' : 'pointer-events-none w-0 opacity-0'
+        }`}
         role="separator"
         aria-label={separatorLabel}
         aria-orientation="vertical"
         aria-valuemin={Math.round(bounds.min)}
         aria-valuemax={Math.round(bounds.max)}
         aria-valuenow={Math.round(leftWidth)}
-        tabIndex={0}
+        aria-hidden={!rightPaneVisible}
+        tabIndex={rightPaneVisible ? 0 : -1}
         onKeyDown={handleKeyDown}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -117,7 +129,16 @@ export default function ResizablePanes({
         style={{ flexShrink: 0 }}
       />
 
-      <div className="h-1/2 min-h-0 min-w-0 w-full flex-none overflow-auto md:h-full md:flex-1">{rightPane}</div>
+      <div
+        className={`min-h-0 min-w-0 flex-none overflow-auto transition-[height,width,opacity] duration-300 ease-out motion-reduce:transition-none ${
+          rightPaneVisible
+            ? 'visible h-1/2 w-full opacity-100 md:h-full md:w-[var(--right-pane-width)] md:flex-none'
+            : 'invisible pointer-events-none h-0 w-full opacity-0 md:h-full md:w-0'
+        }`}
+        aria-hidden={!rightPaneVisible}
+      >
+        {rightPane}
+      </div>
     </div>
   );
 }

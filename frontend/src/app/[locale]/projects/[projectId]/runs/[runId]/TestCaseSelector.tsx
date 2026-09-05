@@ -134,7 +134,7 @@ export default function TestCaseSelector({
     });
   }, [sortDescriptor, cases]);
 
-  const notIncludedCaseClass = 'text-neutral-200 dark:text-neutral-600';
+  const notIncludedCaseClass = 'text-neutral-200 dark:text-default-500';
 
   const renderCell = (testCase: CaseType, columnKey: string): ReactNode => {
     const cellValue = testCase[columnKey as keyof CaseType];
@@ -314,8 +314,15 @@ export default function TestCaseSelector({
 
   const classNames = useMemo(
     () => ({
-      table: ['min-w-[48rem]'],
-      th: ['bg-transparent', 'text-default-500', 'border-b', 'border-divider'],
+      table: ['h-full min-w-[48rem]', 'dark:text-foreground'],
+      th: [
+        'bg-transparent',
+        'text-default-500',
+        'dark:text-foreground',
+        'border-b',
+        'border-divider',
+        'dark:border-divider/60',
+      ],
       td: [
         // changing the rows border radius
         // first
@@ -327,6 +334,8 @@ export default function TestCaseSelector({
         'group-data-[last=true]:first:before:rounded-none',
         'group-data-[last=true]:last:before:rounded-none',
       ],
+      tbody: ['h-full'],
+      emptyWrapper: ['!h-full', 'min-h-40'],
     }),
     []
   );
@@ -336,7 +345,7 @@ export default function TestCaseSelector({
   };
 
   return (
-    <div className="min-w-0 max-w-full overflow-x-auto">
+    <div className="h-full min-h-0 min-w-0 max-w-full overflow-x-auto">
       <Table
         isCompact
         removeWrapper

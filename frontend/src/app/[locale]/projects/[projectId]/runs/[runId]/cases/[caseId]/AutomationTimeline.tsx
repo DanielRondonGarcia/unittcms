@@ -77,7 +77,11 @@ function timelineItems(execution: AutomationExecution): TimelineItem[] {
 export default function AutomationTimeline({ execution, locale, messages, compact = false }: Props) {
   return (
     <section
-      className={compact ? 'min-w-0' : 'min-w-0 rounded-md border p-4'}
+      className={
+        compact
+          ? 'min-w-0 dark:rounded-md dark:bg-content2/40 dark:p-2'
+          : 'min-w-0 rounded-md border p-4 dark:border-divider dark:bg-content1'
+      }
       aria-labelledby={`timeline-${execution.id}`}
     >
       <h2 id={`timeline-${execution.id}`} className="font-semibold">

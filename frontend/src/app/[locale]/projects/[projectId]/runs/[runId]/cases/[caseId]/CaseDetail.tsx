@@ -42,7 +42,7 @@ export default function CaseDetail({
     .sort((a, b) => a.caseSteps.stepNo - b.caseSteps.stepNo);
 
   return (
-    <div className="min-w-0 p-3 text-default-500 sm:p-4">
+    <div className="min-w-0 p-3 text-default-500 sm:p-4 dark:bg-background">
       <div className="mb-4 min-w-0">
         {canNavigateToCase ? (
           <Link
@@ -62,17 +62,17 @@ export default function CaseDetail({
       </div>
 
       <dl className="grid min-w-0 gap-3">
-        <div className="min-w-0 rounded-lg border border-default-200 p-3">
+        <div className="min-w-0 rounded-lg border border-default-200 p-3 dark:border-divider dark:bg-content1">
           <dt className="font-bold">{messages.description}</dt>
           <dd className="mt-1 break-words whitespace-pre-wrap">{testCase.description || '-'}</dd>
         </div>
       </dl>
 
-      <details className="mt-3 min-w-0 rounded-lg border border-default-200">
+      <details className="mt-3 min-w-0 rounded-lg border border-default-200 dark:border-divider dark:bg-content1">
         <summary className="cursor-pointer break-words p-3 font-bold outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset">
           {messages.metadata}
         </summary>
-        <dl className="grid min-w-0 gap-3 border-t border-default-200 p-3 sm:grid-cols-2">
+        <dl className="grid min-w-0 gap-3 border-t border-default-200 p-3 dark:border-divider sm:grid-cols-2">
           <div className="min-w-0">
             <dt className="font-bold">{messages.priority}</dt>
             <dd className="mt-1">
@@ -140,7 +140,10 @@ export default function CaseDetail({
                     const keyword = step.caseSteps.keyword;
                     const keywordLabel = keyword ? messages[keyword] : messages.steps;
                     return (
-                      <article key={step.id} className="flex items-start gap-3 rounded-lg border p-3">
+                      <article
+                        key={step.id}
+                        className="flex items-start gap-3 rounded-lg border p-3 dark:border-divider/60 dark:bg-content1/70"
+                      >
                         <span
                           className={`mt-0.5 inline-flex shrink-0 items-center rounded-full border px-2 py-1 text-xs font-semibold ${
                             keyword ? gherkinKeywordStyles[keyword] : 'border-default-300 text-default-500'
@@ -155,17 +158,20 @@ export default function CaseDetail({
                     );
                   })
                 ) : (
-                  <p className="rounded-lg border border-dashed p-3 text-sm text-default-500">
+                  <p className="rounded-lg border border-dashed p-3 text-sm text-default-500 dark:border-divider/60 dark:bg-content2">
                     {messages.noScenarioSteps}
                   </p>
                 )}
               </div>
               {testCase.gherkinExamples && (
-                <div className="mt-5 min-w-0 overflow-x-auto rounded-lg border p-3">
+                <div className="mt-5 min-w-0 overflow-x-auto rounded-lg border p-3 dark:border-divider/60 dark:bg-content2">
                   <h4 className="mb-2 font-semibold text-foreground">{messages.examples}</h4>
-                  <table className="w-full min-w-max border-collapse text-sm" aria-label={messages.examples}>
+                  <table
+                    className="w-full min-w-max border-collapse text-sm dark:text-foreground"
+                    aria-label={messages.examples}
+                  >
                     <thead>
-                      <tr className="border-b">
+                      <tr className="border-b dark:border-divider/60">
                         {testCase.gherkinExamples.headers.map((header, index) => (
                           <th key={`header-${index}`} scope="col" className="p-2 text-start text-foreground">
                             {header}
@@ -175,9 +181,12 @@ export default function CaseDetail({
                     </thead>
                     <tbody>
                       {testCase.gherkinExamples.rows.map((row, rowIndex) => (
-                        <tr key={`row-${rowIndex}`} className="border-b last:border-b-0">
+                        <tr key={`row-${rowIndex}`} className="border-b last:border-b-0 dark:border-divider/60">
                           {row.map((cell, columnIndex) => (
-                            <td key={`cell-${rowIndex}-${columnIndex}`} className="whitespace-pre-wrap break-words p-2">
+                            <td
+                              key={`cell-${rowIndex}-${columnIndex}`}
+                              className="whitespace-pre-wrap break-words p-2 dark:text-foreground"
+                            >
                               {cell}
                             </td>
                           ))}

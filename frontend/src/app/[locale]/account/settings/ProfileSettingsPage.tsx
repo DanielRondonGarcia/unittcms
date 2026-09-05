@@ -323,6 +323,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
                 placeholder={context.token?.user?.username || ''}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                className="dark-form-field"
               />
             </div>
           </form>
@@ -365,6 +366,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
                 label={messages.currentPassword}
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
+                className="dark-form-field"
               />
               <Input
                 size="sm"
@@ -373,6 +375,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
                 label={messages.newPassword}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
+                className="dark-form-field"
               />
               <Input
                 size="sm"
@@ -381,6 +384,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
                 label={messages.confirmNewPassword}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
+                className="dark-form-field"
               />
             </div>
           </form>
@@ -412,6 +416,7 @@ export default function ProfileSettingsPage({ messages, locale: defaultLocale }:
                 aria-label={messages.changeLocaleAria}
                 selectedKeys={[locale]}
                 disabledKeys={[locale]}
+                className="dark-form-field"
                 onSelectionChange={(value) => {
                   const selectedLocale = locales.find((locale) => locale.code === value.currentKey);
                   if (!selectedLocale) return;

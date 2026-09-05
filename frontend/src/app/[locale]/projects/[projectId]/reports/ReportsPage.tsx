@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useContext, useEffect, useState } from 'react';
-import { Button } from '@heroui/react';
+import { Button, Select, SelectItem } from '@heroui/react';
 import { Download, Eye } from 'lucide-react';
 import Config from '@/config/config';
 import { TokenContext } from '@/utils/TokenProvider';
@@ -158,24 +158,25 @@ export default function ReportsPage({ projectId, locale, messages }: Props) {
         </div>
       )}
       <section aria-busy={busy !== null} className="mt-6 flex flex-col gap-5 rounded-medium border p-5">
-        <label className="flex flex-col gap-1 text-sm font-medium" htmlFor="report-execution">
-          {messages.execution}
-          <select
-            id="report-execution"
-            required
-            value={selectedRunId}
-            disabled={busy !== null}
-            onChange={(event) => void loadScenarios(event.target.value)}
-            className="rounded-medium border p-2 font-normal"
-          >
-            <option value="">{messages.chooseExecution}</option>
-            {runs.map((run) => (
-              <option key={run.id} value={run.id}>
-                {run.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Select
+          id="report-execution"
+          label={messages.execution}
+          placeholder={messages.chooseExecution}
+          isRequired
+          isDisabled={busy !== null}
+          selectedKeys={selectedRunId ? [selectedRunId] : []}
+          onSelectionChange={(keys) => {
+            if (keys === 'all') return;
+            const [runId] = Array.from(keys);
+            void loadScenarios(runId ? String(runId) : '');
+          }}
+          variant="bordered"
+          className="dark-form-field"
+        >
+          {runs.map((run) => (
+            <SelectItem key={String(run.id)}>{run.name}</SelectItem>
+          ))}
+        </Select>
         {busy === 'runs' && <p role="status">{messages.loading}</p>}
         {busy === null && runs.length === 0 && <p className="text-sm text-default-500">{messages.noRuns}</p>}
         <fieldset className="flex flex-col gap-2">

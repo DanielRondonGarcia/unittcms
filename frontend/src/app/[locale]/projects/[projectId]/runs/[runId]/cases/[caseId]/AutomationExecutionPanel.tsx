@@ -320,7 +320,10 @@ export default function AutomationExecutionPanel({
   };
 
   return (
-    <div className="mt-6 min-w-0 max-w-full overflow-x-auto rounded-md border p-4" aria-labelledby="automation-heading">
+    <div
+      className="mt-6 min-w-0 max-w-full overflow-x-auto rounded-md border p-4 dark:border-divider dark:bg-content1"
+      aria-labelledby="automation-heading"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h6 id="automation-heading" className="font-bold">
           {messages.automation}

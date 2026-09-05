@@ -406,14 +406,14 @@ export default function RunEditor({
     );
 
   return (
-    <div className="h-full min-h-0 min-w-0 max-w-full overflow-x-hidden overflow-y-auto">
-      <div className="flex w-full flex-wrap items-center justify-between gap-2 border-b-1 p-3 dark:border-neutral-700">
+    <div className="h-full min-h-0 min-w-0 max-w-full overflow-x-hidden overflow-y-auto dark:bg-background">
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 border-b-1 p-3 dark:border-divider dark:bg-content1 dark:min-h-12 dark:py-2">
         <div className="flex min-w-0 items-center">
           <Tooltip content={messages.backToRuns}>
             <Button
               isIconOnly
               size="sm"
-              className="rounded-full bg-neutral-50 dark:bg-neutral-600 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+              className="rounded-full bg-neutral-50 dark:bg-content3 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
               aria-label={messages.backToRuns}
               onPress={() => router.push(`/projects/${projectId}/runs`, { locale: locale })}
             >
@@ -513,8 +513,8 @@ export default function RunEditor({
         </div>
       </div>
 
-      <div className="container mx-auto min-w-0 w-full max-w-5xl px-6 pb-6 pt-6">
-        <div className="flex flex-col gap-4 md:flex-row">
+      <div className="container mx-auto flex min-h-full min-w-0 w-full max-w-5xl flex-col px-6 pb-6 pt-6">
+        <div className="flex shrink-0 flex-col gap-4 md:flex-row">
           <div className="min-w-0">
             <div className="h-72 w-full max-w-96 md:w-96">
               <div className="flex items-center">
@@ -597,125 +597,127 @@ export default function RunEditor({
           hasPendingRunCaseChanges={hasPendingRunCaseChanges}
         />
 
-        <Divider className="my-6" />
-        <div className="flex items-center justify-between">
-          <h6 className="h-8 font-bold">{messages.selectTestCase}</h6>
-          <div className="flex items-center gap-2">
-            {(selectedKeys === 'all' || selectedKeys.size > 0) && (
-              <>
-                {isManager && (
-                  <AssigneePicker
-                    isAvatarOnly={false}
-                    assigneeUserId={null}
-                    members={members}
-                    isDisabled={false}
-                    unassignedLabel={messages.unassigned}
-                    selectLabel={messages.selectAssigneeAria}
-                    searchPlaceholder={messages.searchAssignee}
-                    triggerLabel={messages.assignSelected}
-                    onAssign={(userId) => handleBulkAssignCases(userId)}
-                  />
-                )}
-                <Dropdown>
-                  <DropdownTrigger>
-                    <Button
-                      size="sm"
-                      isDisabled={!tokenContext.isProjectReporter(Number(projectId))}
-                      color="primary"
-                      endContent={<ChevronDown size={16} />}
-                    >
-                      {messages.testCaseSelection}
-                    </Button>
-                  </DropdownTrigger>
-                  <DropdownMenu aria-label={messages.testCaseSelectActions}>
-                    <DropdownItem
-                      key="include"
-                      startContent={<CopyPlus size={16} />}
-                      onPress={() => handleBulkIncludeExcludeCases(true)}
-                    >
-                      {messages.includeInRun}
-                    </DropdownItem>
-                    <DropdownItem
-                      key="exclude"
-                      startContent={<CopyMinus size={16} />}
-                      onPress={() => handleBulkIncludeExcludeCases(false)}
-                    >
-                      {messages.excludeFromRun}
-                    </DropdownItem>
-                  </DropdownMenu>
-                </Dropdown>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-3 flex min-w-0 flex-col rounded-small border-2 dark:border-neutral-700 md:flex-row">
-          <div className="w-full shrink-0 border-b-1 dark:border-neutral-700 md:w-3/12 md:border-b-0 md:border-r-1">
-            <Tree
-              data={treeData}
-              className="w-full"
-              indent={16}
-              rowHeight={42}
-              overscanCount={5}
-              paddingTop={20}
-              paddingBottom={20}
-              padding={20}
-              width="100%"
-              openByDefault={false}
-              disableDrop={true}
-              disableDrag={true}
-            >
-              {({ node, style }: { node: NodeApi<TreeNodeData>; style: React.CSSProperties }) => (
-                <TreeItem
-                  style={style}
-                  isSelected={selectedFolder ? node.data.id === selectedFolder.id : false}
-                  onClick={() => {
-                    setSelectedKeys(new Set([]));
-                    setSelectedFolder(node.data);
-                  }}
-                  toggleButton={
-                    node.data.children && node.data.children.length > 0 ? (
+        <Divider className="my-6 shrink-0" />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between">
+            <h6 className="h-8 font-bold">{messages.selectTestCase}</h6>
+            <div className="flex items-center gap-2">
+              {(selectedKeys === 'all' || selectedKeys.size > 0) && (
+                <>
+                  {isManager && (
+                    <AssigneePicker
+                      isAvatarOnly={false}
+                      assigneeUserId={null}
+                      members={members}
+                      isDisabled={false}
+                      unassignedLabel={messages.unassigned}
+                      selectLabel={messages.selectAssigneeAria}
+                      searchPlaceholder={messages.searchAssignee}
+                      triggerLabel={messages.assignSelected}
+                      onAssign={(userId) => handleBulkAssignCases(userId)}
+                    />
+                  )}
+                  <Dropdown>
+                    <DropdownTrigger>
                       <Button
                         size="sm"
-                        isIconOnly
-                        aria-label={node.isOpen ? messages.collapseFolder : messages.expandFolder}
-                        className="bg-transparent rounded-full h-6 w-6 min-w-4 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
-                        onPress={() => node.toggle()}
+                        isDisabled={!tokenContext.isProjectReporter(Number(projectId))}
+                        color="primary"
+                        endContent={<ChevronDown size={16} />}
                       >
-                        {node.isOpen ? (
-                          <ChevronDown size={20} color="#F7C24E" />
-                        ) : (
-                          <ChevronRight size={20} color="#F7C24E" />
-                        )}
+                        {messages.testCaseSelection}
                       </Button>
-                    ) : null
-                  }
-                  icon={<Folder size={20} color="#F7C24E" fill="#F7C24E" />}
-                  label={node.data.name}
-                />
+                    </DropdownTrigger>
+                    <DropdownMenu aria-label={messages.testCaseSelectActions}>
+                      <DropdownItem
+                        key="include"
+                        startContent={<CopyPlus size={16} />}
+                        onPress={() => handleBulkIncludeExcludeCases(true)}
+                      >
+                        {messages.includeInRun}
+                      </DropdownItem>
+                      <DropdownItem
+                        key="exclude"
+                        startContent={<CopyMinus size={16} />}
+                        onPress={() => handleBulkIncludeExcludeCases(false)}
+                      >
+                        {messages.excludeFromRun}
+                      </DropdownItem>
+                    </DropdownMenu>
+                  </Dropdown>
+                </>
               )}
-            </Tree>
+            </div>
           </div>
-          <div className="min-w-0 w-full md:w-9/12">
-            <TestCaseSelector
-              projectId={projectId}
-              runId={runId}
-              locale={locale}
-              cases={filteredTestCases}
-              isDisabled={!tokenContext.isProjectReporter(Number(projectId))}
-              isManager={isManager}
-              members={members}
-              selectedKeys={selectedKeys}
-              onSelectionChange={setSelectedKeys}
-              onChangeStatus={handleChangeStatus}
-              onIncludeCase={(includeTestId) => handleIncludeExcludeCase(true, includeTestId)}
-              onExcludeCase={(excludeCaseId) => handleIncludeExcludeCase(false, excludeCaseId)}
-              onAssignCase={handleAssignCase}
-              messages={messages}
-              testRunCaseStatusMessages={testRunCaseStatusMessages}
-              priorityMessages={priorityMessages}
-              testTypeMessages={testTypeMessages}
-            />
+
+          <div className="mt-3 flex min-h-0 min-w-0 flex-1 flex-col rounded-small border-2 dark:border-divider dark:bg-content1 md:flex-row">
+            <div className="w-full shrink-0 border-b-1 dark:border-divider dark:bg-content2 md:h-full md:w-3/12 md:border-b-0 md:border-r-1">
+              <Tree
+                data={treeData}
+                className="h-full w-full"
+                indent={16}
+                rowHeight={42}
+                overscanCount={5}
+                paddingTop={20}
+                paddingBottom={20}
+                padding={20}
+                width="100%"
+                openByDefault={false}
+                disableDrop={true}
+                disableDrag={true}
+              >
+                {({ node, style }: { node: NodeApi<TreeNodeData>; style: React.CSSProperties }) => (
+                  <TreeItem
+                    style={style}
+                    isSelected={selectedFolder ? node.data.id === selectedFolder.id : false}
+                    onClick={() => {
+                      setSelectedKeys(new Set([]));
+                      setSelectedFolder(node.data);
+                    }}
+                    toggleButton={
+                      node.data.children && node.data.children.length > 0 ? (
+                        <Button
+                          size="sm"
+                          isIconOnly
+                          aria-label={node.isOpen ? messages.collapseFolder : messages.expandFolder}
+                          className="bg-transparent rounded-full h-6 w-6 min-w-4 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                          onPress={() => node.toggle()}
+                        >
+                          {node.isOpen ? (
+                            <ChevronDown size={20} color="#F7C24E" />
+                          ) : (
+                            <ChevronRight size={20} color="#F7C24E" />
+                          )}
+                        </Button>
+                      ) : null
+                    }
+                    icon={<Folder size={20} color="#F7C24E" fill="#F7C24E" />}
+                    label={node.data.name}
+                  />
+                )}
+              </Tree>
+            </div>
+            <div className="min-h-0 min-w-0 w-full dark:bg-content1 md:h-full md:w-9/12">
+              <TestCaseSelector
+                projectId={projectId}
+                runId={runId}
+                locale={locale}
+                cases={filteredTestCases}
+                isDisabled={!tokenContext.isProjectReporter(Number(projectId))}
+                isManager={isManager}
+                members={members}
+                selectedKeys={selectedKeys}
+                onSelectionChange={setSelectedKeys}
+                onChangeStatus={handleChangeStatus}
+                onIncludeCase={(includeTestId) => handleIncludeExcludeCase(true, includeTestId)}
+                onExcludeCase={(excludeCaseId) => handleIncludeExcludeCase(false, excludeCaseId)}
+                onAssignCase={handleAssignCase}
+                messages={messages}
+                testRunCaseStatusMessages={testRunCaseStatusMessages}
+                priorityMessages={priorityMessages}
+                testTypeMessages={testTypeMessages}
+              />
+            </div>
           </div>
         </div>
       </div>

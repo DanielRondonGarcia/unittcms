@@ -2,6 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+  --run-case-status-untested: #d4d4d8;
+  --run-case-status-passed: #17c964;
+  --run-case-status-retest: #f5a524;
+  --run-case-status-failed: #f31260;
+  --run-case-status-skipped: #52525b;
+}
+
+html.dark,
+.dark {
+  color-scheme: dark;
+  --run-case-status-untested: #9caab7;
+  --run-case-status-passed: #79c5a0;
+  --run-case-status-retest: #d3b276;
+  --run-case-status-failed: #e2939f;
+  --run-case-status-skipped: #8a98a6;
+}
+
+/* Keep default HeroUI form fields distinct from surrounding dark surfaces without changing light mode. */
+.dark .dark-form-field [data-slot='input-wrapper'],
+.dark .dark-form-field [data-slot='trigger'] {
+  background-color: hsl(var(--heroui-background));
+  border: 1px solid hsl(var(--heroui-divider));
+}
+
+.dark .dark-form-field [data-slot='input-wrapper'][data-hover='true'],
+.dark .dark-form-field [data-slot='trigger'][data-hover='true'] {
+  background-color: hsl(var(--heroui-content2));
+}
+
+.dark .dark-form-field [data-slot='input-wrapper'][data-focus='true'],
+.dark .dark-form-field [data-slot='trigger'][data-focus='true'] {
+  background-color: hsl(var(--heroui-content2));
+  border-color: hsl(var(--heroui-primary));
+}
+
+.dark .dark-form-field[data-focus-visible='true'] [data-slot='input-wrapper'],
+.dark .dark-form-field [data-slot='trigger'][data-focus-visible='true'] {
+  outline: 2px solid hsl(var(--heroui-focus));
+  outline-offset: 1px;
+}
+
+.dark .dark-form-field[data-invalid='true'] [data-slot='input-wrapper'],
+.dark .dark-form-field[data-invalid='true'] [data-slot='trigger'] {
+  border-color: hsl(var(--heroui-danger));
+}
+
+.dark .dark-form-field[data-disabled='true'] [data-slot='input-wrapper'],
+.dark .dark-form-field [data-slot='trigger'][data-disabled='true'] {
+  background-color: hsl(var(--heroui-content1));
+  border-color: hsl(var(--heroui-divider));
+}
+
 /* HeroUI adds scrollbar-hide to tab lists by default; keep this override scoped to run-case tabs. */
 .run-case-tab-list {
   -ms-overflow-style: auto;
@@ -42,15 +96,15 @@
 }
 
 .dark .run-case-tab-list {
-  scrollbar-color: hsl(var(--heroui-default-500, 215 20% 45%)) transparent;
+  scrollbar-color: hsl(var(--heroui-default-500, 210 12.84% 42.75%)) transparent;
 }
 
 .dark .run-case-tab-list::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--heroui-default-500, 215 20% 45%) / 0.75);
+  background-color: hsl(var(--heroui-default-500, 210 12.84% 42.75%) / 0.75);
 }
 
 .dark .run-case-tab-list::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--heroui-default-400, 215 20% 60%) / 0.9);
+  background-color: hsl(var(--heroui-default-400, 208.7 19.01% 23.73%) / 0.9);
 }
 
 @media (pointer: coarse) {

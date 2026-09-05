@@ -345,7 +345,7 @@ function ManualHistoryEntry({
 
   return (
     <article
-      className="min-w-0 overflow-hidden rounded-md border text-sm"
+      className="min-w-0 overflow-hidden rounded-md border text-sm dark:border-divider dark:bg-content1"
       data-history-entry="manual"
       data-history-entry-id={item.id}
     >
@@ -387,7 +387,11 @@ function ManualHistoryEntry({
       </button>
 
       {isExpanded && (
-        <div id={detailsId} className="min-w-0 border-t p-3" data-testid={detailsId}>
+        <div
+          id={detailsId}
+          className="min-w-0 border-t p-3 dark:border-divider dark:bg-content2"
+          data-testid={detailsId}
+        >
           <dl className="grid min-w-0 gap-x-4 gap-y-2 sm:grid-cols-2">
             <div className="min-w-0">
               <dt className="font-semibold">{messages.manualExecutionStatus}</dt>
@@ -433,7 +437,7 @@ function ManualHistoryEntry({
 
           {hasReport && (
             <section
-              className="mt-4 min-w-0 rounded-md border border-default-200 p-3"
+              className="mt-4 min-w-0 rounded-md border border-default-200 p-3 dark:border-divider dark:bg-content3"
               aria-labelledby={`manual-history-report-heading-${item.id}`}
               data-testid={`manual-history-report-${item.id}`}
             >
@@ -495,7 +499,7 @@ function ManualHistoryEntry({
                       return (
                         <li
                           key={evidenceItem.id}
-                          className="min-w-0 rounded-md border border-default-200 p-2"
+                          className="min-w-0 rounded-md border border-default-200 p-2 dark:border-divider dark:bg-content3"
                           data-testid={`manual-history-evidence-item-${evidenceItem.id}`}
                         >
                           <div className="flex min-w-0 items-center gap-3">
@@ -559,7 +563,7 @@ function ManualHistoryEntry({
 
       {isExpanded && previewEvidence && previewUrl && previewFilename && (
         <div
-          className="fixed inset-0 z-50 flex h-screen w-screen items-center justify-center bg-black/80 p-4"
+          className="fixed inset-0 z-50 flex h-screen w-screen items-center justify-center bg-black/80 p-4 dark:bg-background/90"
           role="dialog"
           aria-modal="true"
           aria-labelledby={previewDialogTitleId}
@@ -573,13 +577,16 @@ function ManualHistoryEntry({
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex w-full max-w-6xl items-center justify-between gap-4">
-              <h2 id={previewDialogTitleId} className="min-w-0 truncate text-sm font-semibold text-white">
+              <h2
+                id={previewDialogTitleId}
+                className="min-w-0 truncate text-sm font-semibold text-white dark:text-foreground"
+              >
                 {messages.manualExecutionEvidencePreview}: {previewFilename}
               </h2>
               <button
                 ref={previewCloseButtonRef}
                 type="button"
-                className="shrink-0 rounded-md bg-white px-3 py-2 text-sm font-semibold text-black hover:bg-default-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="shrink-0 rounded-md bg-white px-3 py-2 text-sm font-semibold text-black hover:bg-default-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:bg-content3 dark:text-foreground dark:hover:bg-content4"
                 aria-label={messages.manualExecutionEvidenceClose}
                 data-testid={`manual-history-evidence-close-${item.id}`}
                 onClick={closePreview}
@@ -775,7 +782,7 @@ export default function AutomationHistory({
           return (
             <div
               key={`automation-${item.id}`}
-              className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-md border p-3"
+              className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-md border p-3 dark:border-divider dark:bg-content1"
               data-history-entry="automation"
             >
               <div className="min-w-0 flex-1 space-y-1 text-sm">

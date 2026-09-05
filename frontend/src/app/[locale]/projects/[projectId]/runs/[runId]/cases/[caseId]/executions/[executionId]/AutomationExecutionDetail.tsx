@@ -219,7 +219,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
   const videoDescriptionId = `automation-video-description-${String(execution.id)}`;
 
   return (
-    <main className="mx-auto min-h-full w-full min-w-0 max-w-4xl space-y-6 p-6">
+    <main className="mx-auto min-h-full w-full min-w-0 max-w-4xl space-y-6 p-6 dark:bg-background">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">{messages.automationExecutionDetail}</h1>
@@ -238,7 +238,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
         </Button>
       </div>
 
-      <section className="min-w-0 max-w-full rounded-md border p-4">
+      <section className="min-w-0 max-w-full rounded-md border p-4 dark:border-divider dark:bg-content1">
         <div className="flex flex-wrap items-center gap-2">
           <Chip
             color={
@@ -348,7 +348,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
       <AutomationTimeline execution={execution} locale={locale} messages={messages} />
 
       {execution.diagnostics && (
-        <section className="min-w-0 max-w-full rounded-md border p-4">
+        <section className="min-w-0 max-w-full rounded-md border p-4 dark:border-divider dark:bg-content1">
           <h2 className="font-semibold">{messages.automationDiagnostics}</h2>
           <p className="mt-2 text-sm text-default-500">{messages.automationDiagnosticsAvailable}</p>
           <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
@@ -369,7 +369,7 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
             <div className="mt-4">
               <h3 className="font-semibold">{messages.automationOutput}</h3>
               <pre
-                className="mt-2 max-h-96 max-w-full overflow-auto whitespace-pre-wrap rounded bg-default-100 p-3 text-xs"
+                className="mt-2 max-h-96 max-w-full overflow-auto whitespace-pre-wrap rounded bg-default-100 p-3 text-xs dark:bg-content2"
                 translate="no"
               >
                 {[
@@ -386,12 +386,14 @@ export default function AutomationExecutionDetail({ projectId, runId, caseId, ex
         </section>
       )}
 
-      <section className="min-w-0 max-w-full rounded-md border p-4">
+      <section className="min-w-0 max-w-full rounded-md border p-4 dark:border-divider dark:bg-content1">
         <h2 className="font-semibold">{messages.automationSnapshot}</h2>
-        <pre className="mt-3 max-h-96 max-w-full overflow-auto rounded bg-default-100 p-3 text-xs">{snapshot}</pre>
+        <pre className="mt-3 max-h-96 max-w-full overflow-auto rounded bg-default-100 p-3 text-xs dark:bg-content2">
+          {snapshot}
+        </pre>
       </section>
 
-      <section className="min-w-0 max-w-full rounded-md border p-4">
+      <section className="min-w-0 max-w-full rounded-md border p-4 dark:border-divider dark:bg-content1">
         <h2 className="font-semibold">{messages.automationEvidence}</h2>
         {artifacts.length === 0 ? (
           <p className="mt-2 text-sm">{messages.automationNoEvidence}</p>

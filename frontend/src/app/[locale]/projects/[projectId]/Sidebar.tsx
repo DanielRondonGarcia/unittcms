@@ -104,7 +104,7 @@ export default function Sidebar({ messages, locale }: Props) {
 
   return (
     <div className="border-r-1 dark:border-neutral-700">
-      <div className="w-full flex justify-end">
+      <div className="flex h-12 min-h-12 w-full justify-end">
         <Tooltip content={messages.toggleSidebar} placement="right">
           <Button size="lg" isIconOnly variant="light" onPress={() => setIsSideBarOpen(!isSideBarOpen)}>
             {isSideBarOpen ? (

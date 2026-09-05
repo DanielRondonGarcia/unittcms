@@ -168,7 +168,7 @@ export default function TestCaseDetailPane({
 
   return (
     <div
-      className="flex h-full min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden p-3"
+      className="flex h-full min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden p-3 dark:bg-background"
       data-testid="run-case-detail-pane"
     >
       <Tabs
