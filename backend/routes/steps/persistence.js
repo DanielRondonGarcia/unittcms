@@ -4,6 +4,7 @@ import {
   gherkinTemplate,
   hasValidGherkinKeywords,
   hasValidGherkinStepOrder,
+  matchGherkinKeywordPrefix,
   normalizeGherkinSection,
 } from '../../config/enums.js';
 
@@ -80,6 +81,22 @@ export async function validateAndNormalizeCaseSteps({
   const shapeError = steps.map(validateStepShape).find(Boolean);
   if (shapeError) throw new CaseSaveValidationError('step_shape_invalid', shapeError);
 
+  const isGherkin = template === gherkinTemplate;
+  if (isGherkin) {
+    const prefixedIndex = steps.findIndex((step) => {
+      return step.editState !== 'deleted' && matchGherkinKeywordPrefix(step.step) !== null;
+    });
+    if (prefixedIndex !== -1) {
+      throw new CaseSaveValidationError('details_keyword', 'Gherkin step details must not include a keyword prefix', [
+        field(
+          `Steps[${prefixedIndex}].step`,
+          'details_keyword',
+          'Gherkin step details must not include a keyword prefix'
+        ),
+      ]);
+    }
+  }
+
   const sourceSectionFor = (step) => normalizeGherkinSection(step?.caseSteps?.section);
   if (steps.some((step) => step.editState !== 'deleted' && sourceSectionFor(step) === null)) {
     throw new CaseSaveValidationError('section_invalid', 'Gherkin step section must be background or scenario', [
@@ -87,9 +104,15 @@ export async function validateAndNormalizeCaseSteps({
     ]);
   }
 
-  const isGherkin = template === gherkinTemplate;
   const normalizedSteps = isGherkin ? normalizeGherkinSteps(steps) : steps;
   if (!isGherkin) return { steps: normalizedSteps };
+
+  const activeSteps = normalizedSteps.filter((step) => step.editState !== 'deleted');
+  if (activeSteps.length === 0) {
+    throw new CaseSaveValidationError('steps_required', 'Gherkin cases require at least one step', [
+      field('Steps', 'steps_required', 'Gherkin cases require at least one step'),
+    ]);
+  }
 
   if (!hasValidGherkinStepOrder(normalizedSteps)) {
     throw new CaseSaveValidationError(

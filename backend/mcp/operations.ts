@@ -12,7 +12,13 @@ import defineProject from '../models/projects.js';
 import defineRun from '../models/runs.js';
 import defineStep from '../models/steps.js';
 import defineTag from '../models/tags.js';
-import { gherkinKeywords, gherkinSections, gherkinTemplate, hasValidGherkinExamples } from '../config/enums.js';
+import {
+  gherkinKeywords,
+  gherkinSections,
+  gherkinTemplate,
+  hasValidGherkinExamples,
+  matchGherkinKeywordPrefix,
+} from '../config/enums.js';
 
 type Extra = { authInfo?: { scopes?: string[]; extra?: { userId?: number } } };
 type Handler = (args: Record<string, any>, extra: Extra) => Promise<Record<string, unknown>>;
@@ -50,6 +56,11 @@ const SAFE_ERROR_CODES = new Set([
   'steps_invalid',
   'step_create_id_forbidden',
   'gherkin_examples_invalid',
+  'template_invalid',
+  'steps_required',
+  'steps_not_allowed_for_template',
+  'details_keyword',
+  'step_keyword_mismatch',
   'transaction_unavailable',
   'step_shape_invalid',
   'section_invalid',
@@ -148,6 +159,11 @@ const gherkinExamplesSchema = z
   })
   .nullable()
   .optional();
+const templateInputSchema = z
+  .union([z.number().int(), z.enum(['text', 'step', 'gherkin'])])
+  .describe(
+    'Case template: text (0) uses preConditions/expectedResults, step (1) uses ordinary steps, gherkin (2) requires canonical Given/When/Then steps.'
+  );
 const stepInputSchema = z.object({
   id: z.number().int().positive().optional(),
   editState: z.enum(['notChanged', 'changed', 'new', 'deleted']).optional(),
@@ -262,6 +278,59 @@ function normalizeUpdateSteps(value: unknown): any[] {
       editState: source.editState ?? (source.id === undefined ? 'new' : 'changed'),
     };
   });
+}
+
+function normalizeTemplate(value: unknown): number {
+  if (value === 'text') return 0;
+  if (value === 'step') return 1;
+  if (value === 'gherkin') return gherkinTemplate;
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= gherkinTemplate) {
+    return value;
+  }
+  throw operationError('template_invalid');
+}
+
+function activeSteps(steps: any[]): any[] {
+  return steps.filter((step) => step?.editState !== 'deleted');
+}
+
+function normalizeOrdinarySteps(steps: any[]): any[] {
+  return steps.map((step, index) => {
+    if (!step || typeof step !== 'object' || Array.isArray(step) || step.editState === 'deleted') return step;
+    const caseSteps = step.caseSteps && typeof step.caseSteps === 'object' ? { ...step.caseSteps } : {};
+    if (caseSteps.stepNo === undefined) caseSteps.stepNo = index + 1;
+    return { ...step, caseSteps };
+  });
+}
+
+function normalizeGherkinStepsForMcp(steps: any[]): any[] {
+  return steps.map((step) => {
+    if (!step || typeof step !== 'object' || Array.isArray(step) || step.editState === 'deleted') return step;
+
+    const keyword = step.caseSteps?.keyword;
+    const section = step.caseSteps?.section;
+    if (!gherkinKeywords.includes(keyword)) throw operationError('keywords_invalid');
+    if (!gherkinSections.includes(section)) throw operationError('section_invalid');
+
+    const prefix = matchGherkinKeywordPrefix(step.step);
+    if (!prefix) return step;
+    if (prefix.keyword !== keyword) throw operationError('step_keyword_mismatch');
+    return { ...step, step: prefix.details };
+  });
+}
+
+function normalizeMcpSteps(value: unknown, template: number, mode: 'create' | 'update'): any[] {
+  const steps = mode === 'create' ? normalizeCreateSteps(value) : normalizeUpdateSteps(value);
+  if (template === 1) return normalizeOrdinarySteps(steps);
+  if (template === gherkinTemplate) {
+    if (activeSteps(steps).length === 0) throw operationError('steps_required');
+    return normalizeGherkinStepsForMcp(steps);
+  }
+  return steps;
+}
+
+function rejectTextTemplateSteps(value: unknown): void {
+  if (Array.isArray(value) && value.length > 0) throw operationError('steps_not_allowed_for_template');
 }
 
 async function inTransaction(sequelize: any, callback: (transaction: any) => Promise<any>): Promise<any> {
@@ -715,14 +784,20 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         priority: z.number().int(),
         type: z.number().int(),
         automationStatus: z.number().int(),
-        template: z.number().int(),
+        template: templateInputSchema,
         description: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         preConditions: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         expectedResults: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         automationVersion: z.number().int().positive().optional(),
         gherkinExamples: gherkinExamplesSchema,
         tagIds: z.array(z.number().int().positive()).max(5).optional(),
-        steps: z.array(stepInputSchema).max(MAX_CASE_STEPS).optional(),
+        steps: z
+          .array(stepInputSchema)
+          .max(MAX_CASE_STEPS)
+          .optional()
+          .describe(
+            'Omit for text cases; use step/result for step cases; provide stepNo, keyword, and section for Gherkin cases.'
+          ),
       },
     },
     async (args, extra) => {
@@ -731,13 +806,15 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
       await requireEditableProject(projectId, userId);
       const folderId = positiveId(args.folderId, 'folder_project_mismatch');
       await folderForProject(folderId, projectId);
-      const template = Number(args.template);
+      const template = normalizeTemplate(args.template);
+      if (template === 0) rejectTextTemplateSteps(args.steps);
       if (template === gherkinTemplate && !hasValidGherkinExamples(args.gherkinExamples)) {
         throw operationError('gherkin_examples_invalid');
       }
       const tagIds = args.tagIds === undefined ? undefined : normalizeTagIds(args.tagIds);
       const validatedTags = tagIds === undefined ? undefined : await tagsForProject(projectId, tagIds);
-      const suppliedSteps = args.steps === undefined ? undefined : normalizeCreateSteps(args.steps);
+      const suppliedSteps = args.steps === undefined ? undefined : normalizeMcpSteps(args.steps, template, 'create');
+      if (template === gherkinTemplate && suppliedSteps === undefined) throw operationError('steps_required');
       const values = {
         title: String(args.title).trim(),
         state: args.state,
@@ -752,11 +829,14 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         expectedResults: args.expectedResults ?? null,
         folderId,
       };
+      let casePersistence: CasePersistence | undefined;
+      if (template !== 0 && suppliedSteps !== undefined) {
+        casePersistence = await loadCasePersistence();
+      }
       const created = await inTransaction(sequelize, async (transaction) => {
         const testcase = await Case.create(values, { transaction });
-        if (suppliedSteps !== undefined) {
-          const { persistCaseSteps, validateAndNormalizeCaseSteps } = await loadCasePersistence();
-          const normalized = await validateAndNormalizeCaseSteps({
+        if (casePersistence && suppliedSteps) {
+          const normalized = await casePersistence.validateAndNormalizeCaseSteps({
             caseId: testcase.id,
             title: values.title,
             template,
@@ -764,7 +844,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
             gherkinExamples: values.gherkinExamples,
             steps: suppliedSteps,
           });
-          await persistCaseSteps({
+          await casePersistence.persistCaseSteps({
             caseId: testcase.id,
             steps: normalized.steps,
             isGherkin: template === gherkinTemplate,
@@ -772,14 +852,6 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
             CaseStep,
             transaction,
           });
-        } else if (template === gherkinTemplate) {
-          for (const [index, keyword] of gherkinKeywords.slice(0, 3).entries()) {
-            const step = await Step.create({ step: '', result: '' }, { transaction });
-            await CaseStep.create(
-              { caseId: testcase.id, stepId: step.id, stepNo: index + 1, keyword, section: 'scenario' },
-              { transaction }
-            );
-          }
         }
         if (tagIds !== undefined) await replaceCaseTags(projectId, testcase.id, tagIds, transaction, validatedTags);
         return testcase;
@@ -801,13 +873,19 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         priority: z.number().int().optional(),
         type: z.number().int().optional(),
         automationStatus: z.number().int().optional(),
-        template: z.number().int().optional(),
+        template: templateInputSchema.optional(),
         description: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         preConditions: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         expectedResults: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         gherkinExamples: gherkinExamplesSchema,
         tagIds: z.array(z.number().int().positive()).max(5).optional(),
-        steps: z.array(stepInputSchema).max(MAX_CASE_STEPS).optional(),
+        steps: z
+          .array(stepInputSchema)
+          .max(MAX_CASE_STEPS)
+          .optional()
+          .describe(
+            'Omit for text cases; use step/result for step cases; provide stepNo, keyword, and section for Gherkin cases.'
+          ),
       },
     },
     async (args, extra) => {
@@ -816,23 +894,31 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
       await requireEditableProject(projectId, userId);
       const caseId = positiveId(args.caseId, 'case_not_found');
       const { testcase } = await caseForProject(caseId, projectId);
-      const template = args.template === undefined ? Number(testcase.template) : Number(args.template);
+      const template =
+        args.template === undefined ? normalizeTemplate(testcase.template) : normalizeTemplate(args.template);
       const examples = hasOwn(args, 'gherkinExamples') ? args.gherkinExamples : testcase.gherkinExamples;
       if (template === gherkinTemplate && !hasValidGherkinExamples(examples)) {
         throw operationError('gherkin_examples_invalid');
       }
       const hasSteps = hasOwn(args, 'steps');
-      const candidateSteps = hasSteps ? normalizeUpdateSteps(args.steps) : await loadCaseSteps(caseId);
-      const { persistCaseSteps, validateAndNormalizeCaseSteps } = await loadCasePersistence();
-      const normalized = await validateAndNormalizeCaseSteps({
-        caseId,
-        title: args.title ?? testcase.title,
-        template,
-        automationVersion: Number(testcase.automationVersion || 1) + (template === gherkinTemplate ? 1 : 0),
-        gherkinExamples: examples,
-        steps: candidateSteps,
-      });
-      if (hasSteps) await assertStepsBelongToCase(caseId, normalized.steps);
+      if (template === 0) rejectTextTemplateSteps(args.steps);
+      let casePersistence: CasePersistence | undefined;
+      let normalized: { steps: any[] } | undefined;
+      if (template !== 0) {
+        const candidateSteps = hasSteps
+          ? normalizeMcpSteps(args.steps, template, 'update')
+          : await loadCaseSteps(caseId);
+        casePersistence = await loadCasePersistence();
+        normalized = await casePersistence.validateAndNormalizeCaseSteps({
+          caseId,
+          title: args.title ?? testcase.title,
+          template,
+          automationVersion: Number(testcase.automationVersion || 1) + (template === gherkinTemplate ? 1 : 0),
+          gherkinExamples: examples,
+          steps: candidateSteps,
+        });
+        if (hasSteps) await assertStepsBelongToCase(caseId, normalized.steps);
+      }
       const tagIds = args.tagIds === undefined ? undefined : normalizeTagIds(args.tagIds);
       const validatedTags = tagIds === undefined ? undefined : await tagsForProject(projectId, tagIds);
       const values: Record<string, unknown> = {};
@@ -848,13 +934,15 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         'template',
         'gherkinExamples',
       ]) {
-        if (hasOwn(args, key)) values[key] = key === 'title' ? String(args[key]).trim() : args[key];
+        if (hasOwn(args, key)) {
+          values[key] = key === 'title' ? String(args[key]).trim() : key === 'template' ? template : args[key];
+        }
       }
       if (template === gherkinTemplate) values.automationVersion = Number(testcase.automationVersion || 1) + 1;
       await inTransaction(sequelize, async (transaction) => {
         await testcase.update(values, { transaction });
-        if (hasSteps) {
-          await persistCaseSteps({
+        if (hasSteps && casePersistence && normalized) {
+          await casePersistence.persistCaseSteps({
             caseId,
             steps: normalized.steps,
             isGherkin: template === gherkinTemplate,

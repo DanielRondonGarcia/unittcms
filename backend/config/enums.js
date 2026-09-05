@@ -35,6 +35,36 @@ const templates = ['text', 'step', 'gherkin'];
 const gherkinKeywords = ['given', 'when', 'then', 'and', 'but'];
 const gherkinSections = ['background', 'scenario'];
 const gherkinTemplate = 2;
+const gherkinKeywordAliases = {
+  given: ['given', 'dado', 'angenommen', '前提', '假如'],
+  when: ['when', 'cuando', 'wenn', 'quando', 'もし', '当'],
+  then: ['then', 'entonces', 'dann', 'então', 'ならば', '那么'],
+  and: ['and', 'y', 'e', 'und', 'かつ', '并且'],
+  but: ['but', 'pero', 'mas', 'aber', 'しかし', '但是'],
+};
+const gherkinKeywordAliasEntries = Object.entries(gherkinKeywordAliases)
+  .flatMap(([keyword, aliases]) => aliases.map((alias) => ({ keyword, alias })))
+  .sort((left, right) => right.alias.length - left.alias.length);
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const matchGherkinKeywordPrefix = (value) => {
+  if (typeof value !== 'string') return null;
+
+  for (const { keyword, alias } of gherkinKeywordAliasEntries) {
+    const match = value.match(new RegExp(`^${escapeRegExp(alias)}(?=$|\\s|:)`, 'iu'));
+    if (!match) continue;
+
+    const remainder = value.slice(match[0].length);
+    return {
+      keyword,
+      alias: match[0],
+      details: remainder.replace(/^(?:\s*:\s*|\s+)/u, ''),
+    };
+  }
+
+  return null;
+};
 
 const normalizeGherkinSection = (section) => {
   if (section === undefined || section === null || section === '') return 'scenario';
@@ -96,6 +126,8 @@ export {
   gherkinKeywords,
   gherkinSections,
   gherkinTemplate,
+  gherkinKeywordAliases,
+  matchGherkinKeywordPrefix,
   normalizeGherkinSection,
   hasValidGherkinKeywords,
   hasValidGherkinStepOrder,

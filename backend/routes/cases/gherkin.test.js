@@ -124,7 +124,7 @@ describe('Gherkin case persistence', () => {
     const steps = [
       {
         id: 10,
-        step: 'Then text',
+        step: 'text',
         result: 'Then result',
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
@@ -134,7 +134,7 @@ describe('Gherkin case persistence', () => {
       },
       {
         id: 11,
-        step: 'When text',
+        step: 'text',
         result: 'When result',
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
@@ -144,7 +144,7 @@ describe('Gherkin case persistence', () => {
       },
       {
         id: 12,
-        step: 'Given text',
+        step: 'text',
         result: 'Given result',
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
@@ -156,7 +156,7 @@ describe('Gherkin case persistence', () => {
     const response = await request(app).post('/steps/update?caseId=42').send(steps);
     expect(response.status).toBe(200);
     expect(mockStep.update).toHaveBeenCalledWith(
-      { step: 'Then text', result: 'Then result' },
+      { step: 'text', result: 'Then result' },
       expect.objectContaining({ where: { id: 10 }, transaction })
     );
     expect(mockCaseStep.update).toHaveBeenCalledWith(
@@ -176,23 +176,23 @@ describe('Gherkin case persistence', () => {
       .send([
         {
           id: 10,
-          step: 'Given text',
+          step: 'text',
           result: 'legacy',
           editState: 'changed',
           caseSteps: { stepNo: 1, keyword: 'given' },
         },
         {
           id: 11,
-          step: 'When text',
+          step: 'text',
           result: 'legacy',
           editState: 'changed',
           caseSteps: { stepNo: 2, keyword: 'when' },
         },
-        { id: 12, step: 'And text', result: 'legacy', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'and' } },
-        { id: 13, step: 'But text', result: 'legacy', editState: 'changed', caseSteps: { stepNo: 4, keyword: 'but' } },
+        { id: 12, step: 'text', result: 'legacy', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'and' } },
+        { id: 13, step: 'text', result: 'legacy', editState: 'changed', caseSteps: { stepNo: 4, keyword: 'but' } },
         {
           id: 14,
-          step: 'Then text',
+          step: 'text',
           result: 'legacy',
           editState: 'changed',
           caseSteps: { stepNo: 5, keyword: 'then' },
@@ -216,21 +216,21 @@ describe('Gherkin case persistence', () => {
       .send([
         {
           id: 10,
-          step: 'Given text',
+          step: 'text',
           result: '',
           editState: 'changed',
           caseSteps: { stepNo: 1, keyword: 'given', section: 'background' },
         },
         {
           id: 11,
-          step: 'When text',
+          step: 'text',
           result: '',
           editState: 'notChanged',
           caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
         },
         {
           id: 12,
-          step: 'Then text',
+          step: 'text',
           result: '',
           editState: 'notChanged',
           caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
@@ -251,9 +251,9 @@ describe('Gherkin case persistence', () => {
     const response = await request(app)
       .post('/steps/update?caseId=42')
       .send([
-        { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
-        { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
-        { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
       ]);
     expect(response.status).toBe(200);
     expect(update).toHaveBeenCalledWith({ automationVersion: 5 }, { transaction });
@@ -266,9 +266,9 @@ describe('Gherkin case persistence', () => {
       title: 'Login',
       automationVersion: 2,
       Steps: [
-        { id: 10, step: 'Given text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
-        { id: 11, step: 'When text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
-        { id: 12, step: 'Then text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
       ],
       update,
     });
@@ -292,9 +292,9 @@ describe('Gherkin case persistence', () => {
         title: 'Renamed',
         template: 2,
         Steps: [
-          { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
-          { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
-          { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+          { id: 10, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+          { id: 11, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+          { id: 12, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
         ],
       });
 
@@ -314,9 +314,9 @@ describe('Gherkin case persistence', () => {
       title: 'Login',
       automationVersion: 1,
       Steps: [
-        { id: 10, step: 'Given text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
-        { id: 11, step: 'When text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
-        { id: 12, step: 'Then text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
       ],
       update,
     });
@@ -333,9 +333,9 @@ describe('Gherkin case persistence', () => {
       title: 'Login',
       automationVersion: 1,
       Steps: [
-        { id: 10, step: 'Given text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
-        { id: 11, step: 'When text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
-        { id: 12, step: 'Then text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'notChanged', caseSteps: { stepNo: 3, keyword: 'then' } },
       ],
       update,
     });
@@ -381,14 +381,58 @@ describe('Gherkin case persistence', () => {
     expect(response.body.error).toContain('step and result must be strings');
     expect(sequelize.transaction).not.toHaveBeenCalled();
   });
+  it('rejects a localized keyword prefix in Gherkin details with a structured field', async () => {
+    mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
+    const response = await request(app)
+      .post('/steps/update?caseId=42')
+      .send([
+        {
+          id: 10,
+          step: 'Dado que el usuario inició sesión',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' },
+        },
+        {
+          id: 11,
+          step: 'the user opens the dashboard',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+        },
+        {
+          id: 12,
+          step: 'the dashboard is visible',
+          result: '',
+          editState: 'changed',
+          caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+        },
+      ]);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: 'Gherkin step details must not include a keyword prefix',
+      code: 'details_keyword',
+      fields: [
+        {
+          field: 'Steps[0].step',
+          code: 'details_keyword',
+          message: 'Gherkin step details must not include a keyword prefix',
+        },
+      ],
+    });
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+    expect(mockStep.update).not.toHaveBeenCalled();
+    expect(mockCaseStep.update).not.toHaveBeenCalled();
+  });
   it('rejects duplicate or non-positive Gherkin step orders before opening a transaction', async () => {
     mockCase.findByPk.mockResolvedValue({ id: 42, template: 2 });
     const duplicate = await request(app)
       .post('/steps/update?caseId=42')
       .send([
-        { id: 10, step: 'Given', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
-        { id: 11, step: 'When', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
-        { id: 12, step: 'Then', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
       ]);
 
     expect(duplicate.status).toBe(400);
@@ -402,9 +446,9 @@ describe('Gherkin case persistence', () => {
     const nonPositive = await request(app)
       .post('/steps/update?caseId=42')
       .send([
-        { id: 10, step: 'Given', result: '', editState: 'changed', caseSteps: { stepNo: 0, keyword: 'given' } },
-        { id: 11, step: 'When', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
-        { id: 12, step: 'Then', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 0, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
       ]);
 
     expect(nonPositive.status).toBe(400);
@@ -419,9 +463,9 @@ describe('Gherkin case persistence', () => {
       .send({
         template: 2,
         Steps: [
-          { id: 10, step: 'Given', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
-          { id: 11, step: 'When', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
-          { id: 12, step: 'Then', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
+          { id: 10, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+          { id: 11, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'when' } },
+          { id: 12, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'then' } },
         ],
       });
 
@@ -435,21 +479,21 @@ describe('Gherkin case persistence', () => {
       .send([
         {
           id: 10,
-          step: 'Given',
+          step: 'text',
           result: '',
           editState: 'changed',
           caseSteps: { stepNo: 1, keyword: 'given', section: 'outline' },
         },
         {
           id: 11,
-          step: 'When',
+          step: 'text',
           result: '',
           editState: 'changed',
           caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
         },
         {
           id: 12,
-          step: 'Then',
+          step: 'text',
           result: '',
           editState: 'changed',
           caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
@@ -462,21 +506,21 @@ describe('Gherkin case persistence', () => {
       .send([
         {
           id: 10,
-          step: 'Given',
+          step: 'text',
           result: '',
           editState: 'changed',
           caseSteps: { stepNo: 1, keyword: 'given', section: 'background' },
         },
         {
           id: 11,
-          step: 'When',
+          step: 'text',
           result: '',
           editState: 'changed',
           caseSteps: { stepNo: 2, keyword: 'when', section: 'background' },
         },
         {
           id: 12,
-          step: 'Then',
+          step: 'text',
           result: '',
           editState: 'changed',
           caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
@@ -546,7 +590,7 @@ describe('Gherkin case persistence', () => {
 
     const response = await request(app)
       .post('/steps/update?caseId=42')
-      .send([{ id: 10, step: 'legacy', result: '', editState: 'new', caseSteps: { stepNo: 1 } }]);
+      .send([{ id: 10, step: 'Given ordinary text', result: '', editState: 'new', caseSteps: { stepNo: 1 } }]);
     expect(response.status).toBe(200);
     expect(mockCaseStep.create.mock.calls[0][0]).toMatchObject({ keyword: null, section: 'scenario' });
   });
@@ -559,9 +603,9 @@ describe('Gherkin case persistence', () => {
     const response = await request(app)
       .post('/steps/update?caseId=42')
       .send([
-        { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
-        { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
-        { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
       ]);
 
     expect(response.status).toBe(400);
@@ -581,9 +625,9 @@ describe('Gherkin case persistence', () => {
     const response = await request(app)
       .post('/steps/update?caseId=42')
       .send([
-        { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
-        { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
-        { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
       ]);
 
     expect(response.status).toBe(503);
@@ -600,9 +644,9 @@ describe('Gherkin case persistence', () => {
     const response = await request(app)
       .post('/steps/update?caseId=42')
       .send([
-        { id: 10, step: 'Given text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
-        { id: 11, step: 'When text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
-        { id: 12, step: 'Then text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
+        { id: 10, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 1, keyword: 'given' } },
+        { id: 11, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 2, keyword: 'when' } },
+        { id: 12, step: 'text', result: '', editState: 'changed', caseSteps: { stepNo: 3, keyword: 'then' } },
       ]);
 
     expect(response.status).toBe(400);

@@ -3,6 +3,11 @@ import { Op } from 'sequelize';
 import { describe, expect, it, vi } from 'vitest';
 import { registerMcpOperations } from './operations.js';
 
+const persistenceMocks = vi.hoisted(() => ({
+  persistCaseSteps: vi.fn(),
+  validateAndNormalizeCaseSteps: vi.fn(),
+}));
+
 vi.mock('../routes/steps/persistence.js', () => {
   class MockCaseSaveValidationError extends Error {
     code: string;
@@ -17,7 +22,7 @@ vi.mock('../routes/steps/persistence.js', () => {
     }
   }
 
-  const validateAndNormalizeCaseSteps = vi.fn(async ({ template, steps }: RecordValue) => {
+  persistenceMocks.validateAndNormalizeCaseSteps.mockImplementation(async ({ template, steps }: RecordValue) => {
     if (!Array.isArray(steps)) throw new MockCaseSaveValidationError('steps_invalid');
     if (template === 2) {
       const keywords = new Set(
@@ -29,22 +34,42 @@ vi.mock('../routes/steps/persistence.js', () => {
     }
     return { steps };
   });
-  const persistCaseSteps = vi.fn(async ({ steps, Step, CaseStep, transaction }: RecordValue) => {
-    for (const step of steps) {
-      if (step.editState !== 'changed') continue;
-      await Step.update({ step: step.step, result: step.result }, { where: { id: step.id }, transaction });
-      await CaseStep.update(
-        {
-          stepNo: step.caseSteps.stepNo,
-          keyword: step.caseSteps.keyword ?? null,
-          section: step.caseSteps.section ?? 'scenario',
-        },
-        { where: { stepId: step.id }, transaction }
-      );
+  persistenceMocks.persistCaseSteps.mockImplementation(
+    async ({ caseId, steps, Step, CaseStep, transaction }: RecordValue) => {
+      for (const step of steps) {
+        if (step.editState === 'new') {
+          const newStep = await Step.create({ step: step.step, result: step.result }, { transaction });
+          await CaseStep.create(
+            {
+              caseId,
+              stepId: newStep.id,
+              stepNo: step.caseSteps.stepNo,
+              keyword: step.caseSteps.keyword ?? null,
+              section: step.caseSteps.section ?? 'scenario',
+            },
+            { transaction }
+          );
+          continue;
+        }
+        if (step.editState !== 'changed') continue;
+        await Step.update({ step: step.step, result: step.result }, { where: { id: step.id }, transaction });
+        await CaseStep.update(
+          {
+            stepNo: step.caseSteps.stepNo,
+            keyword: step.caseSteps.keyword ?? null,
+            section: step.caseSteps.section ?? 'scenario',
+          },
+          { where: { stepId: step.id }, transaction }
+        );
+      }
+      return steps;
     }
-    return steps;
-  });
-  return { CaseSaveValidationError: MockCaseSaveValidationError, persistCaseSteps, validateAndNormalizeCaseSteps };
+  );
+  return {
+    CaseSaveValidationError: MockCaseSaveValidationError,
+    persistCaseSteps: persistenceMocks.persistCaseSteps,
+    validateAndNormalizeCaseSteps: persistenceMocks.validateAndNormalizeCaseSteps,
+  };
 });
 
 type RecordValue = Record<string, any>;
@@ -381,6 +406,208 @@ describe('MCP domain operations', () => {
     expect(models.CaseStep.update).toHaveBeenCalledWith(
       expect.objectContaining({ stepNo: 1, keyword: 'given', section: 'scenario' }),
       expect.objectContaining({ where: { stepId: 51 }, transaction: { id: 'tx-1' } })
+    );
+  });
+
+  it('normalizes string and numeric templates and applies their step contracts', async () => {
+    const textHarness = harness();
+    const textResponse = await textHarness.call('unittcms_create_test_case', {
+      projectId: 1,
+      folderId: 11,
+      title: 'Text case',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      template: 'text',
+      preConditions: 'A precondition',
+      expectedResults: 'An expected result',
+    });
+    expect(textResponse.isError).not.toBe(true);
+    expect(textHarness.models.Case.create).toHaveBeenCalledWith(
+      expect.objectContaining({ template: 0, preConditions: 'A precondition', expectedResults: 'An expected result' }),
+      expect.anything()
+    );
+    expect(textHarness.models.Step.create).not.toHaveBeenCalled();
+
+    const stepHarness = harness();
+    const stepResponse = await stepHarness.call('unittcms_create_test_case', {
+      projectId: 1,
+      folderId: 11,
+      title: 'Step case',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      template: 1,
+      steps: [{ step: 'Given ordinary text', result: 'the dashboard opens' }],
+    });
+    expect(stepResponse.isError).not.toBe(true);
+    expect(stepHarness.models.Case.create).toHaveBeenCalledWith(
+      expect.objectContaining({ template: 1 }),
+      expect.anything()
+    );
+    expect(stepHarness.models.Step.create).toHaveBeenCalledWith(
+      { step: 'Given ordinary text', result: 'the dashboard opens' },
+      expect.anything()
+    );
+    expect(stepHarness.models.CaseStep.create).toHaveBeenCalledWith(
+      { caseId: 23, stepId: 60, stepNo: 1, keyword: null, section: 'scenario' },
+      expect.anything()
+    );
+  });
+
+  it('requires explicit Gherkin steps and stores details without displayed keyword labels', async () => {
+    const missingHarness = harness();
+    const missing = await missingHarness.call('unittcms_create_test_case', {
+      projectId: 1,
+      folderId: 11,
+      title: 'Missing steps',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      template: 'gherkin',
+    });
+    expect(errorCode(missing)).toBe('steps_required');
+    expect(missingHarness.models.Case.create).not.toHaveBeenCalled();
+    expect(missingHarness.sequelize.transaction).not.toHaveBeenCalled();
+
+    const gherkinHarness = harness();
+    const response = await gherkinHarness.call('unittcms_create_test_case', {
+      projectId: 1,
+      folderId: 11,
+      title: 'Localized case',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      template: 'gherkin',
+      steps: [
+        {
+          step: 'Dado que el usuario está autenticado',
+          result: '',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' },
+        },
+        {
+          step: 'When the user opens the dashboard',
+          result: '',
+          caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+        },
+        {
+          step: 'the dashboard is visible',
+          result: '',
+          caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+        },
+      ],
+    });
+    expect(response.isError).not.toBe(true);
+    expect(persistenceMocks.validateAndNormalizeCaseSteps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ caseId: 23 })
+    );
+    expect(gherkinHarness.models.Step.create.mock.calls.map(([values]) => values.step)).toEqual([
+      'que el usuario está autenticado',
+      'the user opens the dashboard',
+      'the dashboard is visible',
+    ]);
+  });
+
+  it('rejects Gherkin keyword mismatches and template steps without mutation', async () => {
+    const mismatchHarness = harness();
+    const mismatch = await mismatchHarness.call('unittcms_create_test_case', {
+      projectId: 1,
+      folderId: 11,
+      title: 'Mismatch',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      template: 2,
+      steps: [
+        { step: 'When this is wrong', result: '', caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' } },
+        { step: 'when it happens', result: '', caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' } },
+        { step: 'then it works', result: '', caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' } },
+      ],
+    });
+    expect(errorCode(mismatch)).toBe('step_keyword_mismatch');
+    expect(mismatchHarness.models.Case.create).not.toHaveBeenCalled();
+    expect(mismatchHarness.sequelize.transaction).not.toHaveBeenCalled();
+
+    const textHarness = harness();
+    const textWithSteps = await textHarness.call('unittcms_create_test_case', {
+      projectId: 1,
+      folderId: 11,
+      title: 'Text with steps',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      template: 'text',
+      steps: [{ step: 'ordinary text', result: 'ordinary result' }],
+    });
+    expect(errorCode(textWithSteps)).toBe('steps_not_allowed_for_template');
+    expect(textHarness.models.Case.create).not.toHaveBeenCalled();
+    expect(textHarness.sequelize.transaction).not.toHaveBeenCalled();
+
+    const textUpdateHarness = harness();
+    const textUpdate = await textUpdateHarness.call('unittcms_update_test_case', {
+      projectId: 1,
+      caseId: 21,
+      template: 'text',
+      steps: [{ step: 'Given ordinary text', result: 'ordinary result' }],
+    });
+    expect(errorCode(textUpdate)).toBe('steps_not_allowed_for_template');
+    expect(textUpdateHarness.data.case1.update).not.toHaveBeenCalled();
+    expect(textUpdateHarness.sequelize.transaction).not.toHaveBeenCalled();
+
+    const invalidTemplateHarness = harness();
+    const invalidTemplate = await invalidTemplateHarness.call('unittcms_create_test_case', {
+      projectId: 1,
+      folderId: 11,
+      title: 'Invalid template',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      template: 'unsupported',
+    });
+    expect(errorCode(invalidTemplate)).toBe('template_invalid');
+    expect(invalidTemplateHarness.models.Case.create).not.toHaveBeenCalled();
+  });
+
+  it('normalizes Gherkin prefixes on update and stores the numeric template', async () => {
+    const { call, data, models } = harness();
+    data.case1.template = 2;
+    const response = await call('unittcms_update_test_case', {
+      projectId: 1,
+      caseId: 21,
+      template: 'gherkin',
+      steps: [
+        {
+          id: 51,
+          step: 'Dado que the user is signed out',
+          result: 'ok',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' },
+        },
+        {
+          id: 52,
+          step: 'When the user opens login',
+          result: 'ok',
+          caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+        },
+        {
+          id: 53,
+          step: 'the dashboard is shown',
+          result: 'ok',
+          caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+        },
+      ],
+    });
+    expect(response.isError).not.toBe(true);
+    expect(data.case1.update).toHaveBeenCalledWith(expect.objectContaining({ template: 2 }), expect.anything());
+    expect(models.Step.update).toHaveBeenCalledWith(
+      { step: 'que the user is signed out', result: 'ok' },
+      expect.objectContaining({ where: { id: 51 } })
     );
   });
 
