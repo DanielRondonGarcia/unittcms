@@ -12,3 +12,4 @@ database.sqlite
 /.idea/
 .claude/
 openspec/
+.atl/
