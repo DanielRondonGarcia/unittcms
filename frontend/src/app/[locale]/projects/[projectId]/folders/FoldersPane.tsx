@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useRef } from 'react';
 import { Button } from '@heroui/react';
 import { Plus } from 'lucide-react';
 import { Tree } from 'react-arborist';
@@ -31,6 +31,24 @@ export default function FoldersPane({ projectId, messages, locale }: Props) {
   const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false);
   const [editingFolder, setEditingFolder] = useState<FolderType | null>(null);
   const [parentFolderId, setParentFolderId] = useState<number | null>(null);
+  const treeContainerRef = useRef<HTMLDivElement>(null);
+  const [treeSize, setTreeSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const container = treeContainerRef.current;
+    if (!container) return;
+
+    const updateTreeSize = () => {
+      setTreeSize({ width: container.clientWidth, height: container.clientHeight });
+    };
+
+    updateTreeSize();
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(updateTreeSize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [treeData.length]);
 
   useEffect(() => {
     async function fetchDataEffect() {
@@ -145,17 +163,18 @@ export default function FoldersPane({ projectId, messages, locale }: Props) {
         </Button>
 
         {treeData.length > 0 && (
-          <div className="min-h-0 min-w-0 flex-1">
+          <div ref={treeContainerRef} className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <Tree
               data={treeData}
               className="h-full w-full"
+              height={Math.max(treeSize.height, 1)}
+              width={treeSize.width || '100%'}
               indent={16}
               rowHeight={42}
               overscanCount={5}
               paddingTop={20}
               paddingBottom={20}
               padding={20}
-              width="100%"
               openByDefault={false}
               disableDrop={true}
               disableDrag={true}
