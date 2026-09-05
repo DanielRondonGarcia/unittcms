@@ -8,6 +8,7 @@ import ProfileSettingsPage from './ProfileSettingsPage';
 
 const mocks = vi.hoisted(() => ({
   updateLocale: vi.fn(),
+  listAccessTokens: vi.fn(),
   setToken: vi.fn(),
   storeToken: vi.fn(),
   routerPush: vi.fn(),
@@ -17,10 +18,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/utils/usersControl', () => ({
   updateLocale: mocks.updateLocale,
+  listAccessTokens: mocks.listAccessTokens,
   updateUsername: vi.fn(),
   updatePassword: vi.fn(),
   uploadAvatar: vi.fn(),
   deleteAvatar: vi.fn(),
+  createAccessToken: vi.fn(),
+  revokeAccessToken: vi.fn(),
 }));
 
 vi.mock('@/utils/TokenProvider', async () => {
@@ -65,7 +69,7 @@ vi.mock('@heroui/react', () => {
       onSelectionChange?: (value: { currentKey: string }) => void;
       'aria-label'?: string;
     }) => {
-      mocks.selectLocale = onSelectionChange;
+      if (ariaLabel === 'change locale') mocks.selectLocale = onSelectionChange;
       return <select aria-label={ariaLabel}>{children}</select>;
     },
     SelectItem: ({ children }: { children?: React.ReactNode }) => <option>{children}</option>,
@@ -100,6 +104,7 @@ describe('profile Spanish locale persistence', () => {
     mocks.selectLocale = undefined;
     mocks.updateLocaleButton = undefined;
     mocks.updateLocale.mockResolvedValue({ user: { locale: 'es' } });
+    mocks.listAccessTokens.mockResolvedValue([]);
   });
 
   it('updates the signed-in token and route through the existing preference flow', async () => {

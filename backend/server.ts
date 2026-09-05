@@ -7,11 +7,18 @@ import cors from 'cors';
 import RateLimit from 'express-rate-limit';
 import { Sequelize } from 'sequelize';
 import { RegisterRoutes } from './routes.js';
-import { FRONTEND_ORIGIN, MANUAL_EXECUTION_ENABLED, registerManualExecutionRoute } from './config/config.js';
+import {
+  FRONTEND_ORIGIN,
+  MANUAL_EXECUTION_ENABLED,
+  MCP_ENABLED,
+  MCP_TRUSTED_HOSTS,
+  registerManualExecutionRoute,
+} from './config/config.js';
 import { configureAutomationApplication } from './controllers/AutomationController.js';
 import requestContext from './middleware/requestContext.js';
 import manualExecutionsRoute from './routes/manualExecutions/index.js';
 import reportsRoute from './routes/reports/index.js';
+import { registerMcpRoute } from './mcp/server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +61,8 @@ export const sequelize = new Sequelize({
   logging: false,
 });
 
+registerMcpRoute(app, sequelize, MCP_ENABLED, { frontendOrigin: FRONTEND_ORIGIN, trustedHosts: MCP_TRUSTED_HOSTS });
+
 // Register TSOA-generated routes (TypeScript controllers)
 RegisterRoutes(app);
 
@@ -70,6 +79,7 @@ import usersUpdateRoleRoute from './routes/users/updateRole.js';
 import signUpRoute from './routes/users/signup.js';
 import signInRoute from './routes/users/signin.js';
 import oidcRoute from './routes/users/oidc.js';
+import accessTokensRoute from './routes/users/accessTokens.js';
 app.use('/users', oidcRoute(sequelize)); // OIDC must be before other routes
 app.use('/users', usersIndexRoute(sequelize));
 app.use('/users', usersFindRoute(sequelize));
@@ -82,6 +92,7 @@ app.use('/users', usersUpdateAvatarRoute(sequelize));
 app.use('/users', usersUpdateRoleRoute(sequelize));
 app.use('/users', signUpRoute(sequelize));
 app.use('/users', signInRoute(sequelize));
+app.use('/users', accessTokensRoute(sequelize));
 
 // "/projects"
 import projectsIndexRoute from './routes/projects/index.js';

@@ -85,6 +85,54 @@ already exist, is bcrypt-hashed at startup, and never replaces an existing
 password. If no superuser email is configured, the first signup keeps the
 existing administrator behavior.
 
+## MCP access endpoint rollout
+
+The MCP endpoint is disabled by default. Enable it only after the additive
+access-token migration has completed and the trusted host list has been set.
+The migration preserves existing users, passwords, JWT sign-in, roles, and
+non-MCP routes; no token is created implicitly for an existing account.
+
+### Enable MCP safely
+
+1. Back up the database and keep `MCP_ENABLED=false` while applying the
+   migration.
+2. Run the migration from the application image or source checkout:
+
+   ```bash
+   docker compose --env-file .env -f docker-compose.production.yaml run --rm unittcms npm --prefix backend run migrate
+   ```
+
+   For a source checkout, the equivalent command is
+   `npm --prefix backend run migrate`.
+
+3. Set `MCP_TRUSTED_HOSTS` to a comma-separated list of exact Host header
+   values, including ports when they are part of the deployment. Do not use a
+   wildcard or a public catch-all host. Set `MCP_ENABLED=true`, then recreate
+   the API service.
+4. Open account Settings, create an access token with the minimum required
+   scope, and save the secret when it is shown. The full secret is shown only
+   once; later screens expose metadata only.
+
+MCP clients must call `/mcp` with the bearer header below. Query-string tokens
+are not supported and are rejected; never put an access token in a URL.
+
+```http
+Authorization: Bearer <token>
+```
+
+Tokens expire after their configured 1–90 day lifetime (30 days by default).
+Revoking a token from Settings immediately prevents further MCP requests with
+that token. A read-only token cannot perform write operations.
+
+### Roll back MCP
+
+To disable the endpoint without changing existing account behavior, set
+`MCP_ENABLED=false` and recreate the API service. Keep the additive migration
+and token metadata by default so a later re-enable does not destroy lifecycle
+history. Only undo the migration after a separate data-retention decision and
+database backup; undoing it removes all MCP token metadata and invalidates
+every token. Existing non-MCP routes remain available during this rollback.
+
 Hercules is launched by the worker as a child container through the Docker
 socket, not as a Compose service. Before enabling the worker, pull its image on
 the same Docker host:

@@ -29,6 +29,25 @@ export function isSuperuserConfigured(value = process.env.SUPERUSER_EMAIL) {
 export const MANUAL_EXECUTION_ENABLED = isManualExecutionEnabled();
 export const ALLOW_SELF_REGISTRATION = isSelfRegistrationEnabled();
 
+export function isMcpEnabled(value = process.env.MCP_ENABLED) {
+  return typeof value === 'string' && value.trim().length > 0 && !isFalseLike(value);
+}
+
+export function parseMcpTrustedHosts(value = process.env.MCP_TRUSTED_HOSTS) {
+  if (typeof value !== 'string') return [];
+  return [
+    ...new Set(
+      value
+        .split(',')
+        .map((host) => host.trim())
+        .filter(Boolean)
+    ),
+  ];
+}
+
+export const MCP_ENABLED = isMcpEnabled();
+export const MCP_TRUSTED_HOSTS = parseMcpTrustedHosts();
+
 export function registerManualExecutionRoute(app, sequelize, routeFactory, enabled = MANUAL_EXECUTION_ENABLED) {
   if (enabled) app.use('/manual-executions', routeFactory(sequelize));
 }

@@ -3,7 +3,9 @@ import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isFalseLike,
+  isMcpEnabled,
   isManualExecutionEnabled,
+  parseMcpTrustedHosts,
   isSelfRegistrationEnabled,
   registerManualExecutionRoute,
 } from './config.js';
@@ -32,6 +34,16 @@ describe('manual execution feature flag', () => {
     expect(isSelfRegistrationEnabled('no')).toBe(false);
     expect(isSelfRegistrationEnabled('off')).toBe(false);
     expect(isFalseLike('invalid')).toBe(false);
+  });
+
+  it('keeps MCP disabled by default and normalizes configured trusted hosts', () => {
+    expect(isMcpEnabled(undefined)).toBe(false);
+    expect(isMcpEnabled('false')).toBe(false);
+    expect(isMcpEnabled('true')).toBe(true);
+    expect(parseMcpTrustedHosts(' app.example.test, gateway.example.test, app.example.test ')).toEqual([
+      'app.example.test',
+      'gateway.example.test',
+    ]);
   });
 
   it('does not register the manual API when disabled or invoke its service', async () => {

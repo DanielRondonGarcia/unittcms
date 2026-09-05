@@ -35,6 +35,7 @@ function defineUser(sequelize, DataTypes) {
     User.hasMany(models.Organization, { foreignKey: 'ownerUserId' });
     User.hasMany(models.ManualExecution, { as: 'manualExecutions', foreignKey: 'actorUserId' });
     User.hasMany(models.ManualExecutionEvidence, { as: 'manualEvidence', foreignKey: 'uploaderUserId' });
+    User.hasMany(models.AccessToken, { as: 'accessTokens', foreignKey: 'userId' });
   };
 
   return User;

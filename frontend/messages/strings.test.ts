@@ -19,6 +19,7 @@ function getAllKeys(obj: unknown, prefix = ''): string[] {
 }
 
 describe('Locale message keys consistency', () => {
+  const CANONICAL_LOCALE_KEY_COUNT = 696;
   const locales = [
     { name: 'de', data: de },
     { name: 'en', data: en },
@@ -148,7 +149,7 @@ describe('Locale message keys consistency', () => {
   ] as const;
 
   it('keeps the complete automation feedback catalog contract', () => {
-    expect(baseKeys).toHaveLength(661);
+    expect(baseKeys).toHaveLength(CANONICAL_LOCALE_KEY_COUNT);
   });
 
   it('provides localized report workflow content for every active locale', () => {
