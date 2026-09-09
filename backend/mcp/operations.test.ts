@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Op } from 'sequelize';
 import { describe, expect, it, vi } from 'vitest';
+import { matchGherkinKeywordPrefix } from '../config/enums.js';
 import { registerMcpOperations } from './operations.js';
 
 const persistenceMocks = vi.hoisted(() => ({
@@ -14,10 +15,10 @@ vi.mock('../routes/steps/persistence.js', () => {
     fields: RecordValue[];
     status: number;
 
-    constructor(code: string) {
-      super(code);
+    constructor(code: string, message = code, fields: RecordValue[] = []) {
+      super(message);
       this.code = code;
-      this.fields = [];
+      this.fields = fields;
       this.status = 400;
     }
   }
@@ -25,6 +26,22 @@ vi.mock('../routes/steps/persistence.js', () => {
   persistenceMocks.validateAndNormalizeCaseSteps.mockImplementation(async ({ template, steps }: RecordValue) => {
     if (!Array.isArray(steps)) throw new MockCaseSaveValidationError('steps_invalid');
     if (template === 2) {
+      const prefixedIndex = steps.findIndex(
+        (step) => step?.editState !== 'deleted' && matchGherkinKeywordPrefix(step?.step) !== null
+      );
+      if (prefixedIndex !== -1) {
+        throw new MockCaseSaveValidationError(
+          'details_keyword',
+          'Gherkin step details must not include a keyword prefix',
+          [
+            {
+              field: `Steps[${prefixedIndex}].step`,
+              code: 'details_keyword',
+              message: 'Gherkin step details must not include a keyword prefix',
+            },
+          ]
+        );
+      }
       const keywords = new Set(
         steps.filter((step) => step?.editState !== 'deleted').map((step) => step?.caseSteps?.keyword)
       );
@@ -215,16 +232,28 @@ function harness() {
 
   const sequelize = {
     define: vi.fn((name: string) => models[name]),
-    transaction: vi.fn(async (callback: (transaction: RecordValue) => Promise<unknown>) => callback({ id: 'tx-1' })),
+    transaction: vi.fn(async (callback: (transaction: RecordValue) => Promise<unknown>) => {
+      const previousCases = new Map(cases);
+      try {
+        return await callback({ id: 'tx-1' });
+      } catch (error) {
+        cases.clear();
+        for (const [id, testcase] of previousCases) cases.set(id, testcase);
+        throw error;
+      }
+    }),
   };
-  const tools = new Map<string, { handler: (args: RecordValue, extra: RecordValue) => Promise<any> }>();
+  const tools = new Map<
+    string,
+    { config: RecordValue; handler: (args: RecordValue, extra: RecordValue) => Promise<any> }
+  >();
   const server = {
     registerTool: (
       name: string,
-      _config: RecordValue,
+      config: RecordValue,
       handler: (args: RecordValue, extra: RecordValue) => Promise<any>
     ) => {
-      tools.set(name, { handler });
+      tools.set(name, { config, handler });
     },
   };
   registerMcpOperations(server as never, sequelize);
@@ -240,12 +269,35 @@ function harness() {
     tools,
     models,
     sequelize,
-    data: { project1, project2, folder1, folder2, folder3, case1, case2, tag1, tag2, run1, caseStepLinks, memberships },
+    data: {
+      project1,
+      project2,
+      folder1,
+      folder2,
+      folder3,
+      case1,
+      case2,
+      tag1,
+      tag2,
+      run1,
+      caseStepLinks,
+      memberships,
+      cases,
+    },
   };
 }
 
+function diagnostic(response: any): RecordValue | undefined {
+  try {
+    const value = JSON.parse(response.content[0].text);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function errorCode(response: any): string {
-  return response.content[0].text;
+  return diagnostic(response)?.code ?? response.content[0].text;
 }
 
 describe('MCP domain operations', () => {
@@ -269,6 +321,22 @@ describe('MCP domain operations', () => {
         'unittcms_update_tag',
       ])
     );
+  });
+
+  it('exposes the canonical Gherkin contract in create and update tool guidance', () => {
+    const { tools } = harness();
+    const createConfig = tools.get('unittcms_create_test_case')?.config;
+    const updateConfig = tools.get('unittcms_update_test_case')?.config;
+
+    expect(createConfig?.description).toContain('create requires steps');
+    expect(createConfig?.description).toContain('caseSteps.keyword stores canonical metadata');
+    expect(createConfig?.description).toContain('step stores details only');
+    expect(createConfig?.description).toContain('duplicated or mismatched prefixes are invalid');
+    expect(createConfig?.inputSchema.steps.description).toContain('caseSteps.keyword: given');
+    expect(createConfig?.inputSchema.steps.description).toContain('the user is authenticated');
+    expect(createConfig?.inputSchema.template.description).toContain('step stores details only');
+    expect(updateConfig?.description).toContain('replaces and validates the supplied active step set');
+    expect(updateConfig?.inputSchema.steps.description).toContain('retry with the corrected steps array');
   });
 
   it('enforces read and write scopes before invoking domain handlers', async () => {
@@ -512,6 +580,54 @@ describe('MCP domain operations', () => {
     ]);
   });
 
+  it('rejects a duplicate Gherkin prefix during create without persisting case steps', async () => {
+    const duplicateHarness = harness();
+    const response = await duplicateHarness.call('unittcms_create_test_case', {
+      projectId: 1,
+      folderId: 11,
+      title: 'Duplicate prefix',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      template: 'gherkin',
+      steps: [
+        {
+          step: 'Dado Dado que the user is signed out',
+          result: '',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' },
+        },
+        {
+          step: 'When the user opens the dashboard',
+          result: '',
+          caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+        },
+        {
+          step: 'the dashboard is visible',
+          result: '',
+          caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+        },
+      ],
+    });
+
+    expect(errorCode(response)).toBe('details_keyword');
+    const result = diagnostic(response);
+    expect(result).toEqual(
+      expect.objectContaining({
+        code: 'details_keyword',
+        message: 'Gherkin step details must not include a keyword prefix',
+      })
+    );
+    expect(result?.fields).toEqual([expect.objectContaining({ field: 'Steps[0].step', code: 'details_keyword' })]);
+    expect(result?.remediation).toContain('caseSteps');
+    expect(result?.remediation).toContain('"step":"the user is authenticated"');
+    expect(duplicateHarness.models.Case.create).toHaveBeenCalledOnce();
+    expect(duplicateHarness.data.cases.has(23)).toBe(false);
+    expect(duplicateHarness.models.Step.create).not.toHaveBeenCalled();
+    expect(duplicateHarness.models.CaseStep.create).not.toHaveBeenCalled();
+    expect(duplicateHarness.sequelize.transaction).toHaveBeenCalledOnce();
+  });
+
   it('rejects Gherkin keyword mismatches and template steps without mutation', async () => {
     const mismatchHarness = harness();
     const mismatch = await mismatchHarness.call('unittcms_create_test_case', {
@@ -530,6 +646,17 @@ describe('MCP domain operations', () => {
       ],
     });
     expect(errorCode(mismatch)).toBe('step_keyword_mismatch');
+    const mismatchResult = diagnostic(mismatch);
+    expect(mismatchResult).toEqual(
+      expect.objectContaining({
+        code: 'step_keyword_mismatch',
+        remediation: expect.stringContaining('canonical keyword'),
+      })
+    );
+    expect(mismatchResult?.fields).toEqual([
+      expect.objectContaining({ field: 'steps[0].caseSteps.keyword', code: 'step_keyword_mismatch' }),
+    ]);
+    expect(JSON.stringify(mismatchResult)).not.toContain('this is wrong');
     expect(mismatchHarness.models.Case.create).not.toHaveBeenCalled();
     expect(mismatchHarness.sequelize.transaction).not.toHaveBeenCalled();
 
@@ -611,11 +738,71 @@ describe('MCP domain operations', () => {
     );
   });
 
+  it('rejects a duplicate Gherkin prefix before updating the case', async () => {
+    const { call, data, models, sequelize } = harness();
+    data.case1.template = 2;
+    const response = await call('unittcms_update_test_case', {
+      projectId: 1,
+      caseId: 21,
+      template: 'gherkin',
+      steps: [
+        {
+          id: 51,
+          step: 'Dado Dado que the user is signed out',
+          result: 'ok',
+          caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' },
+        },
+        {
+          id: 52,
+          step: 'When the user opens login',
+          result: 'ok',
+          caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+        },
+        {
+          id: 53,
+          step: 'the dashboard is shown',
+          result: 'ok',
+          caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+        },
+      ],
+    });
+
+    expect(errorCode(response)).toBe('details_keyword');
+    const result = diagnostic(response);
+    expect(result).toEqual(
+      expect.objectContaining({
+        code: 'details_keyword',
+        message: 'Gherkin step details must not include a keyword prefix',
+      })
+    );
+    expect(result?.fields).toEqual([expect.objectContaining({ field: 'Steps[0].step', code: 'details_keyword' })]);
+    expect(result?.remediation).toContain('caseSteps');
+    expect(result?.remediation).toContain('"step":"the user is authenticated"');
+    expect(persistenceMocks.validateAndNormalizeCaseSteps).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        steps: expect.arrayContaining([expect.objectContaining({ step: 'Dado que the user is signed out' })]),
+      })
+    );
+    expect(data.case1.update).not.toHaveBeenCalled();
+    expect(models.Step.update).not.toHaveBeenCalled();
+    expect(models.CaseStep.update).not.toHaveBeenCalled();
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+  });
+
   it('returns stable safe errors instead of database messages', async () => {
     const { call, models } = harness();
     models.Run.create.mockRejectedValueOnce(new Error('SequelizeDatabaseError: secret connection details'));
     const response = await call('unittcms_create_test_run', { projectId: 1, name: 'Run' });
+    const result = diagnostic(response);
+    expect(result).toEqual(
+      expect.objectContaining({
+        code: 'operation_failed',
+        message: 'The MCP operation could not be completed.',
+        remediation: expect.any(String),
+      })
+    );
     expect(errorCode(response)).toBe('operation_failed');
-    expect(errorCode(response)).not.toContain('secret');
+    expect(JSON.stringify(response)).not.toContain('secret');
+    expect(JSON.stringify(response)).not.toContain('SequelizeDatabaseError');
   });
 });

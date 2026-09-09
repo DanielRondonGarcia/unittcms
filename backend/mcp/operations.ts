@@ -26,6 +26,17 @@ type CasePersistence = {
   persistCaseSteps: (args: Record<string, any>) => Promise<unknown>;
   validateAndNormalizeCaseSteps: (args: Record<string, any>) => Promise<{ steps: any[] }>;
 };
+type DiagnosticField = { field: string; code: string; message: string };
+type ErrorGuidance = { message: string; remediation: string };
+
+const GHERKIN_STEP_DETAILS_GUIDANCE =
+  'For Gherkin, caseSteps.keyword stores the canonical metadata and step stores details only. Valid shape: caseSteps.keyword: given with step: "the user is authenticated". Do not store or display "Dado" or "Given" in step. A single matching displayed prefix may be normalized once, but duplicated or mismatched prefixes are invalid.';
+const GHERKIN_STEPS_GUIDANCE =
+  'For template gherkin (2), create requires steps. Each active step must include caseSteps.stepNo as a unique consecutive positive number, caseSteps.keyword as canonical given, when, then, and, or but, caseSteps.section as background or scenario, and non-empty details in step. caseSteps.keyword stores canonical metadata; step stores details only. Example: caseSteps.keyword: given and step: "the user is authenticated". Do not store or display "Dado" or "Given" in step. A single matching displayed prefix may be normalized once, but duplicated or mismatched prefixes are invalid.';
+const GHERKIN_TEMPLATE_GUIDANCE =
+  'Case template: text (0) uses preConditions/expectedResults and does not accept steps; step (1) uses ordinary steps; gherkin (2) requires the Gherkin steps contract. For Gherkin, caseSteps.keyword stores canonical metadata and step stores details only, for example keyword: given with step: "the user is authenticated".';
+const GHERKIN_EXAMPLES_GUIDANCE =
+  'When Gherkin examples are supplied, use a non-empty headers array of unique strings and rows whose string-cell count exactly matches the headers count. Omit or set gherkinExamples to null when examples are not needed.';
 const text = (value: unknown) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
 const denied = (scope: string) => ({
   content: [{ type: 'text', text: `insufficient_scope: ${scope} scope required` }],
@@ -72,17 +83,103 @@ const SAFE_ERROR_CODES = new Set([
   'operation_failed',
 ]);
 
+const GHERKIN_ERROR_CODES = new Set([
+  'gherkin_examples_invalid',
+  'steps_required',
+  'details_keyword',
+  'step_keyword_mismatch',
+  'section_invalid',
+  'step_order_invalid',
+  'keywords_invalid',
+  'gherkin_invalid',
+  'gherkin_lint_unavailable',
+  'gherkin_lint_failed',
+]);
+
+const MCP_ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
+  details_keyword: {
+    message: 'Gherkin step details must contain details only, not a keyword prefix.',
+    remediation:
+      'Retry with a shape such as {"caseSteps":{"keyword":"given","section":"scenario","stepNo":1},"step":"the user is authenticated"}. Store only "the user is authenticated" in step; do not include or duplicate "Dado" or "Given". A single matching prefix may be normalized once, but duplicated or mismatched prefixes are invalid.',
+  },
+  step_keyword_mismatch: {
+    message: 'The canonical keyword does not match the displayed prefix at the reported step.',
+    remediation:
+      'At the reported steps[index], set caseSteps.keyword to the canonical keyword matching the detected displayed prefix, or remove that prefix and keep details only in step, then retry. Do not echo scenario content in step.',
+  },
+  step_order_invalid: {
+    message: 'Active Gherkin step numbers must be unique, consecutive, and positive.',
+    remediation: 'Retry with active caseSteps.stepNo values 1, 2, 3, and so on, without duplicates or gaps.',
+  },
+  keywords_invalid: {
+    message: 'Active Gherkin steps require Given, When, Then, and only canonical step keywords.',
+    remediation:
+      'Retry with at least one active step using each canonical keyword given, when, and then; optional steps may use and or but. Put the canonical value in caseSteps.keyword.',
+  },
+  section_invalid: {
+    message: 'Each active Gherkin step section must be background or scenario.',
+    remediation: 'Retry with caseSteps.section set to exactly background or scenario for every active step.',
+  },
+  steps_required: {
+    message: 'Gherkin cases require a non-empty active steps set.',
+    remediation:
+      'For a Gherkin create, provide steps with at least one active step; for an update, include the replacement active set and keep at least one step.',
+  },
+  gherkin_examples_invalid: {
+    message: 'The Gherkin examples table is invalid.',
+    remediation: GHERKIN_EXAMPLES_GUIDANCE,
+  },
+  gherkin_invalid: {
+    message: 'The Gherkin case is invalid.',
+    remediation:
+      'Correct the bounded fields reported in fields, then retry with the canonical Gherkin step shape and details-only step text.',
+  },
+  gherkin_lint_failed: {
+    message: 'Gherkin lint failed for the supplied case.',
+    remediation:
+      'Correct each bounded lint field reported in fields, then retry. Keep keyword metadata canonical and step text limited to details.',
+  },
+  gherkin_lint_unavailable: {
+    message: 'Gherkin lint is temporarily unavailable.',
+    remediation: 'Retry the same validated Gherkin request when the lint service is available.',
+  },
+  steps_invalid: {
+    message: 'The steps value is invalid.',
+    remediation: 'Retry with steps as an array containing at most 500 step objects.',
+  },
+  step_shape_invalid: {
+    message: 'A supplied step has an invalid shape.',
+    remediation:
+      'Retry each active step with caseSteps, a positive stepNo, a canonical keyword and section for Gherkin, plus string step and result values.',
+  },
+  template_invalid: {
+    message: 'The case template is invalid.',
+    remediation: 'Retry with template text, step, or gherkin, or numeric template 0, 1, or 2.',
+  },
+  steps_not_allowed_for_template: {
+    message: 'Text-template cases do not accept steps.',
+    remediation: 'Retry a text-template request without steps, or choose the step or gherkin template.',
+  },
+};
+
+const DEFAULT_ERROR_GUIDANCE: ErrorGuidance = {
+  message: 'The MCP operation could not be completed.',
+  remediation: 'Correct the referenced resource or request and retry the operation.',
+};
+
 class McpOperationError extends Error {
   readonly code: string;
+  readonly fields?: DiagnosticField[];
 
-  constructor(code: string) {
+  constructor(code: string, fields?: DiagnosticField[]) {
     super(SAFE_ERROR_CODES.has(code) ? code : 'operation_failed');
     this.name = 'McpOperationError';
     this.code = SAFE_ERROR_CODES.has(code) ? code : 'operation_failed';
+    this.fields = fields;
   }
 }
 
-const operationError = (code: string) => new McpOperationError(code);
+const operationError = (code: string, fields?: DiagnosticField[]) => new McpOperationError(code, fields);
 
 function safeErrorCode(error: unknown): string {
   if (error instanceof McpOperationError) return error.code;
@@ -93,10 +190,59 @@ function safeErrorCode(error: unknown): string {
   return 'operation_failed';
 }
 
-const failed = (error: unknown) => ({
-  content: [{ type: 'text', text: safeErrorCode(error) }],
-  isError: true,
-});
+function boundedDiagnosticText(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = Array.from(value, (character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f ? ' ' : character;
+  })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+  return normalized || undefined;
+}
+
+function safeDiagnosticFields(error: unknown): DiagnosticField[] | undefined {
+  if (!error || typeof error !== 'object' || !Array.isArray((error as { fields?: unknown }).fields)) return undefined;
+
+  const fields = (error as { fields: unknown[] }).fields.slice(0, 16).flatMap((value) => {
+    if (!value || typeof value !== 'object') return [];
+    const source = value as Record<string, unknown>;
+    const field = boundedDiagnosticText(source.field, 160);
+    const code = boundedDiagnosticText(source.code, 80);
+    const message = boundedDiagnosticText(source.message, 500);
+    if (!field || !code || !message || !/^[A-Za-z0-9_.[\]-]+(?: \d+)?$/.test(field)) return [];
+    if (!/^[A-Za-z0-9_.[\]-]+$/.test(code)) return [];
+    return [{ field, code, message }];
+  });
+
+  return fields.length > 0 ? fields : undefined;
+}
+
+function safeStructuredMessage(error: unknown, code: string): string | undefined {
+  if (!GHERKIN_ERROR_CODES.has(code) || error instanceof McpOperationError || !error || typeof error !== 'object') {
+    return undefined;
+  }
+  if (!Array.isArray((error as { fields?: unknown }).fields)) return undefined;
+  return boundedDiagnosticText((error as { message?: unknown }).message, 500);
+}
+
+const failed = (error: unknown) => {
+  const code = safeErrorCode(error);
+  const guidance = MCP_ERROR_GUIDANCE[code] ?? DEFAULT_ERROR_GUIDANCE;
+  const diagnostic: Record<string, unknown> = {
+    code,
+    message: safeStructuredMessage(error, code) ?? guidance.message,
+    remediation: guidance.remediation,
+  };
+  const fields = safeDiagnosticFields(error);
+  if (fields) diagnostic.fields = fields;
+  return {
+    content: [{ type: 'text', text: JSON.stringify(diagnostic) }],
+    isError: true,
+  };
+};
 
 function caller(extra: Extra): number {
   const id = Number(extra.authInfo?.extra?.userId);
@@ -158,27 +304,39 @@ const gherkinExamplesSchema = z
       .max(500),
   })
   .nullable()
-  .optional();
+  .optional()
+  .describe(GHERKIN_EXAMPLES_GUIDANCE);
 const templateInputSchema = z
   .union([z.number().int(), z.enum(['text', 'step', 'gherkin'])])
-  .describe(
-    'Case template: text (0) uses preConditions/expectedResults, step (1) uses ordinary steps, gherkin (2) requires canonical Given/When/Then steps.'
-  );
+  .describe(GHERKIN_TEMPLATE_GUIDANCE);
 const stepInputSchema = z.object({
   id: z.number().int().positive().optional(),
   editState: z.enum(['notChanged', 'changed', 'new', 'deleted']).optional(),
-  step: z.string().max(MAX_TEXT_LENGTH).optional(),
+  step: z.string().max(MAX_TEXT_LENGTH).optional().describe(GHERKIN_STEP_DETAILS_GUIDANCE),
   result: z.string().max(MAX_TEXT_LENGTH).optional(),
   caseSteps: z
     .object({
-      stepNo: z.number().int().positive().optional(),
-      keyword: z.enum(['given', 'when', 'then', 'and', 'but']).nullable().optional(),
+      stepNo: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('For Gherkin, use unique consecutive positive step numbers starting at 1 for the active set.'),
+      keyword: z
+        .enum(['given', 'when', 'then', 'and', 'but'])
+        .nullable()
+        .optional()
+        .describe(
+          'For Gherkin, canonical metadata only: use given, when, then, and, or but; do not put the keyword in step.'
+        ),
       section: z
         .enum(gherkinSections as [string, ...string[]])
         .nullable()
-        .optional(),
+        .optional()
+        .describe('For Gherkin, use exactly background or scenario.'),
     })
-    .optional(),
+    .optional()
+    .describe('Gherkin metadata for the step; keyword is canonical metadata and step remains details-only.'),
 });
 
 function positiveId(value: unknown, code = 'operation_failed'): number {
@@ -304,7 +462,7 @@ function normalizeOrdinarySteps(steps: any[]): any[] {
 }
 
 function normalizeGherkinStepsForMcp(steps: any[]): any[] {
-  return steps.map((step) => {
+  return steps.map((step, index) => {
     if (!step || typeof step !== 'object' || Array.isArray(step) || step.editState === 'deleted') return step;
 
     const keyword = step.caseSteps?.keyword;
@@ -314,7 +472,16 @@ function normalizeGherkinStepsForMcp(steps: any[]): any[] {
 
     const prefix = matchGherkinKeywordPrefix(step.step);
     if (!prefix) return step;
-    if (prefix.keyword !== keyword) throw operationError('step_keyword_mismatch');
+    if (prefix.keyword !== keyword) {
+      throw operationError('step_keyword_mismatch', [
+        {
+          field: `steps[${index}].caseSteps.keyword`,
+          code: 'step_keyword_mismatch',
+          message:
+            'The selected canonical keyword must match the detected displayed prefix; use the matching canonical keyword or remove the displayed prefix.',
+        },
+      ]);
+    }
     return { ...step, step: prefix.details };
   });
 }
@@ -775,7 +942,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
     'unittcms_create_test_case',
     'write',
     {
-      description: 'Create a test case with optional transactional steps, examples, and tags',
+      description: `Create a test case with optional transactional steps, examples, and tags. ${GHERKIN_STEPS_GUIDANCE}`,
       inputSchema: {
         projectId: z.number().int().positive(),
         folderId: z.number().int().positive(),
@@ -791,13 +958,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         automationVersion: z.number().int().positive().optional(),
         gherkinExamples: gherkinExamplesSchema,
         tagIds: z.array(z.number().int().positive()).max(5).optional(),
-        steps: z
-          .array(stepInputSchema)
-          .max(MAX_CASE_STEPS)
-          .optional()
-          .describe(
-            'Omit for text cases; use step/result for step cases; provide stepNo, keyword, and section for Gherkin cases.'
-          ),
+        steps: z.array(stepInputSchema).max(MAX_CASE_STEPS).optional().describe(GHERKIN_STEPS_GUIDANCE),
       },
     },
     async (args, extra) => {
@@ -864,7 +1025,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
     'unittcms_update_test_case',
     'write',
     {
-      description: 'Update test-case metadata and optionally replace validated steps, examples, and tags',
+      description: `Update test-case metadata and optionally replace validated steps, examples, and tags. ${GHERKIN_STEPS_GUIDANCE} When steps is supplied, it replaces and validates the supplied active step set; retry with the corrected steps array rather than relying on server-side repair.`,
       inputSchema: {
         projectId: z.number().int().positive(),
         caseId: z.number().int().positive(),
@@ -873,7 +1034,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         priority: z.number().int().optional(),
         type: z.number().int().optional(),
         automationStatus: z.number().int().optional(),
-        template: templateInputSchema.optional(),
+        template: templateInputSchema.optional().describe(GHERKIN_TEMPLATE_GUIDANCE),
         description: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         preConditions: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         expectedResults: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
@@ -884,7 +1045,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
           .max(MAX_CASE_STEPS)
           .optional()
           .describe(
-            'Omit for text cases; use step/result for step cases; provide stepNo, keyword, and section for Gherkin cases.'
+            `${GHERKIN_STEPS_GUIDANCE} On update, supplying steps replaces and validates the supplied active step set; retry with the corrected steps array when validation reports a problem.`
           ),
       },
     },
