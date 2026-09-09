@@ -6,7 +6,8 @@ import defineStep from '../../models/steps.js';
 import defineCaseStep from '../../models/caseSteps.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
-import { gherkinKeywords, gherkinTemplate, hasValidGherkinExamples } from '../../config/enums.js';
+import { gherkinTemplate, hasValidGherkinExamples } from '../../config/enums.js';
+import { CaseSaveValidationError, persistCaseSteps, validateAndNormalizeCaseSteps } from '../steps/persistence.js';
 
 const requiredFields = ['title', 'state', 'priority', 'type', 'automationStatus', 'template'];
 
@@ -50,6 +51,7 @@ export default function (sequelize) {
         preConditions,
         expectedResults,
         gherkinExamples,
+        Steps,
       } = req.body;
 
       if (template === gherkinTemplate && !hasValidGherkinExamples(gherkinExamples)) {
@@ -70,29 +72,40 @@ export default function (sequelize) {
         folderId,
       };
 
+      const hasSteps = Object.prototype.hasOwnProperty.call(req.body, 'Steps');
       const newCase =
-        template === gherkinTemplate
+        template === gherkinTemplate && hasSteps
           ? await sequelize.transaction(async (transaction) => {
               const createdCase = await Case.create(caseAttributes, { transaction });
-              for (const [index, keyword] of gherkinKeywords.slice(0, 3).entries()) {
-                const step = await Step.create({ step: '', result: '' }, { transaction });
-                await CaseStep.create(
-                  {
-                    caseId: createdCase.id,
-                    stepId: step.id,
-                    stepNo: index + 1,
-                    keyword,
-                    section: 'scenario',
-                  },
-                  { transaction }
-                );
-              }
+              const normalized = await validateAndNormalizeCaseSteps({
+                caseId: createdCase.id,
+                title,
+                template,
+                automationVersion: Number(createdCase.automationVersion || 1),
+                gherkinExamples: gherkinExamples ?? null,
+                steps: Steps,
+              });
+              await persistCaseSteps({
+                caseId: createdCase.id,
+                steps: normalized.steps,
+                isGherkin: true,
+                Step,
+                CaseStep,
+                transaction,
+              });
               return createdCase;
             })
           : await Case.create(caseAttributes);
 
       res.json(newCase);
     } catch (error) {
+      if (error instanceof CaseSaveValidationError) {
+        return res.status(error.status).json({
+          error: error.message,
+          code: error.code,
+          ...(error.fields.length ? { fields: error.fields } : {}),
+        });
+      }
       console.error('Error creating new case:', error);
       res.status(500).json({ error: 'Internal server error' });
     }

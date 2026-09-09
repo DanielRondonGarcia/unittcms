@@ -81,9 +81,14 @@ const transaction = { commit: vi.fn(), rollback: vi.fn() };
 const sequelize = {
   transaction: vi.fn(async (callback) => {
     if (!callback) return transaction;
-    const result = await callback(transaction);
-    await transaction.commit();
-    return result;
+    try {
+      const result = await callback(transaction);
+      await transaction.commit();
+      return result;
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
   }),
 };
 const app = express();
@@ -106,18 +111,114 @@ beforeEach(() => {
   mockStep.bulkCreate.mockResolvedValue([{ id: 101 }, { id: 102 }]);
 });
 describe('Gherkin case persistence', () => {
-  it('seeds ordered Given, When, Then rows in the Scenario section for template 2', async () => {
+  it('creates a Gherkin case without empty placeholder rows for template 2', async () => {
     const response = await request(app)
       .post('/cases?folderId=7')
       .send({ title: 'Login', state: 0, priority: 2, type: 0, automationStatus: 0, template: 2 });
 
     expect(response.status).toBe(200);
+    expect(mockCase.create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Login', template: 2, folderId: '7' })
+    );
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+    expect(mockStep.create).not.toHaveBeenCalled();
+    expect(mockCaseStep.create).not.toHaveBeenCalled();
+  });
+  it('validates and persists supplied Gherkin rows in the creation transaction', async () => {
+    const response = await request(app)
+      .post('/cases?folderId=7')
+      .send({
+        title: 'Login',
+        state: 0,
+        priority: 2,
+        type: 0,
+        automationStatus: 0,
+        template: 2,
+        Steps: [
+          {
+            step: 'the user is signed out',
+            result: '',
+            editState: 'new',
+            caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' },
+          },
+          {
+            step: 'the user opens login',
+            result: '',
+            editState: 'new',
+            caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+          },
+          {
+            step: 'the dashboard is shown',
+            result: '',
+            editState: 'new',
+            caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+          },
+        ],
+      });
+
+    expect(response.status).toBe(200);
     expect(sequelize.transaction).toHaveBeenCalledOnce();
+    expect(mockCase.create).toHaveBeenCalledWith(expect.objectContaining({ template: 2 }), { transaction });
+    expect(mockStep.create.mock.calls.map(([attributes]) => attributes)).toEqual([
+      { step: 'the user is signed out', result: '' },
+      { step: 'the user opens login', result: '' },
+      { step: 'the dashboard is shown', result: '' },
+    ]);
     expect(mockCaseStep.create.mock.calls.map(([attributes]) => attributes)).toEqual([
       { caseId: 42, stepId: 100, stepNo: 1, keyword: 'given', section: 'scenario' },
       { caseId: 42, stepId: 101, stepNo: 2, keyword: 'when', section: 'scenario' },
       { caseId: 42, stepId: 102, stepNo: 3, keyword: 'then', section: 'scenario' },
     ]);
+    expect(transaction.commit).toHaveBeenCalledOnce();
+  });
+  it('rejects a nested keyword prefix during Gherkin creation before persisting steps', async () => {
+    const response = await request(app)
+      .post('/cases?folderId=7')
+      .send({
+        title: 'Login',
+        state: 0,
+        priority: 2,
+        type: 0,
+        automationStatus: 0,
+        template: 2,
+        Steps: [
+          {
+            step: 'Dado Dado que the user is signed out',
+            result: '',
+            editState: 'new',
+            caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' },
+          },
+          {
+            step: 'the user opens login',
+            result: '',
+            editState: 'new',
+            caseSteps: { stepNo: 2, keyword: 'when', section: 'scenario' },
+          },
+          {
+            step: 'the dashboard is shown',
+            result: '',
+            editState: 'new',
+            caseSteps: { stepNo: 3, keyword: 'then', section: 'scenario' },
+          },
+        ],
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: 'Gherkin step details must not include a keyword prefix',
+      code: 'details_keyword',
+      fields: [
+        {
+          field: 'Steps[0].step',
+          code: 'details_keyword',
+          message: 'Gherkin step details must not include a keyword prefix',
+        },
+      ],
+    });
+    expect(mockStep.create).not.toHaveBeenCalled();
+    expect(mockCaseStep.create).not.toHaveBeenCalled();
+    expect(transaction.commit).not.toHaveBeenCalled();
+    expect(transaction.rollback).toHaveBeenCalledOnce();
   });
   it('persists reordered and repeated keywords on save', async () => {
     mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
@@ -381,14 +482,14 @@ describe('Gherkin case persistence', () => {
     expect(response.body.error).toContain('step and result must be strings');
     expect(sequelize.transaction).not.toHaveBeenCalled();
   });
-  it('rejects a localized keyword prefix in Gherkin details with a structured field', async () => {
+  it('rejects a nested keyword prefix in Gherkin details with a structured field', async () => {
     mockCase.findByPk.mockResolvedValue({ id: 42, template: 2, title: 'Login', automationVersion: 1 });
     const response = await request(app)
       .post('/steps/update?caseId=42')
       .send([
         {
           id: 10,
-          step: 'Dado que el usuario inició sesión',
+          step: 'Dado Dado que el usuario inició sesión',
           result: '',
           editState: 'changed',
           caseSteps: { stepNo: 1, keyword: 'given', section: 'scenario' },
