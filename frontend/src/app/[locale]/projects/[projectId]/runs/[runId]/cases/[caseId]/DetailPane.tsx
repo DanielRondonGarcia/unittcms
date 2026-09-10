@@ -200,6 +200,10 @@ export default function TestCaseDetailPane({
               runCaseId={runCaseId}
               locale={locale}
               messages={manualExecutionMessages}
+              testCase={testCase}
+              caseDetailMessages={messages}
+              testTypeMessages={testTypeMessages}
+              priorityMessages={priorityMessages}
             />
           </Tab>
         )}

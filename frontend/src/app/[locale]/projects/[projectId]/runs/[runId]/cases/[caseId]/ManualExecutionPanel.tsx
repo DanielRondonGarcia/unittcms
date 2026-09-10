@@ -11,6 +11,7 @@ import {
   type DragEvent,
 } from 'react';
 import { Button } from '@heroui/react';
+import CaseDetail from './CaseDetail';
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog';
 import { TokenContext } from '@/utils/TokenProvider';
 import {
@@ -39,12 +40,20 @@ import {
   type ManualExecutionView,
 } from '@/types/manualExecution';
 import type { ApiError, ApiResult } from '@/utils/apiResult';
+import type { CaseType } from '@/types/case';
+import type { PriorityMessages } from '@/types/priority';
+import type { RunDetailMessages } from '@/types/run';
+import type { TestTypeMessages } from '@/types/testType';
 
 type Props = {
   projectId: string;
   runCaseId: number;
   locale: string;
   messages: ManualExecutionMessages;
+  testCase?: CaseType;
+  caseDetailMessages?: RunDetailMessages;
+  testTypeMessages?: TestTypeMessages;
+  priorityMessages?: PriorityMessages;
 };
 
 type ReportStatus = 'idle' | 'dirty' | 'saving' | 'error';
@@ -193,6 +202,42 @@ function ErrorState({
   );
 }
 
+function CaseDefinitionAccordion({
+  projectId,
+  testCase,
+  locale,
+  messages,
+  testTypeMessages,
+  priorityMessages,
+}: {
+  projectId: string;
+  testCase: CaseType;
+  locale: string;
+  messages: RunDetailMessages;
+  testTypeMessages: TestTypeMessages;
+  priorityMessages: PriorityMessages;
+}) {
+  return (
+    <details className="mt-4 min-w-0 max-w-full overflow-x-hidden rounded-md border dark:border-divider dark:bg-content1">
+      <summary className="cursor-pointer break-words p-3 text-sm font-semibold outline-none hover:bg-default-100 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset">
+        {messages.caseDetail}
+      </summary>
+      <div className="border-t border-default-200 dark:border-divider">
+        <CaseDetail
+          projectId={projectId}
+          testCase={testCase}
+          locale={locale}
+          messages={messages}
+          testTypeMessages={testTypeMessages}
+          priorityMessages={priorityMessages}
+          scenarioHeadingId="manual-case-scenario-detail-heading"
+          compact
+        />
+      </div>
+    </details>
+  );
+}
+
 function ReportField({
   field,
   label,
@@ -233,7 +278,16 @@ function ReportField({
   );
 }
 
-export default function ManualExecutionPanel({ projectId, runCaseId, locale, messages }: Props) {
+export default function ManualExecutionPanel({
+  projectId,
+  runCaseId,
+  locale,
+  messages,
+  testCase,
+  caseDetailMessages,
+  testTypeMessages,
+  priorityMessages,
+}: Props) {
   const context = useContext(TokenContext);
   const accessToken = context.token.access_token;
   const signedIn = context.isSignedIn();
@@ -262,6 +316,17 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
   const uploadExecutionId = useRef<number | null>(null);
   const actionInFlight = useRef(false);
   const reportTooLong = reportCharacterCount(report) > MAX_MANUAL_EXECUTION_REPORT_LENGTH;
+  const caseDefinition =
+    testCase && caseDetailMessages && testTypeMessages && priorityMessages ? (
+      <CaseDefinitionAccordion
+        projectId={projectId}
+        testCase={testCase}
+        locale={locale}
+        messages={caseDetailMessages}
+        testTypeMessages={testTypeMessages}
+        priorityMessages={priorityMessages}
+      />
+    ) : null;
 
   const abortUploads = useCallback(() => {
     uploadGeneration.current += 1;
@@ -686,6 +751,7 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
         className="mt-4 min-w-0 rounded-md border p-3 dark:border-divider dark:bg-content1"
         aria-labelledby="manual-execution-heading"
       >
+        {caseDefinition}
         <h3 id="manual-execution-heading" className="font-bold">
           {messages.manualExecution}
         </h3>
@@ -702,6 +768,7 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
         className="mt-4 min-w-0 rounded-md border p-3 dark:border-divider dark:bg-content1"
         aria-labelledby="manual-execution-heading"
       >
+        {caseDefinition}
         <h3 id="manual-execution-heading" className="font-bold">
           {messages.manualExecution}
         </h3>
@@ -715,6 +782,7 @@ export default function ManualExecutionPanel({ projectId, runCaseId, locale, mes
       className="mt-4 min-w-0 max-w-full overflow-x-hidden rounded-md border p-3 dark:border-divider dark:bg-content1"
       aria-labelledby="manual-execution-heading"
     >
+      {caseDefinition}
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <h3 id="manual-execution-heading" className="font-bold">
           {messages.manualExecution}

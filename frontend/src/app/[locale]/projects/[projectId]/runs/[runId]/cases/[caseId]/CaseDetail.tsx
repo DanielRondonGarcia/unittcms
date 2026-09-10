@@ -16,6 +16,8 @@ type Props = {
   messages: RunDetailMessages;
   testTypeMessages: TestTypeMessages;
   priorityMessages: PriorityMessages;
+  scenarioHeadingId?: string;
+  compact?: boolean;
 };
 
 function isPositiveIdentifier(value: string | number): boolean {
@@ -30,6 +32,8 @@ export default function CaseDetail({
   messages,
   testTypeMessages,
   priorityMessages,
+  scenarioHeadingId = 'scenario-detail-heading',
+  compact = false,
 }: Props) {
   const canNavigateToCase =
     isPositiveIdentifier(projectId) && isPositiveIdentifier(testCase.folderId) && isPositiveIdentifier(testCase.id);
@@ -42,7 +46,7 @@ export default function CaseDetail({
     .sort((a, b) => a.caseSteps.stepNo - b.caseSteps.stepNo);
 
   return (
-    <div className="min-w-0 p-3 text-default-500 sm:p-4 dark:bg-background">
+    <div className={`${compact ? 'min-w-0 p-2' : 'min-w-0 p-3 sm:p-4'} text-default-500 dark:bg-background`}>
       <div className="mb-4 min-w-0">
         {canNavigateToCase ? (
           <Link
@@ -62,17 +66,25 @@ export default function CaseDetail({
       </div>
 
       <dl className="grid min-w-0 gap-3">
-        <div className="min-w-0 rounded-lg border border-default-200 p-3 dark:border-divider dark:bg-content1">
+        <div
+          className={`min-w-0 rounded-lg border border-default-200 ${compact ? 'p-2' : 'p-3'} dark:border-divider dark:bg-content1`}
+        >
           <dt className="font-bold">{messages.description}</dt>
           <dd className="mt-1 break-words whitespace-pre-wrap">{testCase.description || '-'}</dd>
         </div>
       </dl>
 
-      <details className="mt-3 min-w-0 rounded-lg border border-default-200 dark:border-divider dark:bg-content1">
-        <summary className="cursor-pointer break-words p-3 font-bold outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset">
+      <details
+        className={`${compact ? 'mt-2' : 'mt-3'} min-w-0 rounded-lg border border-default-200 dark:border-divider dark:bg-content1`}
+      >
+        <summary
+          className={`cursor-pointer break-words ${compact ? 'p-2' : 'p-3'} font-bold outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`}
+        >
           {messages.metadata}
         </summary>
-        <dl className="grid min-w-0 gap-3 border-t border-default-200 p-3 dark:border-divider sm:grid-cols-2">
+        <dl
+          className={`grid min-w-0 ${compact ? 'gap-2 p-2' : 'gap-3 p-3'} border-t border-default-200 dark:border-divider sm:grid-cols-2`}
+        >
           <div className="min-w-0">
             <dt className="font-bold">{messages.priority}</dt>
             <dd className="mt-1">
@@ -127,9 +139,9 @@ export default function CaseDetail({
       ) : (
         <>
           {testCase.template === gherkinTemplate ? (
-            <section className="mt-4" aria-labelledby="scenario-detail-heading">
+            <section className={compact ? 'mt-3' : 'mt-4'} aria-labelledby={scenarioHeadingId}>
               <div className="mb-3 flex min-w-0 flex-wrap items-baseline gap-2">
-                <h3 id="scenario-detail-heading" className="min-w-0 text-base font-bold text-foreground">
+                <h3 id={scenarioHeadingId} className="min-w-0 text-base font-bold text-foreground">
                   {messages.scenario}:
                 </h3>
                 <span className="min-w-0 break-words text-base text-foreground">{testCase.title}</span>
@@ -142,7 +154,7 @@ export default function CaseDetail({
                     return (
                       <article
                         key={step.id}
-                        className="flex items-start gap-3 rounded-lg border p-3 dark:border-divider/60 dark:bg-content1/70"
+                        className={`flex items-start gap-3 rounded-lg border ${compact ? 'p-2' : 'p-3'} dark:border-divider/60 dark:bg-content1/70`}
                       >
                         <span
                           className={`mt-0.5 inline-flex shrink-0 items-center rounded-full border px-2 py-1 text-xs font-semibold ${
@@ -164,7 +176,9 @@ export default function CaseDetail({
                 )}
               </div>
               {testCase.gherkinExamples && (
-                <div className="mt-5 min-w-0 overflow-x-auto rounded-lg border p-3 dark:border-divider/60 dark:bg-content2">
+                <div
+                  className={`${compact ? 'mt-3 p-2' : 'mt-5 p-3'} min-w-0 overflow-x-auto rounded-lg border dark:border-divider/60 dark:bg-content2`}
+                >
                   <h4 className="mb-2 font-semibold text-foreground">{messages.examples}</h4>
                   <table
                     className="w-full min-w-max border-collapse text-sm dark:text-foreground"
