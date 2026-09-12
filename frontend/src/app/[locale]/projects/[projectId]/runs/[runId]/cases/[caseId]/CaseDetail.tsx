@@ -1,12 +1,13 @@
 'use client';
 
-import { Textarea, Chip } from '@heroui/react';
+import { Chip } from '@heroui/react';
 import { gherkinKeywordStyles, gherkinTemplate, templates, testTypes } from '@/config/selection';
 import type { CaseType } from '@/types/case';
 import type { RunDetailMessages } from '@/types/run';
 import type { PriorityMessages } from '@/types/priority';
 import type { TestTypeMessages } from '@/types/testType';
 import TestCasePriority from '@/components/TestCasePriority';
+import MarkdownContent from '@/components/MarkdownContent';
 import { Link, NextUiLinkClasses } from '@/src/i18n/routing';
 
 type Props = {
@@ -23,6 +24,43 @@ type Props = {
 function isPositiveIdentifier(value: string | number): boolean {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0;
+}
+
+function CaseMarkdown({
+  content,
+  messages,
+  className,
+}: {
+  content?: string | null;
+  messages: RunDetailMessages;
+  className?: string;
+}) {
+  return (
+    <MarkdownContent
+      content={content}
+      copyLabel={messages.copyCode}
+      copiedLabel={messages.codeCopied}
+      copyFailedLabel={messages.copyCodeFailed}
+      className={className}
+    />
+  );
+}
+
+function ReadOnlyMarkdownField({
+  label,
+  content,
+  messages,
+}: {
+  label: string;
+  content?: string | null;
+  messages: RunDetailMessages;
+}) {
+  return (
+    <div role="group" aria-label={label} className="min-w-0 rounded-lg bg-default-100 p-2 dark:bg-content2">
+      <p className="mb-1 text-small font-medium text-default-600 dark:text-default-300">{label}</p>
+      <CaseMarkdown content={content} messages={messages} className="text-small" />
+    </div>
+  );
 }
 
 export default function CaseDetail({
@@ -70,7 +108,9 @@ export default function CaseDetail({
           className={`min-w-0 rounded-lg border border-default-200 ${compact ? 'p-2' : 'p-3'} dark:border-divider dark:bg-content1`}
         >
           <dt className="font-bold">{messages.description}</dt>
-          <dd className="mt-1 break-words whitespace-pre-wrap">{testCase.description || '-'}</dd>
+          <dd className="mt-1 min-w-0">
+            <CaseMarkdown content={testCase.description} messages={messages} />
+          </dd>
         </div>
       </dl>
 
@@ -117,21 +157,17 @@ export default function CaseDetail({
           <p className="mt-2 font-bold">{messages.testDetail}</p>
           <div className="my-2 min-w-0 flex flex-col gap-2 sm:flex-row">
             <div className="min-w-0 w-full sm:w-1/2">
-              <Textarea
-                isReadOnly
-                size="sm"
-                variant="flat"
+              <ReadOnlyMarkdownField
                 label={messages.preconditions}
-                value={testCase.preConditions}
+                content={testCase.preConditions}
+                messages={messages}
               />
             </div>
             <div className="min-w-0 w-full sm:w-1/2">
-              <Textarea
-                isReadOnly
-                size="sm"
-                variant="flat"
+              <ReadOnlyMarkdownField
                 label={messages.expectedResult}
-                value={testCase.expectedResults}
+                content={testCase.expectedResults}
+                messages={messages}
               />
             </div>
           </div>
@@ -163,9 +199,7 @@ export default function CaseDetail({
                         >
                           {keywordLabel}
                         </span>
-                        <p className="min-w-0 whitespace-pre-wrap break-words pt-1 text-sm text-foreground">
-                          {step.step}
-                        </p>
+                        <CaseMarkdown content={step.step} messages={messages} className="pt-1 text-sm" />
                       </article>
                     );
                   })
@@ -217,10 +251,10 @@ export default function CaseDetail({
               {(testCase.Steps ?? []).map((step) => (
                 <div key={step.id} className="my-2 min-w-0 flex flex-col gap-2 sm:flex-row">
                   <div className="min-w-0 w-full sm:w-1/2">
-                    <Textarea isReadOnly size="sm" variant="flat" label={messages.detailsOfTheStep} value={step.step} />
+                    <ReadOnlyMarkdownField label={messages.detailsOfTheStep} content={step.step} messages={messages} />
                   </div>
                   <div className="min-w-0 w-full sm:w-1/2">
-                    <Textarea isReadOnly size="sm" variant="flat" label={messages.expectedResult} value={step.result} />
+                    <ReadOnlyMarkdownField label={messages.expectedResult} content={step.result} messages={messages} />
                   </div>
                 </div>
               ))}

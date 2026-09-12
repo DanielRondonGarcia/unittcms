@@ -5,12 +5,6 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import CaseDetail from './CaseDetail';
 
 vi.mock('@heroui/react', () => ({
-  Textarea: ({ label, value }: { label?: string; value?: string }) => (
-    <div>
-      <span>{label}</span>
-      <span>{value}</span>
-    </div>
-  ),
   Chip: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
 }));
 
@@ -37,6 +31,9 @@ const messages = {
   expectedResult: 'Expected result',
   steps: 'Steps',
   detailsOfTheStep: 'Step details',
+  copyCode: 'Copy code',
+  codeCopied: 'Copied',
+  copyCodeFailed: 'Copy failed',
 };
 
 const testCase = {
@@ -134,10 +131,47 @@ describe('run case detail navigation', () => {
       );
     });
 
-    expect(container.querySelector('dd')?.textContent).toBe(longDescription);
-    expect(container.textContent).toContain(longPreconditions);
-    expect(container.textContent).toContain(longExpectedResult);
+    expect(container.querySelector('dd')?.textContent).toContain(longDescription.trim());
+    expect(container.textContent).toContain(longPreconditions.trim());
+    expect(container.textContent).toContain(longExpectedResult.trim());
     expect(container.querySelector('details summary')?.textContent).toBe(messages.metadata);
+
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('renders Markdown in the read-only case fields', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        <CaseDetail
+          projectId="2"
+          testCase={
+            {
+              ...testCase,
+              description: 'A **formatted** description',
+              preConditions: 'Run `pnpm test` first.',
+              expectedResults: '```bash\npnpm test\n```',
+            } as never
+          }
+          locale="en"
+          messages={messages as never}
+          testTypeMessages={{ other: 'Other' } as never}
+          priorityMessages={{ critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' }}
+        />
+      );
+    });
+
+    expect(container.querySelector('strong')?.textContent).toBe('formatted');
+    expect(container.querySelector('code')?.textContent).toBe('pnpm test');
+    expect(container.querySelector('button')?.textContent).toBe(messages.copyCode);
+    expect(container.querySelector('[role="group"][aria-label="Preconditions"]')?.textContent).toContain('pnpm test');
+    expect(
+      container.querySelector('[role="group"][aria-label="Expected result"]')?.querySelector('pre')
+    ).not.toBeNull();
 
     act(() => root.unmount());
     container.remove();

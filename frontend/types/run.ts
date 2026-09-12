@@ -181,6 +181,9 @@ type RunDetailMessages = {
   correlationId: string;
   noCaseSelected: string;
   metadata: string;
+  copyCode: string;
+  codeCopied: string;
+  copyCodeFailed: string;
   historyUnavailable: string;
   historyNotice: string;
   options: string;
