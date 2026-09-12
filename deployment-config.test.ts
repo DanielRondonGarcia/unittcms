@@ -24,6 +24,15 @@ function serviceBlock(source: string, name: string, nextService: string): string
 }
 
 describe('containerized automation boundaries', () => {
+  it('passes the API rate-limit setting through with a secure default', () => {
+    const api = serviceBlock(compose, 'unittcms', 'redis');
+    const productionApi = serviceBlock(productionCompose, 'unittcms', 'redis');
+    const rateLimitEnvironment = '- RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}';
+
+    expect(api).toContain(rateLimitEnvironment);
+    expect(productionApi).toContain(rateLimitEnvironment);
+  });
+
   it('keeps the API fail-closed by default while allowing an explicit mode override', () => {
     const api = serviceBlock(compose, 'unittcms', 'redis');
 

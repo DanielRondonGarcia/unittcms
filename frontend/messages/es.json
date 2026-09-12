@@ -253,7 +253,13 @@
     "progress": "Progreso",
     "test_classification": "Clasificación de pruebas",
     "by_type": "Por tipo de prueba",
-    "by_priority": "Por prioridad de prueba"
+    "by_priority": "Por prioridad de prueba",
+    "loading": "Cargando...",
+    "request_error": "No se pudieron cargar los datos solicitados.",
+    "retry": "Intentar de nuevo",
+    "retry_after": "Reintentar después de",
+    "correlation_id": "ID de correlación",
+    "no_project": "No hay datos del proyecto disponibles."
   },
   "Folders": {
     "folder": "Carpeta",

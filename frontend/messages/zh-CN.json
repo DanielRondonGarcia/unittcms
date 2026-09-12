@@ -253,7 +253,13 @@
     "progress": "进度",
     "test_classification": "测试分类",
     "by_type": "按测试类型",
-    "by_priority": "按测试优先级"
+    "by_priority": "按测试优先级",
+    "loading": "正在加载...",
+    "request_error": "无法加载请求的数据。",
+    "retry": "重试",
+    "retry_after": "请在此时间后重试",
+    "correlation_id": "关联 ID",
+    "no_project": "没有可用的项目数据。"
   },
   "Folders": {
     "folder": "文件夹",

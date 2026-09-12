@@ -253,7 +253,13 @@
     "progress": "進捗",
     "test_classification": "テスト分類",
     "by_type": "タイプ別",
-    "by_priority": "優先度別"
+    "by_priority": "優先度別",
+    "loading": "読み込み中...",
+    "request_error": "要求されたデータを読み込めませんでした。",
+    "retry": "再試行",
+    "retry_after": "再試行まで",
+    "correlation_id": "相関 ID",
+    "no_project": "プロジェクトデータがありません。"
   },
   "Folders": {
     "folder": "フォルダー",

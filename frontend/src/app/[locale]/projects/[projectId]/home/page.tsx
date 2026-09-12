@@ -14,6 +14,12 @@ export type HomeMessages = {
   testClassification: string;
   byType: string;
   byPriority: string;
+  loading: string;
+  requestError: string;
+  retry: string;
+  retryAfter: string;
+  correlationId: string;
+  noProject: string;
 };
 
 export async function generateMetadata({ params: { locale } }: { params: { locale: LocaleCodeType } }) {
@@ -34,6 +40,12 @@ export default function Page({ params }: { params: { projectId: string } }) {
     testClassification: t('test_classification'),
     byType: t('by_type'),
     byPriority: t('by_priority'),
+    loading: t('loading'),
+    requestError: t('request_error'),
+    retry: t('retry'),
+    retryAfter: t('retry_after'),
+    correlationId: t('correlation_id'),
+    noProject: t('no_project'),
   };
 
   const rcst = useTranslations('RunCaseStatus');

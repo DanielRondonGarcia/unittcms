@@ -253,7 +253,13 @@
     "progress": "Progresso",
     "test_classification": "Classificação de Teste",
     "by_type": "Por tipo de teste",
-    "by_priority": "Por prioridade de teste"
+    "by_priority": "Por prioridade de teste",
+    "loading": "Carregando...",
+    "request_error": "Não foi possível carregar os dados solicitados.",
+    "retry": "Tentar novamente",
+    "retry_after": "Tentar novamente após",
+    "correlation_id": "ID de correlação",
+    "no_project": "Não há dados do projeto disponíveis."
   },
   "Folders": {
     "folder": "Pasta",

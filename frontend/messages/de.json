@@ -253,7 +253,13 @@
     "progress": "Fortschritt",
     "test_classification": "Test-Klassifizierung",
     "by_type": "Nach Typ",
-    "by_priority": "Nach Priorität"
+    "by_priority": "Nach Priorität",
+    "loading": "Wird geladen...",
+    "request_error": "Die angeforderten Daten konnten nicht geladen werden.",
+    "retry": "Erneut versuchen",
+    "retry_after": "Erneut versuchen nach",
+    "correlation_id": "Korrelations-ID",
+    "no_project": "Keine Projektdaten verfügbar."
   },
   "Folders": {
     "folder": "Ordner",

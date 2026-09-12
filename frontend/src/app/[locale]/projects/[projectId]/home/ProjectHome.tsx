@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { Card, CardBody, Chip, Divider } from '@heroui/react';
 import { Folder, Clipboard, FlaskConical } from 'lucide-react';
 import { useTheme } from 'next-themes';
@@ -18,30 +18,42 @@ import { PriorityMessages } from '@/types/priority';
 import { ProjectType } from '@/types/project';
 import { CasePriorityCountType, CaseTypeCountType } from '@/types/chart';
 import { logError } from '@/utils/errorHandler';
+import { EmptyState, LoadingState, RequestErrorState } from '@/components/RequestState';
+import { isRecord, requestJson, toApiError, type ApiError, type ApiResult } from '@/utils/apiResult';
 
 const apiServer = Config.apiServer;
 
-async function fetchProject(jwt: string, projectId: number) {
-  const fetchOptions = {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${jwt}`,
-    },
-  };
+function isProjectPayload(value: unknown): value is ProjectType {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'number' ||
+    typeof value.name !== 'string' ||
+    !Array.isArray(value.Folders) ||
+    !Array.isArray(value.Runs)
+  ) {
+    return false;
+  }
 
+  return (
+    value.Folders.every((folder) => isRecord(folder) && Array.isArray(folder.Cases)) &&
+    value.Runs.every((run) => isRecord(run) && (!run.RunCases || Array.isArray(run.RunCases)))
+  );
+}
+
+async function fetchProject(jwt: string, projectId: number): Promise<ApiResult<ProjectType>> {
   const url = `${apiServer}/home/${projectId}`;
 
-  try {
-    const response = await fetch(url, fetchOptions);
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    const data = await response.json();
-    return data;
-  } catch (error: unknown) {
-    logError('Error fetching data:', error);
-  }
+  return requestJson<ProjectType>(
+    url,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${jwt}`,
+      },
+    },
+    isProjectPayload
+  );
 }
 
 type Props = {
@@ -61,17 +73,9 @@ export function ProjectHome({
 }: Props) {
   const context = useContext(TokenContext);
   const { theme } = useTheme();
-  const [project, setProject] = useState<ProjectType>({
-    id: 0,
-    name: '',
-    detail: '',
-    isPublic: false,
-    userId: 0,
-    createdAt: '',
-    updatedAt: '',
-    Folders: [],
-    Runs: [],
-  });
+  const [isFetching, setIsFetching] = useState(true);
+  const [project, setProject] = useState<ProjectType | null>(null);
+  const [fetchError, setFetchError] = useState<ApiError | null>(null);
   const [folderNum, setFolderNum] = useState(0);
   const [caseNum, setCaseNum] = useState(0);
   const [runNum, setRunNum] = useState(0);
@@ -79,23 +83,61 @@ export function ProjectHome({
   const [priorityCounts, setPriorityCounts] = useState<CasePriorityCountType[]>([]);
   const [progressCategories, setProgressCategories] = useState<string[]>([]);
   const [progressSeries, setProgressSeries] = useState<ProgressSeriesType[]>([]);
+  const requestIdRef = useRef(0);
 
-  useEffect(() => {
-    async function fetchDataEffect() {
-      if (!context.isSignedIn()) {
+  const fetchData = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const isCurrentRequest = () => requestIdRef.current === requestId;
+
+    setIsFetching(true);
+    setFetchError(null);
+    setProject(null);
+    setFolderNum(0);
+    setCaseNum(0);
+    setRunNum(0);
+    setTypesCounts([]);
+    setPriorityCounts([]);
+    setProgressCategories([]);
+    setProgressSeries([]);
+
+    if (!context.isSignedIn()) {
+      setIsFetching(false);
+      return;
+    }
+
+    try {
+      const result = await fetchProject(context.token.access_token, Number(projectId));
+      if (!isCurrentRequest()) {
         return;
       }
 
-      try {
-        const data = await fetchProject(context.token.access_token, Number(projectId));
-        setProject(data);
-      } catch (error: unknown) {
-        logError('Error in effect:', error);
+      if (result.ok) {
+        setProject(result.data);
+      } else {
+        setFetchError(result.error);
+      }
+    } catch (error: unknown) {
+      if (!isCurrentRequest()) {
+        return;
+      }
+
+      logError('Error in effect:', error);
+      setFetchError(toApiError(error));
+    } finally {
+      if (isCurrentRequest()) {
+        setIsFetching(false);
       }
     }
-
-    fetchDataEffect();
   }, [context, projectId]);
+
+  useEffect(() => {
+    void fetchData();
+
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [fetchData]);
 
   useEffect(() => {
     async function aggregate() {
@@ -120,6 +162,18 @@ export function ProjectHome({
 
     aggregate();
   }, [project, testRunCaseStatusMessages]);
+
+  if (isFetching) {
+    return <LoadingState message={messages.loading} />;
+  }
+
+  if (fetchError) {
+    return <RequestErrorState error={fetchError} messages={messages} onRetry={fetchData} />;
+  }
+
+  if (!project) {
+    return <EmptyState message={messages.noProject} />;
+  }
 
   return (
     <div className="container mx-auto max-w-5xl pt-6 px-6 flex-grow">

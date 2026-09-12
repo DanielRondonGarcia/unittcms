@@ -253,7 +253,13 @@
     "progress": "Progress",
     "test_classification": "Test Classification",
     "by_type": "By test type",
-    "by_priority": "By test priority"
+    "by_priority": "By test priority",
+    "loading": "Loading...",
+    "request_error": "The requested data could not be loaded.",
+    "retry": "Try again",
+    "retry_after": "Retry after",
+    "correlation_id": "Correlation ID",
+    "no_project": "No project data is available."
   },
   "Folders": {
     "folder": "Folder",
