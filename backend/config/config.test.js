@@ -5,6 +5,7 @@ import {
   isFalseLike,
   isMcpEnabled,
   isManualExecutionEnabled,
+  isRateLimitEnabled,
   parseMcpTrustedHosts,
   isSelfRegistrationEnabled,
   registerManualExecutionRoute,
@@ -34,6 +35,17 @@ describe('manual execution feature flag', () => {
     expect(isSelfRegistrationEnabled('no')).toBe(false);
     expect(isSelfRegistrationEnabled('off')).toBe(false);
     expect(isFalseLike('invalid')).toBe(false);
+  });
+
+  it('keeps the global API rate limiter enabled by default and accepts false-like values', () => {
+    expect(isRateLimitEnabled(undefined)).toBe(true);
+    expect(isRateLimitEnabled('true')).toBe(true);
+    expect(isRateLimitEnabled('')).toBe(true);
+    expect(isRateLimitEnabled('invalid')).toBe(true);
+    expect(isRateLimitEnabled(' False ')).toBe(false);
+    expect(isRateLimitEnabled('0')).toBe(false);
+    expect(isRateLimitEnabled(' NO ')).toBe(false);
+    expect(isRateLimitEnabled('off')).toBe(false);
   });
 
   it('keeps MCP disabled by default and normalizes configured trusted hosts', () => {

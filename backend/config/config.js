@@ -18,6 +18,10 @@ export function isManualExecutionEnabled(value = process.env.MANUAL_EXECUTION_EN
   return !isFalseLike(value);
 }
 
+export function isRateLimitEnabled(value = process.env.RATE_LIMIT_ENABLED) {
+  return !isFalseLike(value);
+}
+
 export function isSelfRegistrationEnabled(value = process.env.ALLOW_SELF_REGISTRATION) {
   return !isFalseLike(value);
 }
@@ -27,6 +31,7 @@ export function isSuperuserConfigured(value = process.env.SUPERUSER_EMAIL) {
 }
 
 export const MANUAL_EXECUTION_ENABLED = isManualExecutionEnabled();
+export const RATE_LIMIT_ENABLED = isRateLimitEnabled();
 export const ALLOW_SELF_REGISTRATION = isSelfRegistrationEnabled();
 
 export function isMcpEnabled(value = process.env.MCP_ENABLED) {

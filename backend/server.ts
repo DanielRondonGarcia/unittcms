@@ -12,6 +12,7 @@ import {
   MANUAL_EXECUTION_ENABLED,
   MCP_ENABLED,
   MCP_TRUSTED_HOSTS,
+  RATE_LIMIT_ENABLED,
   registerManualExecutionRoute,
 } from './config/config.js';
 import { configureAutomationApplication } from './controllers/AutomationController.js';
@@ -35,14 +36,17 @@ app.use(cors(corsOptions));
 // enable json middleware
 app.use(express.json());
 
-// enable rate limiter
+// Keep request correlation active even when the global rate limiter is disabled.
+// RATE_LIMIT_ENABLED is read at startup; restart/redeploy the API after changing it.
 app.use(requestContext);
-const limiter = RateLimit({
-  windowMs: 60 * 60 * 1000, // 1h
-  max: 1000, // 1000 requests per hour
-  message: 'Too many requests from this IP, please try again after an hour',
-});
-app.use(limiter);
+if (RATE_LIMIT_ENABLED) {
+  const limiter = RateLimit({
+    windowMs: 60 * 60 * 1000, // 1h
+    max: 1000, // 1000 requests per hour
+    message: 'Too many requests from this IP, please try again after an hour',
+  });
+  app.use(limiter);
+}
 
 // Specify the directory to serve static files
 app.use(express.static(path.join(__dirname, 'public')));
