@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   fetchFolders: vi.fn(),
   fetchProjectCases: vi.fn(),
   fetchMembers: vi.fn(),
+  testCaseSelector: vi.fn(),
   routerPush: vi.fn(),
   treeToggle: vi.fn(),
 }));
@@ -108,7 +109,12 @@ vi.mock('@heroui/react', () => {
 });
 
 vi.mock('./RunPregressDonutChart', () => ({ default: () => null }));
-vi.mock('./TestCaseSelector', () => ({ default: () => null }));
+vi.mock('./TestCaseSelector', () => ({
+  default: (props: { cases: Array<{ id: number }> }) => {
+    mocks.testCaseSelector(props);
+    return null;
+  },
+}));
 vi.mock('./AutomationBatchPanel', () => ({
   default: ({ cases }: { cases: Array<{ id: number }> }) => (
     <div data-testid="automation-cases">{cases.map((testCase) => testCase.id).join(',')}</div>
@@ -344,6 +350,37 @@ describe('RunEditor', () => {
     const back = container.querySelector<HTMLButtonElement>('button[aria-label="Back to runs"]');
     await act(async () => back?.click());
     expect(mocks.routerPush).toHaveBeenCalledWith('/projects/10/runs', { locale: 'es' });
+  });
+
+  it('shows cases from the initially selected folder after dependent initialization', async () => {
+    mocks.fetchRun.mockResolvedValueOnce({ ok: true, data: { run, statusCounts: [] } });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    await act(async () => {
+      root.render(
+        <TokenContext.Provider value={contextValue as never}>
+          <RunEditor
+            projectId="10"
+            runId="7"
+            messages={messages as never}
+            runStatusMessages={{} as never}
+            testRunCaseStatusMessages={{} as never}
+            priorityMessages={{} as never}
+            testTypeMessages={{} as never}
+            locale="en"
+          />
+        </TokenContext.Provider>
+      );
+      await settle();
+    });
+
+    expect(mocks.testCaseSelector).toHaveBeenCalledWith(
+      expect.objectContaining({ cases: [expect.objectContaining({ id: testCase.id })] })
+    );
   });
 
   it('restores URL filters after reload without replacing the unfiltered automation cases', async () => {

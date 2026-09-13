@@ -16,6 +16,11 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mocks.routerPush }),
 }));
 
+vi.mock('@/src/i18n/routing', () => ({
+  Link: ({ children, href }: { children?: React.ReactNode; href?: string }) => <a href={href}>{children}</a>,
+  NextUiLinkClasses: 'text-primary',
+}));
+
 vi.mock('@/utils/caseControl', () => ({
   fetchCase: mocks.fetchCase,
 }));
@@ -131,6 +136,8 @@ describe('run case detail tabs', () => {
       ok: true,
       data: {
         id: 1,
+        title: 'Example case',
+        folderId: 3,
         Steps: [],
         RunCases: [],
         template: 'text',
@@ -165,6 +172,10 @@ describe('run case detail tabs', () => {
 
     const tabs = container.querySelector<HTMLElement>('[data-testid="detail-tabs"]');
     expect(tabs).not.toBeNull();
+    const titleHeader = container.querySelector<HTMLElement>('[data-testid="run-case-title"]');
+    expect(titleHeader?.textContent).toContain('#1 Example case');
+    expect(titleHeader?.classList.contains('shrink-0')).toBe(true);
+    expect(titleHeader?.nextElementSibling).toBe(tabs);
     expect(tabs?.dataset.slot).toBe('base');
     expect(tabs?.classList.contains('min-w-0')).toBe(true);
     expect(tabs?.classList.contains('w-full')).toBe(true);

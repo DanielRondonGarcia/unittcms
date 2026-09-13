@@ -226,7 +226,7 @@ export default function RunEditor({
       const foldersData = await fetchFolders(tokenContext.token.access_token, Number(projectId));
       const tree = buildFolderTree(foldersData);
       setTreeData(tree);
-      setSelectedFolder(foldersData[0]);
+      setSelectedFolder(tree[0] ?? null);
       await initTestCases();
       const membersData = await fetchProjectMembersForRun(tokenContext.token.access_token, projectId);
       setMembers(membersData || []);

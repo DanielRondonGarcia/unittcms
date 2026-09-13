@@ -19,6 +19,7 @@ type Props = {
   priorityMessages: PriorityMessages;
   scenarioHeadingId?: string;
   compact?: boolean;
+  showCaseHeading?: boolean;
 };
 
 function isPositiveIdentifier(value: string | number): boolean {
@@ -72,6 +73,7 @@ export default function CaseDetail({
   priorityMessages,
   scenarioHeadingId = 'scenario-detail-heading',
   compact = false,
+  showCaseHeading = true,
 }: Props) {
   const canNavigateToCase =
     isPositiveIdentifier(projectId) && isPositiveIdentifier(testCase.folderId) && isPositiveIdentifier(testCase.id);
@@ -85,23 +87,25 @@ export default function CaseDetail({
 
   return (
     <div className={`${compact ? 'min-w-0 p-2' : 'min-w-0 p-3 sm:p-4'} text-default-500 dark:bg-background`}>
-      <div className="mb-4 min-w-0">
-        {canNavigateToCase ? (
-          <Link
-            href={`/projects/${projectId}/folders/${testCase.folderId}/cases/${testCase.id}`}
-            locale={locale}
-            className={`${NextUiLinkClasses} block min-w-0 max-w-full`}
-            aria-label={caseLabel}
-            title={caseLabel}
-          >
-            <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{caseLabel}</span>
-          </Link>
-        ) : (
-          <span className="block break-words text-sm text-default-500" role="status">
-            {messages.noCaseSelected}
-          </span>
-        )}
-      </div>
+      {showCaseHeading && (
+        <div className="mb-4 min-w-0">
+          {canNavigateToCase ? (
+            <Link
+              href={`/projects/${projectId}/folders/${testCase.folderId}/cases/${testCase.id}`}
+              locale={locale}
+              className={`${NextUiLinkClasses} block min-w-0 max-w-full`}
+              aria-label={caseLabel}
+              title={caseLabel}
+            >
+              <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{caseLabel}</span>
+            </Link>
+          ) : (
+            <span className="block break-words text-sm text-default-500" role="status">
+              {messages.noCaseSelected}
+            </span>
+          )}
+        </div>
+      )}
 
       <dl className="grid min-w-0 gap-3">
         <div

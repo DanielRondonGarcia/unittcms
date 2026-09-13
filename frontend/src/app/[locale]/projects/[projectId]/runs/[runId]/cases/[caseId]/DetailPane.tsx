@@ -7,6 +7,7 @@ import AutomationExecutionPanel from './AutomationExecutionPanel';
 import AutomationHistory from './AutomationHistory';
 import ManualExecutionPanel from './ManualExecutionPanel';
 import Comments from '@/components/Comments';
+import { Link, NextUiLinkClasses } from '@/src/i18n/routing';
 import { TokenContext } from '@/utils/TokenProvider';
 import { fetchCase } from '@/utils/caseControl';
 import { logError } from '@/utils/errorHandler';
@@ -20,7 +21,7 @@ import type { CommentMessages } from '@/types/comment';
 import type { ManualExecutionMessages } from '@/types/manualExecution';
 import { gherkinTemplate } from '@/config/selection';
 
-function isPositiveIdentifier(value: string): boolean {
+function isPositiveIdentifier(value: string | number): boolean {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0;
 }
@@ -166,11 +167,35 @@ export default function TestCaseDetailPane({
     return <EmptyState message={messages.noCaseSelected} />;
   }
 
+  const canNavigateToCase =
+    isPositiveIdentifier(projectId) && isPositiveIdentifier(testCase.folderId) && isPositiveIdentifier(testCase.id);
+  const caseLabel = `#${testCase.id} ${testCase.title}`;
+
   return (
     <div
       className="flex h-full min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden p-3 dark:bg-background"
       data-testid="run-case-detail-pane"
     >
+      <div
+        className="mb-3 min-w-0 w-full max-w-full shrink-0 rounded-md border border-default-200 p-2 dark:border-divider dark:bg-content1"
+        data-testid="run-case-title"
+      >
+        {canNavigateToCase ? (
+          <Link
+            href={`/projects/${projectId}/folders/${testCase.folderId}/cases/${testCase.id}`}
+            locale={locale}
+            className={`${NextUiLinkClasses} block min-w-0 max-w-full`}
+            aria-label={caseLabel}
+            title={caseLabel}
+          >
+            <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{caseLabel}</span>
+          </Link>
+        ) : (
+          <span className="block break-words text-sm text-default-500" role="status">
+            {messages.noCaseSelected}
+          </span>
+        )}
+      </div>
       <Tabs
         aria-label={messages.options}
         size="sm"
@@ -191,6 +216,7 @@ export default function TestCaseDetailPane({
             messages={messages}
             testTypeMessages={testTypeMessages}
             priorityMessages={priorityMessages}
+            showCaseHeading={false}
           />
         </Tab>
         {manualExecutionEnabled && runCaseId !== undefined && (
