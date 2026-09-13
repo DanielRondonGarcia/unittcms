@@ -71,7 +71,7 @@ function CopyableCodeBlock({
       <div className="flex justify-end border-b border-default-200 p-1 dark:border-divider">
         <button
           type="button"
-          className="rounded px-2 py-1 text-xs font-medium text-default-600 hover:bg-default-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:text-default-300 dark:hover:bg-default-100"
+          className="rounded px-2 py-1 text-xs font-medium text-default-600 hover:bg-default-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:text-default-700 dark:hover:bg-default-100"
           onClick={() => void handleCopy()}
           aria-label={label}
         >

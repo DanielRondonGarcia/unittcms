@@ -35,6 +35,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import { useSearchParams } from 'next/navigation';
 import { NodeApi, Tree } from 'react-arborist';
 import {
   fetchRun,
@@ -55,7 +56,7 @@ import TestCaseSelector from './TestCaseSelector';
 import AutomationBatchPanel from './AutomationBatchPanel';
 import AssigneePicker from './AssigneePicker';
 import TestRunFilter from './TestRunFilter';
-import { useRouter } from '@/src/i18n/routing';
+import { usePathname, useRouter } from '@/src/i18n/routing';
 import { testRunStatus } from '@/config/selection';
 import { RunType, RunStatusCountType, RunMessages } from '@/types/run';
 import { CaseType } from '@/types/case';
@@ -71,6 +72,7 @@ import { toApiError, type ApiError } from '@/utils/apiResult';
 import { LoadingState, RequestErrorState } from '@/components/RequestState';
 import TreeItem from '@/components/TreeItem';
 import { buildFolderTree } from '@/utils/buildFolderTree';
+import { parseQueryParam } from '@/utils/parseQueryParam';
 
 const defaultTestRun = {
   id: 0,
@@ -86,6 +88,30 @@ const defaultTestRun = {
 function isPositiveIdentifier(value: string): boolean {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0;
+}
+
+type RunFilterState = {
+  search: string;
+  status: number[];
+  tag: number[];
+  assignee: string;
+};
+
+type SearchParamsLike = {
+  get: (name: string) => string | null;
+};
+
+function parseRunFilterState(searchParams: SearchParamsLike): RunFilterState {
+  return {
+    search: searchParams.get('search') ?? '',
+    status: parseQueryParam(searchParams.get('status')),
+    tag: parseQueryParam(searchParams.get('tag')),
+    assignee: searchParams.get('assignee') ?? '',
+  };
+}
+
+function countRunFilters({ search, status, tag, assignee }: RunFilterState): number {
+  return (search ? 1 : 0) + (status.length > 0 ? 1 : 0) + (tag.length > 0 ? 1 : 0) + (assignee ? 1 : 0);
 }
 
 type Props = {
@@ -111,6 +137,10 @@ export default function RunEditor({
 }: Props) {
   const tokenContext = useContext(TokenContext);
   const { theme } = useTheme();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const initialRunFilters = parseRunFilterState(searchParams);
   const [testRun, setTestRun] = useState<RunType>(defaultTestRun);
   const [treeData, setTreeData] = useState<TreeNodeData[]>([]);
   const [runStatusCounts, setRunStatusCounts] = useState<RunStatusCountType[]>([]);
@@ -124,15 +154,14 @@ export default function RunEditor({
   const [isFetchingRun, setIsFetchingRun] = useState(true);
   const [runError, setRunError] = useState<ApiError | null>(null);
   const [isDirty, setIsDirty] = useState(false);
-  const [searchFilter, setSearchFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<number[]>([]);
-  const [tagFilter, setTagFilter] = useState<number[]>([]);
-  const [assigneeFilter, setAssigneeFilter] = useState<string>('');
+  const [searchFilter, setSearchFilter] = useState(initialRunFilters.search);
+  const [statusFilter, setStatusFilter] = useState<number[]>(initialRunFilters.status);
+  const [tagFilter, setTagFilter] = useState<number[]>(initialRunFilters.tag);
+  const [assigneeFilter, setAssigneeFilter] = useState<string>(initialRunFilters.assignee);
   const [members, setMembers] = useState<MemberType[]>([]);
   const [pendingAssignees, setPendingAssignees] = useState<Map<number, number | null>>(new Map());
   const hasInitializedDependentData = useRef(false);
   const dependentDataRequest = useRef<Promise<void> | null>(null);
-  const router = useRouter();
   const isManager = tokenContext.isProjectManager(Number(projectId));
 
   // not show warning when navigating to test case detail page
@@ -201,6 +230,20 @@ export default function RunEditor({
       await initTestCases();
       const membersData = await fetchProjectMembersForRun(tokenContext.token.access_token, projectId);
       setMembers(membersData || []);
+
+      if (countRunFilters(initialRunFilters) > 0) {
+        const resolvedAssignee =
+          initialRunFilters.assignee === 'me'
+            ? String(tokenContext.token.user?.id ?? '')
+            : (initialRunFilters.assignee ?? '');
+        await initTestCases(
+          initialRunFilters.search,
+          initialRunFilters.status.map(String),
+          initialRunFilters.tag.map(String),
+          resolvedAssignee || undefined
+        );
+      }
+
       hasInitializedDependentData.current = true;
     })();
 
@@ -366,14 +409,45 @@ export default function RunEditor({
     }
   };
 
-  const casesForAutomation = allTestCases.length > 0 ? allTestCases : testCases;
+  const casesForAutomation = allTestCases;
   const hasPendingRunCaseChanges = pendingAssignees.size > 0 || hasUnsavedRunCaseChanges(casesForAutomation);
 
   // **************************************************************************
   // Filter
   // **************************************************************************
   const [showFilter, setShowFilter] = useState(false);
-  const [activeFilterNum, setActiveFilterNum] = useState(0);
+  const [activeFilterNum, setActiveFilterNum] = useState(() => countRunFilters(initialRunFilters));
+
+  const updateRunFilterUrl = (search: string, status: number[], tag: number[], assignee?: string) => {
+    const currentParams = new URLSearchParams(searchParams.toString());
+
+    if (search) {
+      currentParams.set('search', search);
+    } else {
+      currentParams.delete('search');
+    }
+
+    if (status.length > 0) {
+      currentParams.set('status', status.join(','));
+    } else {
+      currentParams.delete('status');
+    }
+
+    if (tag.length > 0) {
+      currentParams.set('tag', tag.join(','));
+    } else {
+      currentParams.delete('tag');
+    }
+
+    if (assignee) {
+      currentParams.set('assignee', assignee);
+    } else {
+      currentParams.delete('assignee');
+    }
+
+    const query = currentParams.toString();
+    router.push(query ? `${pathname}?${query}` : pathname, { locale, scroll: false });
+  };
 
   const onFilterChange = async (search: string, status: number[], tag: number[], assignee?: string) => {
     if (isDirty) {
@@ -392,6 +466,7 @@ export default function RunEditor({
     setTagFilter(tag);
     setAssigneeFilter(assignee ?? '');
     setActiveFilterNum((search ? 1 : 0) + (status.length > 0 ? 1 : 0) + (tag.length > 0 ? 1 : 0) + (assignee ? 1 : 0));
+    updateRunFilterUrl(search, status, tag, assignee);
     await initTestCases(search, status.map(String), tag.map(String), resolvedAssignee || undefined);
   };
 

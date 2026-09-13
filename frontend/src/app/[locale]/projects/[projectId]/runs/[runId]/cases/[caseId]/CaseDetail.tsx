@@ -57,7 +57,7 @@ function ReadOnlyMarkdownField({
 }) {
   return (
     <div role="group" aria-label={label} className="min-w-0 rounded-lg bg-default-100 p-2 dark:bg-content2">
-      <p className="mb-1 text-small font-medium text-default-600 dark:text-default-300">{label}</p>
+      <p className="mb-1 text-small font-medium text-default-600 dark:text-default-700">{label}</p>
       <CaseMarkdown content={content} messages={messages} className="text-small" />
     </div>
   );

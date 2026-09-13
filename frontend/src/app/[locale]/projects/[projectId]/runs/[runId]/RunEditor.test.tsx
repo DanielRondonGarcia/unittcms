@@ -40,7 +40,12 @@ vi.mock('@/utils/TokenProvider', async () => {
 vi.mock('@/utils/formGuard', () => ({ useFormGuard: vi.fn() }));
 
 vi.mock('@/src/i18n/routing', () => ({
+  usePathname: () => '/projects/10/runs/7',
   useRouter: () => ({ push: mocks.routerPush }),
+}));
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
 vi.mock('next-themes', () => ({
@@ -104,9 +109,38 @@ vi.mock('@heroui/react', () => {
 
 vi.mock('./RunPregressDonutChart', () => ({ default: () => null }));
 vi.mock('./TestCaseSelector', () => ({ default: () => null }));
-vi.mock('./AutomationBatchPanel', () => ({ default: () => null }));
+vi.mock('./AutomationBatchPanel', () => ({
+  default: ({ cases }: { cases: Array<{ id: number }> }) => (
+    <div data-testid="automation-cases">{cases.map((testCase) => testCase.id).join(',')}</div>
+  ),
+}));
 vi.mock('./AssigneePicker', () => ({ default: () => null }));
-vi.mock('./TestRunFilter', () => ({ default: () => null }));
+vi.mock('./TestRunFilter', () => ({
+  default: ({
+    activeSearchFilter,
+    activeStatusFilters,
+    activeTagFilters,
+    activeAssigneeFilter,
+    onFilterChange,
+  }: {
+    activeSearchFilter: string;
+    activeStatusFilters: number[];
+    activeTagFilters: number[];
+    activeAssigneeFilter?: string;
+    onFilterChange: (search: string, status: number[], tag: number[], assignee?: string) => void;
+  }) => (
+    <div
+      data-testid="run-filter-state"
+      data-search={activeSearchFilter}
+      data-status={activeStatusFilters.join(',')}
+      data-tags={activeTagFilters.join(',')}
+      data-assignee={activeAssigneeFilter ?? ''}
+    >
+      <button aria-label="Apply test run filter" onClick={() => onFilterChange('login', [1], [2], 'me')} />
+      <button aria-label="Clear test run filter" onClick={() => onFilterChange('', [], [], undefined)} />
+    </div>
+  ),
+}));
 vi.mock('@/components/TreeItem', () => ({
   default: ({ toggleButton, label }: { toggleButton?: React.ReactNode; label: string }) => (
     <div>
@@ -204,6 +238,7 @@ describe('RunEditor', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, '', '/en/projects/10/runs/7');
     mocks.fetchFolders.mockResolvedValue([folder]);
     mocks.fetchProjectCases.mockResolvedValue([testCase]);
     mocks.fetchMembers.mockResolvedValue([]);
@@ -309,5 +344,91 @@ describe('RunEditor', () => {
     const back = container.querySelector<HTMLButtonElement>('button[aria-label="Back to runs"]');
     await act(async () => back?.click());
     expect(mocks.routerPush).toHaveBeenCalledWith('/projects/10/runs', { locale: 'es' });
+  });
+
+  it('restores URL filters after reload without replacing the unfiltered automation cases', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/en/projects/10/runs/7?tab=comments&search=login&status=1,2&tag=5,6&assignee=me'
+    );
+    const filteredCase = { ...testCase, id: 99, title: 'Filtered case' };
+    mocks.fetchRun.mockResolvedValueOnce({ ok: true, data: { run, statusCounts: [] } });
+    mocks.fetchProjectCases
+      .mockReset()
+      .mockResolvedValueOnce([testCase])
+      .mockResolvedValueOnce([filteredCase])
+      .mockResolvedValue([filteredCase]);
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    await act(async () => {
+      root.render(
+        <TokenContext.Provider value={contextValue as never}>
+          <RunEditor
+            projectId="10"
+            runId="7"
+            messages={messages as never}
+            runStatusMessages={{} as never}
+            testRunCaseStatusMessages={{} as never}
+            priorityMessages={{} as never}
+            testTypeMessages={{} as never}
+            locale="en"
+          />
+        </TokenContext.Provider>
+      );
+      await settle();
+    });
+
+    const filterState = container.querySelector('[data-testid="run-filter-state"]');
+    expect(filterState?.getAttribute('data-search')).toBe('login');
+    expect(filterState?.getAttribute('data-status')).toBe('1,2');
+    expect(filterState?.getAttribute('data-tags')).toBe('5,6');
+    expect(filterState?.getAttribute('data-assignee')).toBe('me');
+    expect(mocks.fetchProjectCases).toHaveBeenNthCalledWith(
+      1,
+      'test-token',
+      10,
+      7,
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    );
+    expect(mocks.fetchProjectCases).toHaveBeenNthCalledWith(
+      2,
+      'test-token',
+      10,
+      7,
+      'login',
+      ['1', '2'],
+      ['5', '6'],
+      '7'
+    );
+    expect(container.querySelector('[data-testid="automation-cases"]')?.textContent).toBe('11');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[aria-label="Apply test run filter"]')?.click();
+      await settle();
+    });
+
+    expect(mocks.routerPush).toHaveBeenCalledWith(
+      '/projects/10/runs/7?tab=comments&search=login&status=1&tag=2&assignee=me',
+      { locale: 'en', scroll: false }
+    );
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[aria-label="Clear test run filter"]')?.click();
+      await settle();
+    });
+
+    expect(mocks.routerPush).toHaveBeenLastCalledWith('/projects/10/runs/7?tab=comments', {
+      locale: 'en',
+      scroll: false,
+    });
+    expect(mocks.fetchProjectCases).toHaveBeenLastCalledWith('test-token', 10, 7, '', [], [], undefined);
   });
 });
