@@ -1,9 +1,14 @@
 import React from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import RunLayout from './layout';
+import RunLayoutContent from './RunLayoutContent';
 
 vi.mock('next-intl', () => ({
   useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
+}));
+
+vi.mock('next/navigation', () => ({
+  useSelectedLayoutSegments: () => [],
 }));
 
 vi.mock('./RunEditor', () => ({ default: () => null }));
@@ -21,10 +26,11 @@ describe('run layout', () => {
   });
 
   it('passes route-specific sidebar width bounds', () => {
-    const layout = RunLayout({
+    const content = RunLayout({
       children: <div />,
       params: { projectId: '1', runId: '2', locale: 'en' },
-    });
+    }) as React.ReactElement<React.ComponentProps<typeof RunLayoutContent>>;
+    const layout = RunLayoutContent(content.props);
     const props = (layout as React.ReactElement<ResizableProps>).props;
 
     expect(props).toMatchObject({

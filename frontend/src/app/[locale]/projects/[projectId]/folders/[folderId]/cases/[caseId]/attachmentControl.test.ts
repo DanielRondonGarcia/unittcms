@@ -1,20 +1,90 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   fetchAttachmentPreview,
   fetchCreateAttachments,
   fetchDeleteAttachment,
   fetchDownloadAttachment,
 } from './attachmentControl';
+import CaseAttachmentsEditor from './CaseAttachmentsEditor';
 import { isImage } from './isImage';
-import { AttachmentType } from '@/types/case';
+import type { AttachmentType, CaseMessages } from '@/types/case';
+
+vi.mock('@heroui/react', () => ({
+  Image: ({ alt, src }: { alt?: string; src?: string }) => React.createElement('img', { alt, src }),
+  Button: ({ children, onPress, isDisabled }: { children?: React.ReactNode; onPress?: () => void; isDisabled?: boolean }) => (
+    React.createElement('button', { type: 'button', disabled: isDisabled, onClick: onPress }, children)
+  ),
+  Tooltip: ({ children }: { children?: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+  Card: ({ children }: { children?: React.ReactNode }) => React.createElement('div', null, children),
+  CardBody: ({ children }: { children?: React.ReactNode }) => React.createElement('div', null, children),
+}));
+
+vi.mock('lucide-react', () => ({
+  Trash: () => React.createElement('span'),
+  ArrowDownToLine: () => React.createElement('span'),
+  ArrowUpFromLine: () => React.createElement('span'),
+}));
 
 describe('attachment control', () => {
   const fetchMock = vi.fn();
   const nativeCreateObjectURL = URL.createObjectURL;
   const nativeRevokeObjectURL = URL.revokeObjectURL;
+  const mountedRoots: { root: ReturnType<typeof createRoot>; container: HTMLDivElement }[] = [];
+
+  const editorMessages = {
+    delete: 'Delete',
+    download: 'Download',
+    clickToUpload: 'Click to upload',
+    orDragAndDrop: ' or drag and drop',
+    maxFileSize: 'Maximum file size',
+  } as CaseMessages;
+
+  async function settle() {
+    for (let index = 0; index < 8; index += 1) {
+      await Promise.resolve();
+    }
+  }
+
+  async function renderEditor(attachments: AttachmentType[]) {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push({ root, container });
+
+    await act(async () => {
+      root.render(
+        React.createElement(CaseAttachmentsEditor, {
+          isDisabled: false,
+          token: 'preview-token',
+          attachments,
+          onAttachmentDownload: vi.fn(),
+          onAttachmentDelete: vi.fn(),
+          onFilesDrop: vi.fn(),
+          onFilesInput: vi.fn(),
+          messages: editorMessages,
+        })
+      );
+      await settle();
+    });
+
+    return container;
+  }
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { React: typeof React }).React = React;
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
 
   afterEach(() => {
+    act(() => {
+      for (const { root, container } of mountedRoots.splice(0)) {
+        root.unmount();
+        container.remove();
+      }
+    });
     fetchMock.mockReset();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -119,4 +189,24 @@ describe('attachment control', () => {
       headers: { Authorization: 'Bearer preview-token' },
     });
   });
+
+  test.each([401, 403, 404])(
+    'renders no raster preview bytes when the authenticated preview returns %s',
+    async (status) => {
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const createObjectURL = vi.fn(() => 'blob:preview');
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: createObjectURL });
+      fetchMock.mockResolvedValue({ ok: false, status });
+
+      const container = await renderEditor([createAttachment('photo.png')]);
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/attachments/download/1', {
+        method: 'GET',
+        headers: { Authorization: 'Bearer preview-token' },
+      });
+      expect(createObjectURL).not.toHaveBeenCalled();
+      expect(container.querySelector('img')).toBeNull();
+    }
+  );
 });

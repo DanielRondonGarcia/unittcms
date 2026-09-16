@@ -51,6 +51,14 @@ describe('GET /attachments/download/:attachmentId', () => {
     vi.spyOn(fs.promises, 'readFile').mockResolvedValue(Buffer.from('attachment bytes'));
   });
 
+  it('returns 404 for the removed historical uploads URL without file bytes', async () => {
+    const response = await request(app).get('/uploads/stored.png');
+
+    expect(response.status).toBe(404);
+    expect(response.text).not.toContain('attachment bytes');
+    expect(mockAttachment.findByPk).not.toHaveBeenCalled();
+  });
+
   it('returns 401 without identity and does not query the attachment', async () => {
     signedIn = false;
 
