@@ -2,24 +2,24 @@ import Config from '@/config/config';
 import { logError } from '@/utils/errorHandler';
 const apiServer = Config.apiServer;
 
-async function fetchDownloadAttachment(attachmentId: number, downloadFileName: string) {
-  const fetchOptions = {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  };
-
+async function fetchDownloadAttachment(jwt: string, attachmentId: number, downloadFileName: string) {
   const url = `${apiServer}/attachments/download/${attachmentId}`;
+  let downloadUrl: string | undefined;
 
   try {
-    const response = await fetch(url, fetchOptions);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        'Content-Type': 'application/json',
+      },
+    });
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
     const blob = await response.blob();
-    const downloadUrl = window.URL.createObjectURL(blob);
+    downloadUrl = window.URL.createObjectURL(blob);
 
     const link = document.createElement('a');
     link.href = downloadUrl;
@@ -30,10 +30,14 @@ async function fetchDownloadAttachment(attachmentId: number, downloadFileName: s
   } catch (error: unknown) {
     logError('Error downloading attachment', error);
     throw error;
+  } finally {
+    if (downloadUrl) {
+      window.URL.revokeObjectURL(downloadUrl);
+    }
   }
 }
 
-async function fetchCreateAttachments(caseId: number, files: File[]) {
+async function fetchCreateAttachments(jwt: string, caseId: number, files: File[]) {
   try {
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
@@ -44,6 +48,9 @@ async function fetchCreateAttachments(caseId: number, files: File[]) {
     const response = await fetch(url, {
       method: 'POST',
       body: formData,
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+      },
     });
 
     if (!response.ok) {
@@ -57,18 +64,17 @@ async function fetchCreateAttachments(caseId: number, files: File[]) {
   }
 }
 
-async function fetchDeleteAttachment(attachmentId: number) {
-  const fetchOptions = {
-    method: 'DELETE',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  };
-
+async function fetchDeleteAttachment(jwt: string, attachmentId: number) {
   const url = `${apiServer}/attachments/${attachmentId}`;
 
   try {
-    const response = await fetch(url, fetchOptions);
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        'Content-Type': 'application/json',
+      },
+    });
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
@@ -78,4 +84,25 @@ async function fetchDeleteAttachment(attachmentId: number) {
   }
 }
 
-export { fetchDownloadAttachment, fetchCreateAttachments, fetchDeleteAttachment };
+async function fetchAttachmentPreview(jwt: string, attachmentId: number): Promise<Blob> {
+  const url = `${apiServer}/attachments/download/${attachmentId}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+
+    return await response.blob();
+  } catch (error: unknown) {
+    logError('Error previewing attachment', error);
+    throw error;
+  }
+}
+
+export { fetchDownloadAttachment, fetchCreateAttachments, fetchDeleteAttachment, fetchAttachmentPreview };

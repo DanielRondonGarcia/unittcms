@@ -1,14 +1,13 @@
 import { Image, Button, Tooltip, Card, CardBody } from '@heroui/react';
 import { Trash, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
-import { ChangeEvent, DragEvent } from 'react';
+import { ChangeEvent, DragEvent, useEffect, useState } from 'react';
 import { isImage } from './isImage';
+import { fetchAttachmentPreview } from './attachmentControl';
 import { AttachmentType, CaseMessages } from '@/types/case';
-import Config from '@/config/config';
-
-const apiServer = Config.apiServer;
 
 type Props = {
   isDisabled: boolean;
+  token: string;
   attachments: AttachmentType[];
   onAttachmentDownload: (attachmentId: number, downloadFileName: string) => void;
   onAttachmentDelete: (attachmentId: number) => void;
@@ -17,8 +16,45 @@ type Props = {
   messages: CaseMessages;
 };
 
+function RasterPreview({ image, token }: { image: AttachmentType; token: string }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isCurrent = true;
+    let objectUrl: string | undefined;
+    setPreviewUrl(null);
+
+    void fetchAttachmentPreview(token, image.id)
+      .then((blob) => {
+        if (!isCurrent) {
+          return;
+        }
+
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewUrl(objectUrl);
+      })
+      .catch(() => {
+        // Failed or unauthorized previews render no bytes.
+      });
+
+    return () => {
+      isCurrent = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [image.id, token]);
+
+  if (!previewUrl) {
+    return null;
+  }
+
+  return <Image alt={image.title} src={previewUrl} className="object-cover h-40 w-40" />;
+}
+
 export default function CaseAttachmentsEditor({
   isDisabled = false,
+  token,
   attachments = [],
   onAttachmentDownload,
   onAttachmentDelete,
@@ -39,14 +75,10 @@ export default function CaseAttachmentsEditor({
   return (
     <>
       <div className="flex flex-wrap mt-3">
-        {images.map((image, index) => (
-          <Card key={index} radius="sm" className="mt-2 me-2 max-w-md">
+        {images.map((image) => (
+          <Card key={image.id} radius="sm" className="mt-2 me-2 max-w-md">
             <CardBody>
-              <Image
-                alt={image.title}
-                src={`${apiServer}/uploads/${image.filename}`}
-                className="object-cover h-40 w-40"
-              />
+              <RasterPreview image={image} token={token} />
               <div className="flex items-center justify-between">
                 <p>{image.title}</p>
                 <Tooltip content={messages.delete}>

@@ -559,7 +559,7 @@ export async function up(queryInterface) {
     {
       title: 'vitest logo',
       detail: '',
-      filename: 'logo-shadow.svg',
+      filename: 'vitest-logo.png',
       createdAt: new Date(),
       updatedAt: new Date(),
     },
@@ -569,7 +569,7 @@ export async function up(queryInterface) {
   const sampleFolderPath = 'public/sample';
   const uploadsFolderPath = 'public/uploads';
   const SeleniumLogoFileName = '861px-Selenium_Logo.png';
-  const vitestLogoFileName = 'logo-shadow.svg';
+  const vitestLogoFileName = 'vitest-logo.png';
   if (!fs.existsSync(uploadsFolderPath)) {
     fs.mkdirSync(uploadsFolderPath, { recursive: true });
   }
@@ -578,7 +578,7 @@ export async function up(queryInterface) {
       console.log(err);
     }
   });
-  fs.copyFile(`${sampleFolderPath}/${vitestLogoFileName}`, `${uploadsFolderPath}/${vitestLogoFileName}`, (err) => {
+  fs.copyFile(`${sampleFolderPath}/${SeleniumLogoFileName}`, `${uploadsFolderPath}/${vitestLogoFileName}`, (err) => {
     if (err) {
       console.log(err);
     }

@@ -8,8 +8,7 @@ function isImage(attachmentFile: AttachmentType) {
     extension === 'jpg' ||
     extension === 'jpeg' ||
     extension === 'gif' ||
-    extension === 'bmp' ||
-    extension === 'svg'
+    extension === 'bmp'
   ) {
     return true;
   } else {
