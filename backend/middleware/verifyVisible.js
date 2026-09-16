@@ -3,10 +3,27 @@ import defineMember from '../models/members.js';
 import defineProject from '../models/projects.js';
 import defineFolder from '../models/folders.js';
 import defineCase from '../models/cases.js';
+import defineCaseAttachment from '../models/caseAttachments.js';
 import defineRun from '../models/runs.js';
 import defineRunCase from '../models/runCases.js';
 
 export default function verifyVisibleMiddleware(sequelize) {
+  async function findProjectIdFromAttachmentId(attachmentId) {
+    const Project = defineProject(sequelize, DataTypes);
+    const Folder = defineFolder(sequelize, DataTypes);
+    const Case = defineCase(sequelize, DataTypes);
+    const CaseAttachment = defineCaseAttachment(sequelize, DataTypes);
+    CaseAttachment.belongsTo(Case, { foreignKey: 'caseId' });
+    Case.belongsTo(Folder, { foreignKey: 'folderId' });
+    Folder.belongsTo(Project, { foreignKey: 'projectId' });
+
+    const caseAttachment = await CaseAttachment.findOne({
+      where: { attachmentId },
+      include: { model: Case, include: { model: Folder, include: Project } },
+    });
+    return caseAttachment?.Case?.Folder?.Project?.id;
+  }
+
   /**
    * Verify user can read project by projectId
    * (have to be called after verifySignedIn() middleware)
@@ -87,6 +104,21 @@ export default function verifyVisibleMiddleware(sequelize) {
       return;
     }
 
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  async function verifyProjectVisibleFromAttachmentId(req, res, next) {
+    const attachmentId = req.params.attachmentId || req.query.attachmentId;
+    if (!attachmentId) {
+      return res.status(400).json({ error: 'attachmentId is required' });
+    }
+
+    const projectId = await findProjectIdFromAttachmentId(attachmentId);
+    if (!projectId) return res.status(404).json({ error: 'Not found' });
+    if (await isVisible(projectId, req.userId)) {
+      next();
+      return;
+    }
     return res.status(403).json({ error: 'Forbidden' });
   }
 
@@ -203,6 +235,7 @@ export default function verifyVisibleMiddleware(sequelize) {
     verifyProjectVisibleFromProjectId,
     verifyProjectVisibleFromFolderId,
     verifyProjectVisibleFromCaseId,
+    verifyProjectVisibleFromAttachmentId,
     verifyProjectVisibleFromRunId,
     verifyProjectVisibleFromCommentableId,
   };

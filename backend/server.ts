@@ -48,9 +48,6 @@ if (RATE_LIMIT_ENABLED) {
   app.use(limiter);
 }
 
-// Specify the directory to serve static files
-app.use(express.static(path.join(__dirname, 'public')));
-
 // Swagger UI
 const swaggerPath = path.join(__dirname, 'public/swagger.json');
 const swaggerDocument = JSON.parse(readFileSync(swaggerPath, 'utf8'));

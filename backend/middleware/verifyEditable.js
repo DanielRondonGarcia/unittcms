@@ -4,10 +4,40 @@ import defineMember from '../models/members.js';
 import defineProject from '../models/projects.js';
 import defineFolder from '../models/folders.js';
 import defineCase from '../models/cases.js';
+import defineCaseAttachment from '../models/caseAttachments.js';
 import defineRun from '../models/runs.js';
 import defineRunCase from '../models/runCases.js';
 
 export default function verifyEditableMiddleware(sequelize) {
+  async function findProjectIdFromCaseId(caseId) {
+    const Project = defineProject(sequelize, DataTypes);
+    const Folder = defineFolder(sequelize, DataTypes);
+    const Case = defineCase(sequelize, DataTypes);
+    Project.hasMany(Folder, { foreignKey: 'projectId' });
+    Folder.hasMany(Case, { foreignKey: 'folderId' });
+    Folder.belongsTo(Project, { foreignKey: 'projectId' });
+    Case.belongsTo(Folder, { foreignKey: 'folderId' });
+
+    const testCase = await Case.findByPk(caseId, { include: { model: Folder, include: Project } });
+    return testCase?.Folder?.Project?.id;
+  }
+
+  async function findProjectIdFromAttachmentId(attachmentId) {
+    const Project = defineProject(sequelize, DataTypes);
+    const Folder = defineFolder(sequelize, DataTypes);
+    const Case = defineCase(sequelize, DataTypes);
+    const CaseAttachment = defineCaseAttachment(sequelize, DataTypes);
+    CaseAttachment.belongsTo(Case, { foreignKey: 'caseId' });
+    Case.belongsTo(Folder, { foreignKey: 'folderId' });
+    Folder.belongsTo(Project, { foreignKey: 'projectId' });
+
+    const caseAttachment = await CaseAttachment.findOne({
+      where: { attachmentId },
+      include: { model: Case, include: { model: Folder, include: Project } },
+    });
+    return caseAttachment?.Case?.Folder?.Project?.id;
+  }
+
   /**
    * Verify user has project
    * (have to be called after verifySignedIn() middleware)
@@ -125,28 +155,12 @@ export default function verifyEditableMiddleware(sequelize) {
    * (have to be called after verifySignedIn() middleware)
    */
   async function verifyProjectDeveloperFromCaseId(req, res, next) {
-    const Project = defineProject(sequelize, DataTypes);
-    const Folder = defineFolder(sequelize, DataTypes);
-    const Case = defineCase(sequelize, DataTypes);
-    Project.hasMany(Folder, { foreignKey: 'projectId' });
-    Folder.hasMany(Case, { foreignKey: 'folderId' });
-    Folder.belongsTo(Project, { foreignKey: 'projectId' });
-    Case.belongsTo(Folder, { foreignKey: 'folderId' });
-
     const caseId = req.params.caseId || req.query.caseId;
     if (!caseId) {
       return res.status(400).json({ error: 'caseId is required' });
     }
 
-    // find project id from caseId
-    const testCase = await Case.findByPk(caseId, {
-      include: {
-        model: Folder,
-        include: Project,
-      },
-    });
-
-    const projectId = testCase && testCase.Folder && testCase.Folder.Project && testCase.Folder.Project.id;
+    const projectId = await findProjectIdFromCaseId(caseId);
     if (!projectId) {
       return res.status(404).send('failed to find projectId');
     }
@@ -157,6 +171,32 @@ export default function verifyEditableMiddleware(sequelize) {
       return;
     }
 
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  async function verifyProjectDeveloperFromParentCaseId(req, res, next) {
+    const parentCaseId = req.params.parentCaseId || req.query.parentCaseId;
+    if (!parentCaseId) return res.status(400).json({ error: 'parentCaseId is required' });
+
+    const projectId = await findProjectIdFromCaseId(parentCaseId);
+    if (!projectId) return res.status(404).json({ error: 'Not found' });
+    if (await isDeveloper(projectId, req.userId)) {
+      next();
+      return;
+    }
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  async function verifyProjectDeveloperFromAttachmentId(req, res, next) {
+    const attachmentId = req.params.attachmentId || req.query.attachmentId;
+    if (!attachmentId) return res.status(400).json({ error: 'attachmentId is required' });
+
+    const projectId = await findProjectIdFromAttachmentId(attachmentId);
+    if (!projectId) return res.status(404).json({ error: 'Not found' });
+    if (await isDeveloper(projectId, req.userId)) {
+      next();
+      return;
+    }
     return res.status(403).json({ error: 'Forbidden' });
   }
 
@@ -382,6 +422,8 @@ export default function verifyEditableMiddleware(sequelize) {
     verifyProjectDeveloperFromProjectId,
     verifyProjectDeveloperFromFolderId,
     verifyProjectDeveloperFromCaseId,
+    verifyProjectDeveloperFromParentCaseId,
+    verifyProjectDeveloperFromAttachmentId,
     verifyProjectReporterFromProjectId,
     verifyProjectReporterFromRunId,
     verifyProjectReporterFromCommentableId,
