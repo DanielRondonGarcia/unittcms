@@ -13,3 +13,14 @@ database.sqlite
 .claude/
 openspec/
 .atl/
+
+# Local development and QA artifacts
+/.codegraph/
+/.playwright-mcp/
+/backend/backend/
+/after-case-detail-layout.png
+/mock-detail-tabs-current.png
+/mock-detail-tabs.png
+/playwright-api-requests.txt
+/untitled.md
+/untitled-2.md
