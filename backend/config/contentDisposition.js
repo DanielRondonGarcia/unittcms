@@ -9,8 +9,10 @@ export function toSafeFileName(fileName) {
   return s;
 }
 
-export function contentDisposition(filename) {
-  const fallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
-  const encoded = encodeURIComponent(filename);
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+export function contentDisposition(filename, mode = 'attachment') {
+  const safeFilename = toSafeFileName(filename) || 'download';
+  const disposition = mode === 'inline' ? 'inline' : 'attachment';
+  const fallback = safeFilename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
+  const encoded = encodeURIComponent(safeFilename);
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
