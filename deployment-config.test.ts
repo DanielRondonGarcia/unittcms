@@ -136,12 +136,31 @@ describe('registry-backed production deployment', () => {
 });
 
 describe('release image workflow', () => {
-  it('publishes both Dockerfile targets with the repository token and release tags', () => {
+  it('creates dispatch release tags and publishes both Dockerfile targets with the repository token', () => {
     expect(releaseWorkflow).toContain("- '*.*.*'");
     expect(releaseWorkflow).toContain('workflow_dispatch:');
-    expect(releaseWorkflow).toContain('release_tag:');
+    expect(releaseWorkflow).toMatch(
+      /bump_type:\n\s+description:[\s\S]*?\n\s+required: true\n\s+type: choice\n\s+options:\n\s+- major\n\s+- minor\n\s+- patch/
+    );
+    expect(releaseWorkflow).not.toContain('release_tag:');
+    expect(releaseWorkflow).not.toContain('inputs.release_tag');
+    expect(releaseWorkflow).toContain("if: github.event_name == 'workflow_dispatch'");
+    expect(releaseWorkflow).toContain('git tag --list');
+    expect(releaseWorkflow).toContain("sed -nE 's/^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$/\\1.\\2.\\3/p'");
+    expect(releaseWorkflow).toContain('sort -V');
+    expect(releaseWorkflow).toContain("require('./package.json').version");
+    expect(releaseWorkflow).toContain('case "$BUMP_TYPE" in');
+    expect(releaseWorkflow).toContain('git tag --annotate');
+    expect(releaseWorkflow).toContain('git push origin "refs/tags/$release_tag"');
+    expect(releaseWorkflow).toContain('git ls-remote --refs --tags origin');
+    expect(releaseWorkflow).toContain('ref: ${{ github.sha }}');
+    expect(releaseWorkflow).toContain(
+      "RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && steps.create_tag.outputs.tag || github.ref_name }}"
+    );
     expect(releaseWorkflow).toContain('git show-ref --tags --verify --quiet');
     expect(releaseWorkflow).toContain('revision=$(git rev-parse HEAD)');
+    expect(releaseWorkflow).toContain('concurrency:');
+    expect(releaseWorkflow).toContain('cancel-in-progress: false');
     expect(releaseWorkflow).toContain('contents: write');
     expect(releaseWorkflow).toContain('packages: write');
     expect(releaseWorkflow).toContain('password: ${{ secrets.GITHUB_TOKEN }}');
