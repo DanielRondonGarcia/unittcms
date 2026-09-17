@@ -150,6 +150,8 @@ describe('release image workflow', () => {
     expect(releaseWorkflow).toContain('sort -V');
     expect(releaseWorkflow).toContain("require('./package.json').version");
     expect(releaseWorkflow).toContain('case "$BUMP_TYPE" in');
+    expect(releaseWorkflow).toContain('git config user.name "github-actions[bot]"');
+    expect(releaseWorkflow).toContain('git config user.email "41898282+github-actions[bot]@users.noreply.github.com"');
     expect(releaseWorkflow).toContain('git tag --annotate');
     expect(releaseWorkflow).toContain('git push origin "refs/tags/$release_tag"');
     expect(releaseWorkflow).toContain('git ls-remote --refs --tags origin');
