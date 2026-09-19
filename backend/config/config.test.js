@@ -4,9 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isFalseLike,
   isMcpEnabled,
+  isMcpRateLimitEnabled,
   isManualExecutionEnabled,
   isRateLimitEnabled,
+  parseMcpRateLimitMax,
   parseMcpTrustedHosts,
+  parseMcpRateLimitWindowMs,
   isSelfRegistrationEnabled,
   registerManualExecutionRoute,
 } from './config.js';
@@ -56,6 +59,33 @@ describe('manual execution feature flag', () => {
       'app.example.test',
       'gateway.example.test',
     ]);
+  });
+
+  it('enables the MCP limiter by default and accepts all supported false-like values', () => {
+    expect(isMcpRateLimitEnabled(undefined)).toBe(true);
+    expect(isMcpRateLimitEnabled('true')).toBe(true);
+    expect(isMcpRateLimitEnabled('')).toBe(true);
+    expect(isMcpRateLimitEnabled('invalid')).toBe(true);
+    expect(isMcpRateLimitEnabled(' False ')).toBe(false);
+    expect(isMcpRateLimitEnabled('0')).toBe(false);
+    expect(isMcpRateLimitEnabled(' NO ')).toBe(false);
+    expect(isMcpRateLimitEnabled('off')).toBe(false);
+  });
+
+  it('uses MCP rate-limit defaults for missing or invalid positive integers', () => {
+    expect(parseMcpRateLimitMax(undefined)).toBe(100);
+    expect(parseMcpRateLimitMax('25')).toBe(25);
+    expect(parseMcpRateLimitMax('invalid')).toBe(100);
+    expect(parseMcpRateLimitMax('0')).toBe(100);
+    expect(parseMcpRateLimitMax('-1')).toBe(100);
+    expect(parseMcpRateLimitMax('1.5')).toBe(100);
+
+    expect(parseMcpRateLimitWindowMs(undefined)).toBe(3600000);
+    expect(parseMcpRateLimitWindowMs('10')).toBe(10);
+    expect(parseMcpRateLimitWindowMs('invalid')).toBe(3600000);
+    expect(parseMcpRateLimitWindowMs('0')).toBe(3600000);
+    expect(parseMcpRateLimitWindowMs('-1')).toBe(3600000);
+    expect(parseMcpRateLimitWindowMs('1.5')).toBe(3600000);
   });
 
   it('does not register the manual API when disabled or invoke its service', async () => {

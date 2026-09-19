@@ -6,6 +6,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       - PORT=8000
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY outside source before starting UnitTCMS}
@@ -14,6 +16,9 @@ services:
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:8000}
       - ALLOW_SELF_REGISTRATION=${ALLOW_SELF_REGISTRATION:-true}
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - MCP_RATE_LIMIT_ENABLED=${MCP_RATE_LIMIT_ENABLED:-true}
+      - MCP_RATE_LIMIT_MAX=${MCP_RATE_LIMIT_MAX:-100}
+      - MCP_RATE_LIMIT_WINDOW_MS=${MCP_RATE_LIMIT_WINDOW_MS:-3600000} # milliseconds
       - MCP_ENABLED=${MCP_ENABLED:-false}
       - MCP_TRUSTED_HOSTS=${MCP_TRUSTED_HOSTS:-localhost:8000}
       - SUPERUSER_EMAIL=${SUPERUSER_EMAIL:-}

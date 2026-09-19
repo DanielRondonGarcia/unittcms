@@ -9,6 +9,8 @@ export const PORT = process.env.PORT || 8001;
 export const API_PATH = process.env.API_PATH || '/api';
 
 const FALSE_LIKE_VALUES = new Set(['false', '0', 'no', 'off']);
+const DEFAULT_MCP_RATE_LIMIT_MAX = 100;
+const DEFAULT_MCP_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 export function isFalseLike(value) {
   return typeof value === 'string' && FALSE_LIKE_VALUES.has(value.trim().toLowerCase());
@@ -20,6 +22,31 @@ export function isManualExecutionEnabled(value = process.env.MANUAL_EXECUTION_EN
 
 export function isRateLimitEnabled(value = process.env.RATE_LIMIT_ENABLED) {
   return !isFalseLike(value);
+}
+
+export function isMcpRateLimitEnabled(value = process.env.MCP_RATE_LIMIT_ENABLED) {
+  return !isFalseLike(value);
+}
+
+function parsePositiveInteger(value, fallback) {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+  }
+
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) return fallback;
+
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function parseMcpRateLimitMax(value = process.env.MCP_RATE_LIMIT_MAX) {
+  return parsePositiveInteger(value, DEFAULT_MCP_RATE_LIMIT_MAX);
+}
+
+export function parseMcpRateLimitWindowMs(value = process.env.MCP_RATE_LIMIT_WINDOW_MS) {
+  return parsePositiveInteger(value, DEFAULT_MCP_RATE_LIMIT_WINDOW_MS);
 }
 
 export function isSelfRegistrationEnabled(value = process.env.ALLOW_SELF_REGISTRATION) {
@@ -52,6 +79,9 @@ export function parseMcpTrustedHosts(value = process.env.MCP_TRUSTED_HOSTS) {
 
 export const MCP_ENABLED = isMcpEnabled();
 export const MCP_TRUSTED_HOSTS = parseMcpTrustedHosts();
+export const MCP_RATE_LIMIT_ENABLED = isMcpRateLimitEnabled();
+export const MCP_RATE_LIMIT_MAX = parseMcpRateLimitMax();
+export const MCP_RATE_LIMIT_WINDOW_MS = parseMcpRateLimitWindowMs();
 
 export function registerManualExecutionRoute(app, sequelize, routeFactory, enabled = MANUAL_EXECUTION_ENABLED) {
   if (enabled) app.use('/manual-executions', routeFactory(sequelize));

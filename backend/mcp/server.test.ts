@@ -22,7 +22,10 @@ function token(secret: string, values: Record<string, unknown> = {}) {
     ...values,
   };
 }
-function appFor(tokens: Record<string, ReturnType<typeof token>>) {
+function appFor(
+  tokens: Record<string, ReturnType<typeof token>>,
+  rateLimit: { enabled?: boolean; windowMs?: number; max?: number } = { max: 100 }
+) {
   const AccessToken = {
     findOne: vi.fn(
       async ({ where }: { where: { tokenHash: string } }) =>
@@ -43,7 +46,7 @@ function appFor(tokens: Record<string, ReturnType<typeof token>>) {
     trustedHosts: ['127.0.0.1'],
     now: () => now,
     registerTools,
-    rateLimit: { max: 100 },
+    rateLimit,
   });
   return { app, writes };
 }
@@ -108,5 +111,25 @@ describe('MCP transport authorization and guards', () => {
       expect((await post(app, 'first', { jsonrpc: '2.0', id, method: 'ping' })).status).toBe(200);
     expect((await post(app, 'first', { jsonrpc: '2.0', id: 101, method: 'ping' })).status).toBe(429);
     expect((await post(app, 'second', { jsonrpc: '2.0', id: 1, method: 'ping' })).status).toBe(200);
+  });
+
+  it('uses injected MCP rate-limit settings and preserves the standard headers', async () => {
+    const { app } = appFor({ valid: token('valid') }, { max: 1, windowMs: 60_000 });
+
+    const allowed = await post(app, 'valid', { jsonrpc: '2.0', id: 1, method: 'ping' });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.ratelimit).toContain('limit=1');
+    expect(allowed.headers['x-ratelimit-limit']).toBeUndefined();
+
+    const limited = await post(app, 'valid', { jsonrpc: '2.0', id: 2, method: 'ping' });
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ error: 'MCP rate limit exceeded' });
+  });
+
+  it('leaves MCP unthrottled when the injected limiter is disabled', async () => {
+    const { app } = appFor({ valid: token('valid') }, { enabled: false, max: 1, windowMs: 1 });
+
+    expect((await post(app, 'valid', { jsonrpc: '2.0', id: 1, method: 'ping' })).status).toBe(200);
+    expect((await post(app, 'valid', { jsonrpc: '2.0', id: 2, method: 'ping' })).status).toBe(200);
   });
 });

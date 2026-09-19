@@ -33,6 +33,38 @@ describe('containerized automation boundaries', () => {
     expect(productionApi).toContain(rateLimitEnvironment);
   });
 
+  it('passes MCP rate-limit settings through with safe defaults and documents milliseconds', () => {
+    const api = serviceBlock(compose, 'unittcms', 'redis');
+    const productionApi = serviceBlock(productionCompose, 'unittcms', 'redis');
+    const mcpRateLimitEnvironment = [
+      'MCP_RATE_LIMIT_ENABLED=${MCP_RATE_LIMIT_ENABLED:-true}',
+      'MCP_RATE_LIMIT_MAX=${MCP_RATE_LIMIT_MAX:-100}',
+      'MCP_RATE_LIMIT_WINDOW_MS=${MCP_RATE_LIMIT_WINDOW_MS:-3600000}',
+    ];
+
+    for (const environment of mcpRateLimitEnvironment) {
+      expect(api).toContain(environment);
+      expect(productionApi).toContain(environment);
+    }
+
+    expect(envExample).toContain('MCP_RATE_LIMIT_ENABLED=true');
+    expect(envExample).toContain('MCP_RATE_LIMIT_MAX=100');
+    expect(envExample).toContain('MCP_RATE_LIMIT_WINDOW_MS=3600000');
+    expect(envExample).toContain('The rate-limit window is in milliseconds; 10 means 10 milliseconds.');
+  });
+
+  it('loads .env for the API service while retaining explicit environment defaults', () => {
+    const api = serviceBlock(compose, 'unittcms', 'redis');
+    const productionApi = serviceBlock(productionCompose, 'unittcms', 'redis');
+    const envFile = 'env_file:\n      - .env';
+
+    for (const service of [api, productionApi]) {
+      expect(service).toContain(envFile);
+      expect(service).toContain('environment:');
+      expect(service).toContain('MCP_RATE_LIMIT_ENABLED=${MCP_RATE_LIMIT_ENABLED:-true}');
+    }
+  });
+
   it('keeps the API fail-closed by default while allowing an explicit mode override', () => {
     const api = serviceBlock(compose, 'unittcms', 'redis');
 

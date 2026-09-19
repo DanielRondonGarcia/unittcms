@@ -11,6 +11,9 @@ import {
   FRONTEND_ORIGIN,
   MANUAL_EXECUTION_ENABLED,
   MCP_ENABLED,
+  MCP_RATE_LIMIT_ENABLED,
+  MCP_RATE_LIMIT_MAX,
+  MCP_RATE_LIMIT_WINDOW_MS,
   MCP_TRUSTED_HOSTS,
   RATE_LIMIT_ENABLED,
   registerManualExecutionRoute,
@@ -62,7 +65,15 @@ export const sequelize = new Sequelize({
   logging: false,
 });
 
-registerMcpRoute(app, sequelize, MCP_ENABLED, { frontendOrigin: FRONTEND_ORIGIN, trustedHosts: MCP_TRUSTED_HOSTS });
+registerMcpRoute(app, sequelize, MCP_ENABLED, {
+  frontendOrigin: FRONTEND_ORIGIN,
+  trustedHosts: MCP_TRUSTED_HOSTS,
+  rateLimit: {
+    enabled: MCP_RATE_LIMIT_ENABLED,
+    max: MCP_RATE_LIMIT_MAX,
+    windowMs: MCP_RATE_LIMIT_WINDOW_MS,
+  },
+});
 
 // Register TSOA-generated routes (TypeScript controllers)
 RegisterRoutes(app);
