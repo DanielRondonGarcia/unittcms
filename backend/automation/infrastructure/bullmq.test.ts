@@ -1,10 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  AUTOMATION_CANCEL_CHANNEL,
-  BullMqQueueAdapter,
-  RedisExecutorRegistry,
-  RedisWorkerHealth,
-} from './bullmq.js';
+import { AUTOMATION_CANCEL_CHANNEL, BullMqQueueAdapter, RedisExecutorRegistry, RedisWorkerHealth } from './bullmq.js';
 
 function redisFixture() {
   let stored: string | null = null;
@@ -29,19 +24,25 @@ describe('BullMQ runtime boundary', () => {
     const removed = vi.fn(async () => undefined);
     const queue = {
       add: vi.fn(async (_name: string, _job: unknown) => ({ id: 'e1:attempt:1' })),
-      getJobs: vi.fn(async () => [{ id: 'e1:attempt:1', data: { executionId: 'e1', attempt: 1, snapshot: 'Feature: safe' }, remove: removed }]),
+      getJobs: vi.fn(async () => [
+        { id: 'e1:attempt:1', data: { executionId: 'e1', attempt: 1, snapshot: 'Feature: safe' }, remove: removed },
+      ]),
       close: vi.fn(async () => undefined),
     };
     const adapter = new BullMqQueueAdapter(queue as never, redis.client as never, { publisher: redis.client as never });
 
     await expect(
-      adapter.add('automation-execution', { executionId: 'e1', attempt: 1, snapshot: 'Feature: safe' }, {
-        jobId: 'e1:attempt:1',
-        attempts: 2,
-        backoff: { type: 'exponential', delay: 1000 },
-        removeOnComplete: true,
-        removeOnFail: false,
-      })
+      adapter.add(
+        'automation-execution',
+        { executionId: 'e1', attempt: 1, snapshot: 'Feature: safe' },
+        {
+          jobId: 'e1:attempt:1',
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: true,
+          removeOnFail: false,
+        }
+      )
     ).resolves.toEqual({ id: 'e1:attempt:1' });
     await adapter.remove('e1');
 
@@ -61,7 +62,11 @@ describe('BullMQ runtime boundary', () => {
       executors: [{ key: 'hercules', health: { ready: false, status: 'compatibility_not_ready' } }],
     });
 
-    await expect(health.health()).resolves.toMatchObject({ ready: false, phase0Ready: false, executors: [{ key: 'hercules' }] });
+    await expect(health.health()).resolves.toMatchObject({
+      ready: false,
+      phase0Ready: false,
+      executors: [{ key: 'hercules' }],
+    });
     expect(JSON.stringify(redis.client.set.mock.calls)).not.toContain('api-key');
   });
 

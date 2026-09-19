@@ -14,11 +14,7 @@ export async function up(queryInterface, Sequelize) {
     const key = `${row.runCaseId}:${example}`;
     const activeExecutionKey = assignedKeys.has(key) ? null : key;
     assignedKeys.add(key);
-    await queryInterface.bulkUpdate(
-      'automationExecutions',
-      { activeExecutionKey },
-      { id: row.id }
-    );
+    await queryInterface.bulkUpdate('automationExecutions', { activeExecutionKey }, { id: row.id });
   }
 
   await queryInterface.addIndex('automationExecutions', ['activeExecutionKey'], {

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LlmConfigError } from './infrastructure/llm-config.js';
-import { AutomationWorkerBootstrapError, loadWorkerHerculesVolume, loadWorkerSecret, start } from './worker-bootstrap.js';
+import {
+  AutomationWorkerBootstrapError,
+  loadWorkerHerculesVolume,
+  loadWorkerSecret,
+  start,
+} from './worker-bootstrap.js';
 
 vi.mock('./infrastructure/bullmq.js', () => ({
   AUTOMATION_HEALTH_TTL_MS: 60_000,
@@ -32,21 +37,15 @@ describe('automation worker bootstrap boundary', () => {
 
   it('rejects an empty file secret with the safe required error code', () => {
     expect(() =>
-      loadWorkerSecret(
-        { AUTOMATION_WORKER_SECRET_FILE: '/run/secrets/automation_worker_secret' },
-        () => ' \n'
-      )
+      loadWorkerSecret({ AUTOMATION_WORKER_SECRET_FILE: '/run/secrets/automation_worker_secret' }, () => ' \n')
     ).toThrow(new AutomationWorkerBootstrapError('automation_worker_secret_required'));
   });
 
   it('rejects an unreadable file secret with the safe required error code', () => {
     expect(() =>
-      loadWorkerSecret(
-        { AUTOMATION_WORKER_SECRET_FILE: '/run/secrets/automation_worker_secret' },
-        () => {
-          throw new Error('reader failure');
-        }
-      )
+      loadWorkerSecret({ AUTOMATION_WORKER_SECRET_FILE: '/run/secrets/automation_worker_secret' }, () => {
+        throw new Error('reader failure');
+      })
     ).toThrow(new AutomationWorkerBootstrapError('automation_worker_secret_required'));
   });
 
@@ -78,8 +77,8 @@ describe('automation worker bootstrap boundary', () => {
   });
 
   it('requires worker HMAC and typed LLM configuration before opening Redis', async () => {
-    await expect(start({ mode: 'real', redisUrl: 'redis://unreachable.test:6379', workerSecret: 'worker-secret' })).rejects.toBeInstanceOf(
-      LlmConfigError
-    );
+    await expect(
+      start({ mode: 'real', redisUrl: 'redis://unreachable.test:6379', workerSecret: 'worker-secret' })
+    ).rejects.toBeInstanceOf(LlmConfigError);
   });
 });

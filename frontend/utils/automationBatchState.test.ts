@@ -56,11 +56,9 @@ describe('automation batch state', () => {
       finishedAt: '2026-08-28T12:01:00.000Z',
     };
 
-    expect(rehydrateAutomationBatchResults(cases, [active, terminal])).toEqual([
-      { ...cases[0], execution: terminal },
-    ]);
-    expect(mergeAutomationBatchResults([{ ...cases[0], execution: active }], [{ ...cases[0], execution: terminal }])).toEqual([
-      { ...cases[0], execution: terminal },
-    ]);
+    expect(rehydrateAutomationBatchResults(cases, [active, terminal])).toEqual([{ ...cases[0], execution: terminal }]);
+    expect(
+      mergeAutomationBatchResults([{ ...cases[0], execution: active }], [{ ...cases[0], execution: terminal }])
+    ).toEqual([{ ...cases[0], execution: terminal }]);
   });
 });

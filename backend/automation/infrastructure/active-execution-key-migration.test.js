@@ -23,6 +23,11 @@ describe('active execution key migration', () => {
 
     expect(bulkUpdate).toHaveBeenNthCalledWith(1, 'automationExecutions', { activeExecutionKey: '7:1' }, { id: 12 });
     expect(bulkUpdate).toHaveBeenNthCalledWith(2, 'automationExecutions', { activeExecutionKey: null }, { id: 13 });
-    expect(bulkUpdate).toHaveBeenNthCalledWith(3, 'automationExecutions', { activeExecutionKey: '7:scenario' }, { id: 14 });
+    expect(bulkUpdate).toHaveBeenNthCalledWith(
+      3,
+      'automationExecutions',
+      { activeExecutionKey: '7:scenario' },
+      { id: 14 }
+    );
   });
 });

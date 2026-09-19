@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { CANONICAL_FEATURE, HERCULES_CONTRACT, evaluateCompatibility } from './hercules.js';
 import { HERCULES_PROOF_SOURCE, buildCompatibilityProof, parseCanonicalJUnit } from './hercules-proof.js';
 
-const PASS_XML = '<testsuite tests="1" failures="0" errors="0"><testcase classname="fixture" name="scenario"/></testsuite>';
+const PASS_XML =
+  '<testsuite tests="1" failures="0" errors="0"><testcase classname="fixture" name="scenario"/></testsuite>';
 const EMPTY_XML = '<testsuite tests="0" failures="0" errors="0"></testsuite>';
 const NO_TESTCASE_XML = '<testsuite tests="1" failures="0" errors="0"></testsuite>';
 const MISMATCHED_TEST_COUNT_XML =

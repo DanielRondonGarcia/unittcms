@@ -1,5 +1,9 @@
 import { createAutomationApplication, type AutomationApplication } from '../application/service.js';
-import type { EnvironmentResolver as EnvironmentResolverPort, ExecutorRegistry, ResolvedEnvironment } from '../ports/index.js';
+import type {
+  EnvironmentResolver as EnvironmentResolverPort,
+  ExecutorRegistry,
+  ResolvedEnvironment,
+} from '../ports/index.js';
 import { EnvironmentResolver } from './environment.js';
 import { FileArtifactStorage } from './artifacts.js';
 import {
@@ -24,7 +28,9 @@ export type RealAutomationRuntimeOptions = {
   models?: AutomationModels;
 };
 
-export async function createRealAutomationRuntime(options: RealAutomationRuntimeOptions): Promise<RealAutomationRuntime> {
+export async function createRealAutomationRuntime(
+  options: RealAutomationRuntimeOptions
+): Promise<RealAutomationRuntime> {
   const redisUrl = options.redisUrl.trim();
   if (!redisUrl) throw new Error('automation_redis_url_required');
   const connection = createRedisConnection(redisUrl);

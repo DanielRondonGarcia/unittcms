@@ -68,10 +68,12 @@ function inspectCanonicalJUnit(xml) {
     if (suites.length === 0 || testcases.length === 0) return null;
     if (testcases.some((testcase) => testcase.parentElement?.localName.toLowerCase() !== 'testsuite')) return null;
 
-    const rootTests = rootName === 'testsuite' ? nonNegativeCount(root, 'tests') : optionalNonNegativeCount(root, 'tests');
+    const rootTests =
+      rootName === 'testsuite' ? nonNegativeCount(root, 'tests') : optionalNonNegativeCount(root, 'tests');
     const rootFailures =
       rootName === 'testsuite' ? nonNegativeCount(root, 'failures') : optionalNonNegativeCount(root, 'failures');
-    const rootErrors = rootName === 'testsuite' ? nonNegativeCount(root, 'errors') : optionalNonNegativeCount(root, 'errors');
+    const rootErrors =
+      rootName === 'testsuite' ? nonNegativeCount(root, 'errors') : optionalNonNegativeCount(root, 'errors');
     if (rootTests === null || rootFailures === null || rootErrors === null) return null;
 
     const suiteCounts = suites.map((suite) => ({
@@ -82,7 +84,10 @@ function inspectCanonicalJUnit(xml) {
     if (suiteCounts.some((counts) => Object.values(counts).some((count) => count === null))) return null;
 
     const declaredSuiteTests = suiteCounts.reduce((total, counts) => total + counts.tests, 0);
-    if (declaredSuiteTests !== testcases.length || (root.getAttribute('tests') !== null && rootTests !== testcases.length))
+    if (
+      declaredSuiteTests !== testcases.length ||
+      (root.getAttribute('tests') !== null && rootTests !== testcases.length)
+    )
       return null;
 
     return {

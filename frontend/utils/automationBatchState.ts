@@ -62,7 +62,12 @@ export function mergeAutomationBatchResults(
   for (const result of next) {
     const key = automationBatchCaseKey(result);
     const previous = merged.get(key);
-    if (!previous || !result.execution || !previous.execution || String(previous.execution.id) === String(result.execution.id)) {
+    if (
+      !previous ||
+      !result.execution ||
+      !previous.execution ||
+      String(previous.execution.id) === String(result.execution.id)
+    ) {
       merged.set(key, result);
       continue;
     }

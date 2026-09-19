@@ -14,9 +14,15 @@ import type { AttachmentType, CaseMessages } from '@/types/case';
 
 vi.mock('@heroui/react', () => ({
   Image: ({ alt, src }: { alt?: string; src?: string }) => React.createElement('img', { alt, src }),
-  Button: ({ children, onPress, isDisabled }: { children?: React.ReactNode; onPress?: () => void; isDisabled?: boolean }) => (
-    React.createElement('button', { type: 'button', disabled: isDisabled, onClick: onPress }, children)
-  ),
+  Button: ({
+    children,
+    onPress,
+    isDisabled,
+  }: {
+    children?: React.ReactNode;
+    onPress?: () => void;
+    isDisabled?: boolean;
+  }) => React.createElement('button', { type: 'button', disabled: isDisabled, onClick: onPress }, children),
   Tooltip: ({ children }: { children?: React.ReactNode }) => React.createElement(React.Fragment, null, children),
   Card: ({ children }: { children?: React.ReactNode }) => React.createElement('div', null, children),
   CardBody: ({ children }: { children?: React.ReactNode }) => React.createElement('div', null, children),

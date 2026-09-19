@@ -1,7 +1,14 @@
 import { Queue, Worker } from 'bullmq';
 import type { Job } from 'bullmq';
 import Redis from 'ioredis';
-import type { AutomationExecutor, AutomationWorker, ExecutorHealth, ExecutorRegistry, ExecutionJob, WorkerHealth } from '../ports/index.js';
+import type {
+  AutomationExecutor,
+  AutomationWorker,
+  ExecutorHealth,
+  ExecutorRegistry,
+  ExecutionJob,
+  WorkerHealth,
+} from '../ports/index.js';
 import type { QueueAdapter, WorkerJob, WorkerRuntime } from '../worker.js';
 
 export const AUTOMATION_QUEUE_NAME = 'automation-execution';
@@ -43,11 +50,7 @@ export class BullMqQueueAdapter implements QueueAdapter {
   private readonly connection: Redis;
   private readonly options: BullMqQueueAdapterOptions;
 
-  constructor(
-    queue: Queue<ExecutionJob>,
-    connection: Redis,
-    options: BullMqQueueAdapterOptions = {}
-  ) {
+  constructor(queue: Queue<ExecutionJob>, connection: Redis, options: BullMqQueueAdapterOptions = {}) {
     this.queue = queue;
     this.connection = connection;
     this.options = options;
@@ -134,11 +137,7 @@ export class BullMqWorkerRuntime implements WorkerRuntime {
     if (this.cancelHandler) void this.cancelHandler(message).catch(() => undefined);
   };
 
-  constructor(
-    connection: Redis,
-    subscriber: Redis,
-    queueName = AUTOMATION_QUEUE_NAME
-  ) {
+  constructor(connection: Redis, subscriber: Redis, queueName = AUTOMATION_QUEUE_NAME) {
     this.connection = connection;
     this.subscriber = subscriber;
     this.queueName = queueName;
@@ -149,16 +148,12 @@ export class BullMqWorkerRuntime implements WorkerRuntime {
   }
 
   async consume(handler: (job: WorkerJob) => Promise<unknown>, options: { concurrency: number }): Promise<void> {
-    this.worker = new Worker<ExecutionJob>(
-      this.queueName,
-      async (job) => handler(workerJob(job)),
-      {
-        connection: this.connection,
-        concurrency: options.concurrency,
-        maxStalledCount: 1,
-        stalledInterval: 30_000,
-      }
-    );
+    this.worker = new Worker<ExecutionJob>(this.queueName, async (job) => handler(workerJob(job)), {
+      connection: this.connection,
+      concurrency: options.concurrency,
+      maxStalledCount: 1,
+      stalledInterval: 30_000,
+    });
     this.worker.on('error', () => undefined);
     this.subscriber.on('message', this.onCancelMessage);
     await this.subscriber.subscribe(AUTOMATION_CANCEL_CHANNEL);
@@ -183,7 +178,11 @@ function parseHealth(value: string | null): WorkerHealth {
   if (!value) return unavailableHealth();
   try {
     const parsed = JSON.parse(value) as Partial<WorkerHealth>;
-    if (typeof parsed.heartbeatAt !== 'string' || typeof parsed.phase0Ready !== 'boolean' || !Array.isArray(parsed.executors))
+    if (
+      typeof parsed.heartbeatAt !== 'string' ||
+      typeof parsed.phase0Ready !== 'boolean' ||
+      !Array.isArray(parsed.executors)
+    )
       return unavailableHealth('worker_health_invalid');
     return {
       ready: parsed.ready === true,

@@ -382,9 +382,7 @@ function updateValues(value: PlainRecord, current: PlainRecord = {}): PlainRecor
       if (field === 'summary' || field === 'error') result[field] = genericExecutionResultSanitizer.text(value[field]);
       else if (field === 'errorKind')
         result[field] =
-          typeof value[field] === 'string' && EXECUTION_ERROR_KINDS.has(value[field] as string)
-            ? value[field]
-            : null;
+          typeof value[field] === 'string' && EXECUTION_ERROR_KINDS.has(value[field] as string) ? value[field] : null;
       else result[field] = value[field];
     }
   }

@@ -16,7 +16,11 @@ function Harness({ active, poll, onValue, onError }: HarnessProps) {
   return null;
 }
 
-function HistoryHarness({ poll, onValue, onError }: {
+function HistoryHarness({
+  poll,
+  onValue,
+  onError,
+}: {
   poll: () => Promise<string[]>;
   onValue: (value: string[]) => void;
   onError: (error: unknown) => void;
