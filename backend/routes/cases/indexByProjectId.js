@@ -145,6 +145,11 @@ export default function (sequelize) {
             },
             tagInclude,
           ],
+          order: [
+            ['folderId', 'ASC'],
+            ['position', 'ASC'],
+            ['id', 'ASC'],
+          ],
         });
         res.json(cases);
       } catch (error) {

@@ -72,6 +72,10 @@ describe('GET /cases', () => {
           through: { attributes: [] },
         },
       ],
+      order: [
+        ['position', 'ASC'],
+        ['id', 'ASC'],
+      ],
     });
     expect(res.body).toEqual([{ id: 1 }]);
   });
@@ -93,6 +97,10 @@ describe('GET /cases', () => {
           attributes: ['id', 'name'],
           through: { attributes: [] },
         },
+      ],
+      order: [
+        ['position', 'ASC'],
+        ['id', 'ASC'],
       ],
     });
   });

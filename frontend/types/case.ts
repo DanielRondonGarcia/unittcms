@@ -7,6 +7,7 @@ type GherkinExamples = {
 
 type CaseType = {
   id: number;
+  position?: number;
   title: string;
   state: number;
   priority: number;

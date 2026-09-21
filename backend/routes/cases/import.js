@@ -5,6 +5,7 @@ import multer from 'multer';
 import XLSX from 'xlsx';
 import { DataTypes } from 'sequelize';
 import defineCase from '../../models/cases.js';
+import defineFolder from '../../models/folders.js';
 import defineStep from '../../models/steps.js';
 import defineCaseStep from '../../models/caseSteps.js';
 import authMiddleware from '../../middleware/auth.js';
@@ -18,6 +19,7 @@ import {
   gherkinTemplate,
   normalizeGherkinSection,
 } from '../../config/enums.js';
+import createCaseOrderService from './orderService.js';
 
 const fileFilter = (req, file, cb) => {
   const allowedFileTypes = ['.xlsx', '.xls'];
@@ -44,10 +46,12 @@ const upload = multer({
 
 export default function (sequelize) {
   const Case = defineCase(sequelize, DataTypes);
+  const Folder = defineFolder(sequelize, DataTypes);
   const Step = defineStep(sequelize, DataTypes);
   const CaseStep = defineCaseStep(sequelize, DataTypes);
   Case.belongsToMany(Step, { through: CaseStep });
   Step.belongsToMany(Case, { through: CaseStep });
+  const caseOrderService = createCaseOrderService({ sequelize, Case, Folder });
   const { verifySignedIn } = authMiddleware(sequelize);
   const { verifyProjectDeveloperFromFolderId } = editableMiddleware(sequelize);
 
@@ -140,7 +144,12 @@ export default function (sequelize) {
       // Only open the transaction once all data is known to be valid.
       const t = await sequelize.transaction();
       try {
-        const createdCases = await Case.bulkCreate(casesToCreate, { transaction: t });
+        const existingCases = await caseOrderService.normalizeFolder(folderId, { transaction: t });
+        const casesWithPositions = casesToCreate.map((caseData, index) => ({
+          ...caseData,
+          position: existingCases.length + index + 1,
+        }));
+        const createdCases = await Case.bulkCreate(casesWithPositions, { transaction: t });
         for (const stepData of stepsToCreate) {
           const createdCase = createdCases[stepData.caseIndex];
           const createdStep = await Step.create(

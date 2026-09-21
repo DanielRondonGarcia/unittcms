@@ -129,9 +129,10 @@ function harness() {
     template: 0,
     automationVersion: 1,
     folderId: 11,
+    position: 1,
     gherkinExamples: null,
   });
-  const case2 = record({ id: 22, title: 'Case two', template: 0, automationVersion: 1, folderId: 12 });
+  const case2 = record({ id: 22, title: 'Case two', template: 0, automationVersion: 1, folderId: 12, position: 1 });
   const tag1 = record({ id: 31, name: 'frontend', projectId: 1 });
   const tag2 = record({ id: 32, name: 'backend', projectId: 2 });
   const run1 = record({ id: 41, name: 'Run one', projectId: 1, state: 0 });
@@ -188,12 +189,47 @@ function harness() {
     return [...folders.values()];
   });
   models.Case.findByPk.mockImplementation(async (id: number) => cases.get(Number(id)) ?? null);
-  models.Case.findAll.mockImplementation(async ({ where }: RecordValue) => {
+  models.Case.findAll.mockImplementation(async ({ where, order }: RecordValue) => {
     const ids = where?.id?.[Op.in] as number[] | undefined;
-    if (ids) return [...cases.values()].filter((testcase) => ids.includes(Number(testcase.id)));
+    const directIds = Array.isArray(where?.id) ? (where.id as number[]) : undefined;
+    let records = [...cases.values()];
+    if (ids || directIds) {
+      const requestedIds = ids ?? directIds ?? [];
+      records = records.filter((testcase) => requestedIds.includes(Number(testcase.id)));
+    }
     const folderIds = where?.folderId?.[Op.in] as number[] | undefined;
-    if (folderIds) return [...cases.values()].filter((testcase) => folderIds.includes(Number(testcase.folderId)));
-    return [...cases.values()];
+    if (folderIds) records = records.filter((testcase) => folderIds.includes(Number(testcase.folderId)));
+    if (where?.folderId !== undefined && !folderIds) {
+      records = records.filter((testcase) => Number(testcase.folderId) === Number(where.folderId));
+    }
+    if (!Array.isArray(order)) return records;
+    return records.sort((left, right) => {
+      for (const [field, direction] of order) {
+        const leftValue = left[field];
+        const rightValue = right[field];
+        if (leftValue === rightValue) continue;
+        if (leftValue === undefined || leftValue === null) return 1;
+        if (rightValue === undefined || rightValue === null) return -1;
+        const result = leftValue < rightValue ? -1 : 1;
+        return direction === 'DESC' ? -result : result;
+      }
+      return 0;
+    });
+  });
+  models.Case.update.mockImplementation(async (values: RecordValue, { where }: RecordValue = {}) => {
+    let updated = 0;
+    for (const testcase of cases.values()) {
+      const matchesId =
+        where?.id === undefined ||
+        (where.id?.[Op.in] as number[] | undefined)?.includes(Number(testcase.id)) ||
+        Number(testcase.id) === Number(where.id);
+      const matchesFolder = where?.folderId === undefined || Number(testcase.folderId) === Number(where.folderId);
+      if (matchesId && matchesFolder) {
+        Object.assign(testcase, values);
+        updated += 1;
+      }
+    }
+    return [updated];
   });
   models.Case.create.mockImplementation(async (values: RecordValue) => {
     const created = record({ ...values, id: 23 });
@@ -300,6 +336,20 @@ function errorCode(response: any): string {
   return diagnostic(response)?.code ?? response.content[0].text;
 }
 
+function createCaseArgs(overrides: RecordValue = {}): RecordValue {
+  return {
+    projectId: 1,
+    folderId: 11,
+    title: 'New case',
+    state: 0,
+    priority: 2,
+    type: 0,
+    automationStatus: 0,
+    template: 0,
+    ...overrides,
+  };
+}
+
 describe('MCP domain operations', () => {
   it('registers the project contracts and the complete mapped domain surface', () => {
     const { tools } = harness();
@@ -315,6 +365,7 @@ describe('MCP domain operations', () => {
         'unittcms_create_test_case',
         'unittcms_update_test_case',
         'unittcms_move_test_case',
+        'unittcms_reorder_test_cases',
         'unittcms_create_test_run',
         'unittcms_list_tags',
         'unittcms_create_tag',
@@ -335,8 +386,218 @@ describe('MCP domain operations', () => {
     expect(createConfig?.inputSchema.steps.description).toContain('caseSteps.keyword: given');
     expect(createConfig?.inputSchema.steps.description).toContain('the user is authenticated');
     expect(createConfig?.inputSchema.template.description).toContain('step stores details only');
+    expect(createConfig?.description).toContain('Omit position to append');
+    expect(createConfig?.inputSchema.position.description).toContain('one-based rank');
     expect(updateConfig?.description).toContain('replaces and validates the supplied active step set');
     expect(updateConfig?.inputSchema.steps.description).toContain('retry with the corrected steps array');
+    expect(updateConfig?.description).toContain('Omit position to preserve order');
+    expect(updateConfig?.inputSchema.position.description).toContain('one-based rank');
+  });
+
+  it('exposes one-based positions in safe projections and orders project-wide results by folder position', async () => {
+    const { call, data, models } = harness();
+    const case10 = record({ id: 10, title: 'Case ten', template: 0, automationVersion: 1, folderId: 11, position: 1 });
+    const case30 = record({
+      id: 30,
+      title: 'Case thirty',
+      template: 0,
+      automationVersion: 1,
+      folderId: 13,
+      position: 1,
+    });
+    data.case1.position = 2;
+    data.cases.set(10, case10);
+    data.cases.set(30, case30);
+
+    const listResponse = await call('unittcms_list_test_cases', { projectId: 1, limit: 10 });
+    const listed = JSON.parse(listResponse.content[0].text);
+    expect(listed.map((testcase: RecordValue) => testcase.id)).toEqual([10, 21, 30]);
+    expect(listed[0]).toEqual(expect.objectContaining({ id: 10, folderId: 11, position: 1 }));
+    expect(listed[1]).toEqual(expect.objectContaining({ id: 21, folderId: 11, position: 2 }));
+    expect(listed[2]).toEqual(expect.objectContaining({ id: 30, folderId: 13, position: 1 }));
+    const listOptions = models.Case.findAll.mock.calls[models.Case.findAll.mock.calls.length - 1][0];
+    expect(listOptions.order).toEqual([
+      ['folderId', 'ASC'],
+      ['position', 'ASC'],
+      ['id', 'ASC'],
+    ]);
+
+    const fullResponse = await call('unittcms_update_test_case', {
+      projectId: 1,
+      caseId: 21,
+      title: 'Renamed case',
+    });
+    expect(JSON.parse(fullResponse.content[0].text)).toEqual(
+      expect.objectContaining({ id: 21, title: 'Renamed case', folderId: 11, position: 2 })
+    );
+  });
+
+  it('appends created cases by default and inserts them at an explicit one-based position', async () => {
+    const appendHarness = harness();
+    const appendResponse = await appendHarness.call('unittcms_create_test_case', createCaseArgs());
+    expect(appendResponse.isError).not.toBe(true);
+    expect(JSON.parse(appendResponse.content[0].text)).toEqual(
+      expect.objectContaining({ id: 23, folderId: 11, position: 2 })
+    );
+    expect(appendHarness.data.cases.get(23)).toEqual(expect.objectContaining({ position: 2 }));
+
+    const insertHarness = harness();
+    const insertResponse = await insertHarness.call(
+      'unittcms_create_test_case',
+      createCaseArgs({ title: 'Inserted case', position: 1 })
+    );
+    expect(insertResponse.isError).not.toBe(true);
+    expect(JSON.parse(insertResponse.content[0].text)).toEqual(
+      expect.objectContaining({ id: 23, folderId: 11, position: 1 })
+    );
+    expect(insertHarness.data.case1).toEqual(expect.objectContaining({ id: 21, position: 2 }));
+  });
+
+  it('moves an updated case within its folder without changing its immutable ID', async () => {
+    const { call, data } = harness();
+    const case10 = record({ id: 10, title: 'Case ten', template: 0, automationVersion: 1, folderId: 11, position: 2 });
+    data.cases.set(10, case10);
+
+    const response = await call('unittcms_update_test_case', {
+      projectId: 1,
+      caseId: 21,
+      id: 999,
+      title: 'Moved case',
+      position: 2,
+    });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text)).toEqual(
+      expect.objectContaining({ id: 21, title: 'Moved case', folderId: 11, position: 2 })
+    );
+    expect(data.case1).toEqual(expect.objectContaining({ id: 21, folderId: 11, position: 2 }));
+    expect(case10).toEqual(expect.objectContaining({ id: 10, folderId: 11, position: 1 }));
+  });
+
+  it('appends moved cases to the target folder in supplied ID order', async () => {
+    const { call, data } = harness();
+    const case10 = record({ id: 10, title: 'Case ten', template: 0, automationVersion: 1, folderId: 11, position: 2 });
+    const targetCase = record({
+      id: 30,
+      title: 'Target case',
+      template: 0,
+      automationVersion: 1,
+      folderId: 13,
+      position: 1,
+    });
+    data.cases.set(10, case10);
+    data.cases.set(30, targetCase);
+
+    const response = await call('unittcms_move_test_case', {
+      projectId: 1,
+      caseIds: [21, 10],
+      targetFolderId: 13,
+    });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text)).toEqual({
+      movedCaseIds: [21, 10],
+      targetFolderId: 13,
+      projectId: 1,
+    });
+    expect(targetCase).toEqual(expect.objectContaining({ id: 30, folderId: 13, position: 1 }));
+    expect(data.case1).toEqual(expect.objectContaining({ id: 21, folderId: 13, position: 2 }));
+    expect(case10).toEqual(expect.objectContaining({ id: 10, folderId: 13, position: 3 }));
+  });
+
+  it('validates a complete folder permutation before writing and commits case 10 at position 3', async () => {
+    const createFolderCases = () => {
+      const testHarness = harness();
+      const case10 = record({
+        id: 10,
+        title: 'Case ten',
+        template: 0,
+        automationVersion: 1,
+        folderId: 11,
+        position: 2,
+      });
+      const case24 = record({
+        id: 24,
+        title: 'Case twenty-four',
+        template: 0,
+        automationVersion: 1,
+        folderId: 11,
+        position: 3,
+      });
+      testHarness.data.cases.set(10, case10);
+      testHarness.data.cases.set(24, case24);
+      return { testHarness, case10, case24 };
+    };
+
+    const success = createFolderCases();
+    const successResponse = await success.testHarness.call('unittcms_reorder_test_cases', {
+      projectId: 1,
+      folderId: 11,
+      orderedCaseIds: [21, 24, 10],
+    });
+    expect(successResponse.isError).not.toBe(true);
+    expect(JSON.parse(successResponse.content[0].text)).toEqual({
+      folderId: 11,
+      orderedCaseIds: [21, 24, 10],
+      committed: [
+        { id: 21, position: 1 },
+        { id: 24, position: 2 },
+        { id: 10, position: 3 },
+      ],
+    });
+    expect(success.case10).toEqual(expect.objectContaining({ id: 10, position: 3 }));
+    expect(new Set([...success.testHarness.data.cases.keys()])).toEqual(new Set([10, 21, 22, 24]));
+
+    const invalidRequests = [
+      { orderedCaseIds: [21, 21, 10, 24], code: 'ordered_case_ids_duplicate' },
+      { orderedCaseIds: [21, 10], code: 'ordered_case_ids_missing' },
+      { orderedCaseIds: [21, 10, 24, 999], code: 'ordered_case_ids_unknown' },
+      { orderedCaseIds: [21, 10, 24, 22], code: 'ordered_case_ids_foreign' },
+    ];
+    for (const request of invalidRequests) {
+      const invalid = createFolderCases();
+      const response = await invalid.testHarness.call('unittcms_reorder_test_cases', {
+        projectId: 1,
+        folderId: 11,
+        orderedCaseIds: request.orderedCaseIds,
+      });
+      expect(errorCode(response)).toBe(request.code);
+      expect(invalid.testHarness.models.Case.update).not.toHaveBeenCalled();
+    }
+  });
+
+  it('enforces reorder authorization and maps persistence failures to safe errors', async () => {
+    const unauthorized = harness();
+    unauthorized.data.memberships.set('1:99', 2);
+    const forbidden = await unauthorized.call(
+      'unittcms_reorder_test_cases',
+      { projectId: 1, folderId: 11, orderedCaseIds: [21] },
+      99
+    );
+    expect(errorCode(forbidden)).toBe('project_write_forbidden');
+    expect(unauthorized.models.Case.update).not.toHaveBeenCalled();
+
+    const foreignFolder = harness();
+    const foreignFolderResponse = await foreignFolder.call('unittcms_reorder_test_cases', {
+      projectId: 1,
+      folderId: 12,
+      orderedCaseIds: [22],
+    });
+    expect(errorCode(foreignFolderResponse)).toBe('folder_project_mismatch');
+    expect(foreignFolder.models.Case.update).not.toHaveBeenCalled();
+
+    const persistenceFailure = harness();
+    persistenceFailure.models.Case.update.mockRejectedValueOnce(
+      new Error('SequelizeDatabaseError: secret connection details')
+    );
+    const response = await persistenceFailure.call('unittcms_reorder_test_cases', {
+      projectId: 1,
+      folderId: 11,
+      orderedCaseIds: [21],
+    });
+    expect(errorCode(response)).toBe('operation_failed');
+    expect(JSON.stringify(response)).not.toContain('secret');
+    expect(JSON.stringify(response)).not.toContain('SequelizeDatabaseError');
   });
 
   it('enforces read and write scopes before invoking domain handlers', async () => {

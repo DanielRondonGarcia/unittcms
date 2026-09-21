@@ -28,6 +28,7 @@ import TestCasePriority from '@/components/TestCasePriority';
 import { TestTypeMessages } from '@/types/testType';
 import { TestRunCaseStatusMessages } from '@/types/status';
 import { MemberType } from '@/types/user';
+import { sortCasesByFolderPosition } from '@/utils/caseOrdering';
 
 type Props = {
   projectId: string;
@@ -96,11 +97,15 @@ export default function TestCaseSelector({
   }, [isDisabled]);
 
   const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
-    column: 'id',
+    column: 'folderId',
     direction: 'ascending',
   });
 
   const sortedItems = useMemo(() => {
+    if (sortDescriptor.column === 'folderId') {
+      return sortCasesByFolderPosition(cases);
+    }
+
     return [...cases].sort((a: CaseType, b: CaseType) => {
       let first: number | string, second: number | string;
 

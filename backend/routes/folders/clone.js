@@ -8,6 +8,27 @@ import defineCaseStep from '../../models/caseSteps.js';
 import authMiddleware from '../../middleware/auth.js';
 import editableMiddleware from '../../middleware/verifyEditable.js';
 import { gherkinTemplate, normalizeGherkinSection } from '../../config/enums.js';
+import createCaseOrderService from '../cases/orderService.js';
+
+function cloneCaseAttributes(sourceCase, targetFolderId) {
+  const attributes = { ...sourceCase };
+  delete attributes.id;
+  delete attributes.createdAt;
+  delete attributes.updatedAt;
+  delete attributes.position;
+  delete attributes.folderId;
+  delete attributes.Steps;
+  return { ...attributes, folderId: targetFolderId };
+}
+
+function cloneStepAttributes(sourceStep) {
+  const attributes = { ...sourceStep };
+  delete attributes.id;
+  delete attributes.createdAt;
+  delete attributes.updatedAt;
+  delete attributes.caseSteps;
+  return attributes;
+}
 
 export default function (sequelize) {
   const { verifySignedIn } = authMiddleware(sequelize);
@@ -20,6 +41,7 @@ export default function (sequelize) {
   Case.belongsTo(Folder);
   Case.belongsToMany(Step, { through: 'caseSteps' });
   Step.belongsToMany(Case, { through: 'caseSteps' });
+  const caseOrderService = createCaseOrderService({ sequelize, Case, Folder });
 
   async function _cloneFolderRecursive(sourceFolder, targetParent, transaction) {
     const folderToCreate = {
@@ -35,6 +57,8 @@ export default function (sequelize) {
 
     const childFolders = await Folder.findAll({
       where: { parentFolderId: sourceFolder.id },
+      order: [['id', 'ASC']],
+      transaction,
     });
 
     for (const child of childFolders) {
@@ -47,7 +71,12 @@ export default function (sequelize) {
   async function _cloneCasesAndSteps(folderId, targetFolderId, transaction) {
     const folderCases = await Case.findAll({
       where: { folderId },
+      order: [
+        ['position', 'ASC'],
+        ['id', 'ASC'],
+      ],
       include: [{ model: Step, through: { attributes: ['stepNo', 'keyword', 'section'] } }],
+      transaction,
     });
 
     if (folderCases.length === 0) return;
@@ -57,32 +86,27 @@ export default function (sequelize) {
       throw new Error('invalid_case_step_section');
     }
 
-    const clonedCases = cases.map((c) => {
-      // eslint-disable-next-line no-unused-vars
-      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...clonedCase } = c;
-      return { ...clonedCase, folderId: targetFolderId };
-    });
+    for (const sourceCase of cases) {
+      const sourceSteps = sourceCase.Steps ?? [];
+      const newCase = await caseOrderService.createCase({
+        attributes: cloneCaseAttributes(sourceCase, targetFolderId),
+        folderId: targetFolderId,
+        transaction,
+      });
 
-    for (const c of clonedCases) {
-      const newCase = await Case.create(c, { transaction });
-
-      if (c.Steps && c.Steps.length > 0) {
-        const clonedSteps = c.Steps.map((s) => {
-          // eslint-disable-next-line no-unused-vars
-          const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...clonedStep } = s;
-          return clonedStep;
-        });
+      if (sourceSteps.length > 0) {
+        const clonedSteps = sourceSteps.map(cloneStepAttributes);
 
         const newSteps = await Step.bulkCreate(clonedSteps, { transaction });
         const caseSteps = newSteps.map((step, index) => ({
           caseId: newCase.id,
           stepId: step.id,
-          stepNo: clonedSteps[index].caseSteps.stepNo,
-          keyword: clonedSteps[index].caseSteps.keyword ?? null,
+          stepNo: sourceSteps[index].caseSteps.stepNo,
+          keyword: sourceSteps[index].caseSteps.keyword ?? null,
           section:
-            c.template === gherkinTemplate
+            sourceCase.template === gherkinTemplate
               ? 'scenario'
-              : normalizeGherkinSection(clonedSteps[index].caseSteps?.section),
+              : normalizeGherkinSection(sourceSteps[index].caseSteps?.section),
         }));
 
         await CaseStep.bulkCreate(caseSteps, { transaction });

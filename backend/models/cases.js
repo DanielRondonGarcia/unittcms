@@ -74,6 +74,10 @@ function defineCase(sequelize, DataTypes) {
       },
       onDelete: 'CASCADE',
     },
+    position: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
   });
 
   Case.associate = (models) => {

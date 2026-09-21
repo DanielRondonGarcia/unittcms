@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, ReactNode, useEffect } from 'react';
+import { useState, useMemo, useCallback, ReactNode, useEffect, type DragEvent } from 'react';
 import {
   Button,
   DropdownTrigger,
@@ -38,14 +38,17 @@ import TestCasePriority from '@/components/TestCasePriority';
 import { LocaleCodeType } from '@/types/locale';
 import { highlightSearchTerm } from '@/utils/highlightSearchTerm';
 import { onMoveEvent } from '@/utils/testCaseMoveEvent';
+import { computeCaseDragPermutation, isCanonicalCaseOrderView, sortCasesByPosition } from '@/utils/caseOrdering';
 
 type Props = {
   projectId: string;
+  folderId: number;
   isDisabled: boolean;
   cases: CaseType[];
   onCreateCase: () => void;
   onDeleteCase: (caseId: number) => void;
   onDeleteCases: (caseIds: number[]) => void;
+  onReorderCases: (folderId: number, orderedCaseIds: number[]) => Promise<boolean>;
   onShowImportDialog: () => void;
   onExportCases: (type: string) => void;
   onFilterChange: (query: string, priorities: number[], types: number[], tag: number[]) => void;
@@ -61,11 +64,13 @@ type Props = {
 
 export default function TestCaseTable({
   projectId,
+  folderId,
   isDisabled,
   cases,
   onCreateCase,
   onDeleteCase,
   onDeleteCases,
+  onReorderCases,
   onShowImportDialog,
   onExportCases,
   onFilterChange,
@@ -199,19 +204,28 @@ export default function TestCaseTable({
   // sort test case
   // **************************************************************************
   const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
-    column: 'id',
+    column: 'position',
     direction: 'ascending',
   });
   const sortedItems = useMemo(() => {
     if (cases.length === 0) {
       return [];
     }
+
+    if (sortDescriptor.column === 'position') {
+      return sortCasesByPosition(cases);
+    }
+
     return [...cases].sort((a: CaseType, b: CaseType) => {
-      const first = a[sortDescriptor.column as keyof CaseType] as number;
-      const second = b[sortDescriptor.column as keyof CaseType] as number;
+      const first = a[sortDescriptor.column as keyof CaseType] as number | string;
+      const second = b[sortDescriptor.column as keyof CaseType] as number | string;
       const cmp = first < second ? -1 : first > second ? 1 : 0;
 
-      return sortDescriptor.direction === 'descending' ? -cmp : cmp;
+      if (cmp !== 0) {
+        return sortDescriptor.direction === 'descending' ? -cmp : cmp;
+      }
+
+      return a.id - b.id;
     });
   }, [sortDescriptor, cases]);
   const handleSort = (columnUid: string) => {
@@ -246,36 +260,96 @@ export default function TestCaseTable({
   // **************************************************************************
   const [dragCount, setDragCount] = useState<number | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const handleDragStart = (e: React.DragEvent, id: number) => {
+  const [draggedCaseIds, setDraggedCaseIds] = useState<number[]>([]);
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+  const [isReordering, setIsReordering] = useState(false);
+  const [reorderError, setReorderError] = useState(false);
+  const isFiltered = activeFilterNum > 0;
+  const isCanonicalView = isCanonicalCaseOrderView({
+    isFiltered,
+    sortDescriptor: {
+      column: String(sortDescriptor.column),
+      direction: String(sortDescriptor.direction),
+    },
+  });
+  const canReorder = !isDisabled && !isReordering && isCanonicalView;
+
+  const handleDragStart = (e: DragEvent<HTMLTableRowElement>, id: number) => {
+    if (!canReorder) {
+      e.preventDefault();
+      return;
+    }
+
     e.stopPropagation();
 
     let selectedIds: number[];
     if (selectedKeys === 'all' || (selectedKeys instanceof Set && selectedKeys.has(id) && selectedKeys.size > 1)) {
       // when multiple row selected
-      selectedIds =
-        selectedKeys === 'all' ? sortedItems.map((item) => item.id) : (Array.from(selectedKeys) as number[]);
+      selectedIds = selectedKeys === 'all' ? sortedItems.map((item) => item.id) : Array.from(selectedKeys).map(Number);
     } else {
       // when no row selected or only one row selected
       selectedIds = [id];
     }
+    setDraggedCaseIds(selectedIds);
     setDragCount(selectedIds.length);
+    e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('application/json', JSON.stringify(selectedIds));
     const img = new window.Image();
     img.src = 'data:image/svg+xml;base64,';
     e.dataTransfer.setDragImage(img, 0, 0);
   };
-  const handleDrag = (e: React.DragEvent) => {
+  const handleDrag = (e: DragEvent<HTMLTableRowElement>) => {
     setMousePos({ x: e.clientX, y: e.clientY });
   };
-  const handleDragEnd = () => {
+  const handleDragEnd = useCallback(() => {
     setDragCount(null);
+    setDraggedCaseIds([]);
+    setDropTargetId(null);
+  }, []);
+
+  const handleDragOver = (e: DragEvent<HTMLTableRowElement>, id: number) => {
+    if (!canReorder || draggedCaseIds.length === 0 || draggedCaseIds.includes(id)) return;
+
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropTargetId(id);
   };
+
+  const handleDrop = async (e: DragEvent<HTMLTableRowElement>, targetCaseId: number) => {
+    if (!canReorder || draggedCaseIds.length === 0) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const orderedCaseIds = computeCaseDragPermutation(cases, draggedCaseIds[0], targetCaseId, {
+      isFiltered,
+      sortDescriptor: {
+        column: String(sortDescriptor.column),
+        direction: String(sortDescriptor.direction),
+      },
+      selectedCaseIds: draggedCaseIds,
+    });
+
+    handleDragEnd();
+    if (!orderedCaseIds) return;
+
+    setReorderError(false);
+    setIsReordering(true);
+    try {
+      const saved = await onReorderCases(folderId, orderedCaseIds);
+      if (!saved) setReorderError(true);
+    } catch {
+      setReorderError(true);
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
   useEffect(() => {
-    const unsubscribe = onMoveEvent(() => {
+    return onMoveEvent(() => {
       handleDragEnd();
     });
-    return unsubscribe;
-  }, []);
+  }, [handleDragEnd]);
 
   return (
     <>
@@ -380,7 +454,18 @@ export default function TestCaseTable({
         </div>
       </div>
 
-      <div>
+      <div aria-busy={isReordering}>
+        {(isReordering || reorderError) && (
+          <div
+            className={`px-3 py-2 text-sm ${reorderError ? 'text-danger' : 'text-default-500'}`}
+            role={reorderError ? 'alert' : 'status'}
+            aria-live="polite"
+          >
+            {reorderError
+              ? 'Unable to save case order. The last server-confirmed order was restored.'
+              : 'Saving case order…'}
+          </div>
+        )}
         <table className={heroUITableClasses.table()}>
           <thead className={heroUITableClasses.thead()}>
             <tr className={heroUITableClasses.tr()}>
@@ -409,13 +494,18 @@ export default function TestCaseTable({
           <tbody className={heroUITableClasses.tbody()}>
             {sortedItems.map((item) => (
               <tr
-                draggable
+                draggable={canReorder}
                 className={`${heroUITableClasses.tr()} cursor-pointer`}
                 key={item.id}
                 onDragStart={(e) => handleDragStart(e, item.id)}
                 onDrag={handleDrag}
+                onDragOver={(e) => handleDragOver(e, item.id)}
+                onDrop={(e) => void handleDrop(e, item.id)}
                 onDragEnd={handleDragEnd}
-                style={{ opacity: dragCount ? 0.5 : 1 }}
+                style={{
+                  opacity: dragCount ? 0.5 : 1,
+                  outline: dropTargetId === item.id ? '2px solid currentColor' : undefined,
+                }}
               >
                 <td className={`${heroUITableClasses.td()} ${tdClassNames}`}>
                   <Checkbox isSelected={isSelected(item.id)} onChange={() => handleSelectRow(item.id)} />

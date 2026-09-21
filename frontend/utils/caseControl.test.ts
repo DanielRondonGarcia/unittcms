@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createCase,
   deleteGherkinCaseStep,
   fetchCase,
   hasValidGherkinExamples,
@@ -7,10 +8,12 @@ import {
   hasValidGherkinStepOrder,
   insertGherkinCaseStep,
   normalizeGherkinCaseSteps,
+  reorderCases,
+  updateCase,
   validateGherkinCase,
 } from './caseControl';
 import type { GherkinKeyword, GherkinSection } from '@/types/base';
-import type { StepType } from '@/types/case';
+import type { CaseType, StepType } from '@/types/case';
 
 const fetchMock = vi.fn();
 
@@ -35,6 +38,7 @@ const validCasePayload = {
   preConditions: null,
   expectedResults: null,
   folderId: 3,
+  position: '4',
   Steps: [],
   RunCases: [],
 };
@@ -214,6 +218,7 @@ describe('fetchCase request outcomes', () => {
       ok: true,
       data: expect.objectContaining({
         id: 7,
+        position: 4,
         description: '',
         preConditions: '',
         expectedResults: '',
@@ -248,5 +253,132 @@ describe('fetchCase request outcomes', () => {
     fetchMock.mockRejectedValueOnce(Object.assign(new Error('aborted'), { name: 'AbortError' }));
     const timedOut = await fetchCase('jwt', 7);
     expect(timedOut).toMatchObject({ ok: false, error: { status: 0, code: 'timeout' } });
+  });
+});
+
+describe('case ordering request boundary', () => {
+  it('sends an authenticated complete permutation to the exact reorder endpoint', async () => {
+    fetchMock.mockResolvedValue(
+      response(200, {
+        folderId: '7',
+        orderedCaseIds: ['12', '11', '10'],
+        committed: [
+          { id: '12', position: '1' },
+          { id: '11', position: '2' },
+          { id: '10', position: '3' },
+        ],
+      })
+    );
+
+    await expect(reorderCases('jwt', 7, [12, 11, 10])).resolves.toEqual({
+      ok: true,
+      data: {
+        folderId: 7,
+        orderedCaseIds: [12, 11, 10],
+        committed: [
+          { id: 12, position: 1 },
+          { id: 11, position: 2 },
+          { id: 10, position: 3 },
+        ],
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/cases/reorder',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer jwt',
+        },
+        body: JSON.stringify({ folderId: 7, orderedCaseIds: [12, 11, 10] }),
+      })
+    );
+  });
+
+  it('preserves structured API errors from the reorder endpoint', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        400,
+        { error: 'orderedCaseIds is not a complete folder permutation', code: 'ordered_case_ids_missing' },
+        {
+          'X-Correlation-Id': 'corr-order',
+          'Retry-After': '3',
+        }
+      )
+    );
+
+    await expect(reorderCases('jwt', 7, [12, 11])).resolves.toEqual({
+      ok: false,
+      error: {
+        status: 400,
+        code: 'ordered_case_ids_missing',
+        message: 'orderedCaseIds is not a complete folder permutation',
+        correlationId: 'corr-order',
+        retryAfterSeconds: 3,
+      },
+    });
+  });
+
+  it('rejects invalid reorder input before making a network request', async () => {
+    await expect(reorderCases('jwt', 0, [1])).resolves.toMatchObject({
+      ok: false,
+      error: { status: 400, code: 'folder_id_invalid' },
+    });
+    await expect(reorderCases('jwt', 7, [])).resolves.toMatchObject({
+      ok: false,
+      error: { status: 400, code: 'ordered_case_ids_invalid' },
+    });
+    await expect(reorderCases('jwt', 7, [1, 1])).resolves.toMatchObject({
+      ok: false,
+      error: { status: 400, code: 'ordered_case_ids_duplicate' },
+    });
+    await expect(reorderCases('jwt', 7, [1, 0])).resolves.toMatchObject({
+      ok: false,
+      error: { status: 400, code: 'ordered_case_ids_invalid' },
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('normalizes optional positions and never sends case identity fields in create/update bodies', async () => {
+    fetchMock.mockResolvedValueOnce(response(200, { id: 8 })).mockResolvedValueOnce(response(200, { id: 8 }));
+
+    await createCase('jwt', '7', 'New case', 'Description', 0, 3);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      title: 'New case',
+      state: 0,
+      priority: 2,
+      type: 0,
+      automationStatus: 0,
+      description: 'Description',
+      template: 0,
+      preConditions: '',
+      expectedResults: '',
+      position: 3,
+    });
+
+    const updateData = {
+      ...validCasePayload,
+      id: 8,
+      folderId: 7,
+      position: 2,
+      description: 'Updated description',
+    } as unknown as CaseType;
+    await updateCase('jwt', updateData);
+
+    const updateBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(updateBody).toMatchObject({ description: 'Updated description', position: 2 });
+    expect(updateBody).not.toHaveProperty('id');
+    expect(updateBody).not.toHaveProperty('folderId');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/cases/8');
+  });
+
+  it('rejects non-positive optional positions without sending a mutation', async () => {
+    await expect(createCase('jwt', '7', 'Invalid', 'Description', 0, 0)).rejects.toMatchObject({
+      status: 400,
+      code: 'position_invalid',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

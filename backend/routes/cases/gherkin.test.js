@@ -52,12 +52,15 @@ vi.mock('../../middleware/verifyVisible.js', () => ({
 }));
 const mockCase = {
   create: vi.fn(),
+  update: vi.fn(),
   findAll: vi.fn(),
   findByPk: vi.fn(),
   belongsToMany: vi.fn(),
   hasMany: vi.fn(),
 };
 vi.mock('../../models/cases.js', () => ({ default: () => mockCase }));
+const mockFolder = { findByPk: vi.fn() };
+vi.mock('../../models/folders.js', () => ({ default: () => mockFolder }));
 const mockStep = {
   create: vi.fn(),
   bulkCreate: vi.fn(),
@@ -105,6 +108,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLintGherkinFeature.mockResolvedValue([]);
   nextStepId = 100;
+  mockCase.findAll.mockResolvedValue([]);
+  mockCase.update.mockResolvedValue([1]);
+  mockFolder.findByPk.mockResolvedValue({ id: 7, projectId: 1 });
   mockCase.findByPk.mockResolvedValue({ id: 42, template: 1, title: 'Login', automationVersion: 1, update: vi.fn() });
   mockCase.create.mockResolvedValue({ id: 42, template: 2 });
   mockStep.create.mockImplementation(async (attributes) => ({ id: nextStepId++, ...attributes }));
@@ -118,9 +124,10 @@ describe('Gherkin case persistence', () => {
 
     expect(response.status).toBe(200);
     expect(mockCase.create).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Login', template: 2, folderId: '7' })
+      expect.objectContaining({ title: 'Login', template: 2, folderId: 7 }),
+      { transaction }
     );
-    expect(sequelize.transaction).not.toHaveBeenCalled();
+    expect(sequelize.transaction).toHaveBeenCalledOnce();
     expect(mockStep.create).not.toHaveBeenCalled();
     expect(mockCaseStep.create).not.toHaveBeenCalled();
   });
@@ -663,6 +670,7 @@ describe('Gherkin case persistence', () => {
     const sourceCase = {
       id: 42,
       folderId: 7,
+      position: 2,
       template: 2,
       Steps: [
         { id: 10, step: 'Then', result: '', caseSteps: { stepNo: 1, keyword: 'then' } },
@@ -670,13 +678,31 @@ describe('Gherkin case persistence', () => {
       ],
       get: () => sourceCase,
     };
-    mockCase.findAll.mockResolvedValue([sourceCase]);
-    mockCase.create.mockResolvedValue({ id: 99 });
+    const clonedCase = { id: 99, template: 2, folderId: 8, position: -1 };
+    mockCase.findAll.mockImplementation(({ where }) => {
+      if (where?.id) return [sourceCase];
+      return [];
+    });
+    mockCase.create.mockResolvedValue(clonedCase);
+    mockCase.findByPk.mockImplementation((id) => (Number(id) === 99 ? clonedCase : sourceCase));
 
     const response = await request(app)
       .post('/cases/clone?projectId=5')
       .send({ caseIds: [42], targetFolderId: 8 });
     expect(response.status).toBe(200);
+    expect(mockCase.findAll).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: [42] },
+        order: [
+          ['position', 'ASC'],
+          ['id', 'ASC'],
+        ],
+      })
+    );
+    expect(mockCase.create).toHaveBeenCalledWith(
+      expect.not.objectContaining({ id: 42, position: 2 }),
+      expect.objectContaining({ transaction })
+    );
     expect(mockCaseStep.bulkCreate).toHaveBeenCalledWith(
       [
         { caseId: 99, stepId: 101, stepNo: 1, keyword: 'then', section: 'scenario' },

@@ -27,8 +27,11 @@ vi.mock('../../middleware/verifyEditable.js', () => ({
   }),
 }));
 
-const mockCase = { bulkCreate: vi.fn(), belongsToMany: vi.fn() };
+const mockCase = { bulkCreate: vi.fn(), findAll: vi.fn(), update: vi.fn(), belongsToMany: vi.fn() };
 vi.mock('../../models/cases.js', () => ({ default: () => mockCase }));
+
+const mockFolder = { findByPk: vi.fn() };
+vi.mock('../../models/folders.js', () => ({ default: () => mockFolder }));
 
 const mockStep = { create: vi.fn(), belongsToMany: vi.fn() };
 vi.mock('../../models/steps.js', () => ({ default: () => mockStep }));
@@ -55,6 +58,9 @@ describe('Test case import strict validation', () => {
     app.use(express.json());
     app.use('/', casesImportRoute(sequelize));
     vi.clearAllMocks();
+    mockFolder.findByPk.mockResolvedValue({ id: 1 });
+    mockCase.findAll.mockResolvedValue([]);
+    mockCase.update.mockResolvedValue([1]);
   });
 
   const postImport = (rows) => {
@@ -72,6 +78,85 @@ describe('Test case import strict validation', () => {
       mockCaseStep.create.mockResolvedValue({ id: 1 });
       const res = await postImport([{ ...validRow }]);
       expect(res.status).toBe(200);
+    });
+
+    it('appends distinct cases in input order without consuming positions for step rows', async () => {
+      const existingCases = [
+        { id: 10, folderId: 1, position: 7 },
+        { id: 11, folderId: 1, position: 12 },
+      ];
+      mockCase.findAll.mockResolvedValue(existingCases);
+      mockCase.bulkCreate.mockResolvedValue([
+        { id: 20, template: 1, title: 'First' },
+        { id: 21, template: 1, title: 'Second' },
+      ]);
+      mockStep.create
+        .mockResolvedValueOnce({ id: 1 })
+        .mockResolvedValueOnce({ id: 2 })
+        .mockResolvedValueOnce({ id: 3 });
+      mockCaseStep.create.mockResolvedValue({ id: 1 });
+
+      const res = await postImport([
+        { ...validRow, title: 'First', step: 'first step' },
+        { ...validRow, title: 'First', step: 'second step' },
+        { ...validRow, title: 'Second', step: 'third step' },
+      ]);
+
+      expect(res.status).toBe(200);
+      expect(mockCase.bulkCreate).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ title: 'First', position: 3 }),
+          expect.objectContaining({ title: 'Second', position: 4 }),
+        ],
+        expect.objectContaining({ transaction: expect.anything() })
+      );
+      expect(mockCaseStep.create.mock.calls.map(([attributes]) => attributes)).toEqual([
+        expect.objectContaining({ caseId: 20, stepNo: 1 }),
+        expect.objectContaining({ caseId: 20, stepNo: 2 }),
+        expect.objectContaining({ caseId: 21, stepNo: 1 }),
+      ]);
+      expect(mockCase.update.mock.calls.map(([attributes]) => attributes.position)).toEqual([-1, -2, 1, 2]);
+    });
+
+    it('keeps Gherkin step metadata while appending the case once', async () => {
+      mockCase.bulkCreate.mockResolvedValue([{ id: 30, template: 2, title: 'Login' }]);
+      mockStep.create.mockResolvedValue({ id: 4 });
+      mockCaseStep.create.mockResolvedValue({ id: 4 });
+
+      const res = await postImport([
+        {
+          ...validRow,
+          title: 'Login',
+          template: 'gherkin',
+          keyword: 'given',
+          section: 'background',
+          step: 'the user is signed out',
+        },
+        {
+          ...validRow,
+          title: 'Login',
+          template: 'gherkin',
+          keyword: 'then',
+          section: 'scenario',
+          step: 'the dashboard is shown',
+        },
+      ]);
+
+      expect(res.status).toBe(200);
+      expect(mockCase.bulkCreate).toHaveBeenCalledWith(
+        [expect.objectContaining({ title: 'Login', template: 2, position: 1 })],
+        expect.objectContaining({ transaction: expect.anything() })
+      );
+      expect(mockCaseStep.create).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ caseId: 30, stepNo: 1, keyword: 'given', section: 'scenario' }),
+        expect.objectContaining({ transaction: expect.anything() })
+      );
+      expect(mockCaseStep.create).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ caseId: 30, stepNo: 2, keyword: 'then', section: 'scenario' }),
+        expect.objectContaining({ transaction: expect.anything() })
+      );
     });
   });
 

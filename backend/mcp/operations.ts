@@ -19,6 +19,7 @@ import {
   hasValidGherkinExamples,
   matchGherkinKeywordPrefix,
 } from '../config/enums.js';
+import createCaseOrderService from '../routes/cases/orderService.js';
 
 type Extra = { authInfo?: { scopes?: string[]; extra?: { userId?: number } } };
 type Handler = (args: Record<string, any>, extra: Extra) => Promise<Record<string, unknown>>;
@@ -37,6 +38,8 @@ const GHERKIN_TEMPLATE_GUIDANCE =
   'Case template: text (0) uses preConditions/expectedResults and does not accept steps; step (1) uses ordinary steps; gherkin (2) requires the Gherkin steps contract. For Gherkin, caseSteps.keyword stores canonical metadata and step stores details only, for example keyword: given with step: "the user is authenticated".';
 const GHERKIN_EXAMPLES_GUIDANCE =
   'When Gherkin examples are supplied, use a non-empty headers array of unique strings and rows whose string-cell count exactly matches the headers count. Omit or set gherkinExamples to null when examples are not needed.';
+const CASE_POSITION_GUIDANCE =
+  'position is the one-based rank within folderId; case IDs remain immutable and position is scoped to the current folder.';
 const text = (value: unknown) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
 const denied = (scope: string) => ({
   content: [{ type: 'text', text: `insufficient_scope: ${scope} scope required` }],
@@ -54,7 +57,18 @@ const SAFE_ERROR_CODES = new Set([
   'folder_project_mismatch',
   'case_not_found',
   'case_project_mismatch',
+  'case_folder_mismatch',
   'case_ids_invalid',
+  'case_ids_duplicate',
+  'case_ids_unknown',
+  'ordered_case_ids_invalid',
+  'ordered_case_ids_duplicate',
+  'ordered_case_ids_unknown',
+  'ordered_case_ids_foreign',
+  'ordered_case_ids_missing',
+  'position_invalid',
+  'position_out_of_range',
+  'position_required',
   'tag_not_found',
   'tag_project_mismatch',
   'tag_ids_invalid',
@@ -80,6 +94,8 @@ const SAFE_ERROR_CODES = new Set([
   'gherkin_invalid',
   'gherkin_lint_unavailable',
   'gherkin_lint_failed',
+  'case_attributes_invalid',
+  'transaction_required',
   'operation_failed',
 ]);
 
@@ -146,6 +162,50 @@ const MCP_ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
   steps_invalid: {
     message: 'The steps value is invalid.',
     remediation: 'Retry with steps as an array containing at most 500 step objects.',
+  },
+  position_invalid: {
+    message: 'The case position must be a positive one-based integer.',
+    remediation: `Retry with ${CASE_POSITION_GUIDANCE}`,
+  },
+  position_out_of_range: {
+    message: 'The requested case position is outside the folder order.',
+    remediation: `Retry with a position between 1 and the folder case count plus one; ${CASE_POSITION_GUIDANCE}`,
+  },
+  position_required: {
+    message: 'An explicit case position is required for this ordering operation.',
+    remediation: `Retry with a positive one-based position; ${CASE_POSITION_GUIDANCE}`,
+  },
+  case_folder_mismatch: {
+    message: 'The case does not belong to the requested folder.',
+    remediation: 'Retry with the folderId that currently contains the case.',
+  },
+  ordered_case_ids_invalid: {
+    message: 'orderedCaseIds must be an array of positive case IDs.',
+    remediation: 'Retry with an array containing at most 500 positive integer case IDs.',
+  },
+  ordered_case_ids_duplicate: {
+    message: 'orderedCaseIds must not contain duplicate case IDs.',
+    remediation: 'Retry with each case ID exactly once in the desired folder order.',
+  },
+  ordered_case_ids_unknown: {
+    message: 'orderedCaseIds contains a case that does not exist.',
+    remediation: 'Retry after removing unknown IDs and provide the complete current folder permutation.',
+  },
+  ordered_case_ids_foreign: {
+    message: 'orderedCaseIds contains a case from another folder.',
+    remediation: 'Retry with only cases belonging to the requested folder.',
+  },
+  ordered_case_ids_missing: {
+    message: 'orderedCaseIds is not a complete folder permutation.',
+    remediation: 'Retry with every case in the folder exactly once, including unchanged cases.',
+  },
+  case_ids_duplicate: {
+    message: 'caseIds must not contain duplicate case IDs.',
+    remediation: 'Retry with each case ID once in the requested move order.',
+  },
+  case_ids_unknown: {
+    message: 'Some requested cases were not found.',
+    remediation: 'Retry with existing case IDs from the visible project.',
   },
   step_shape_invalid: {
     message: 'A supplied step has an invalid shape.',
@@ -290,11 +350,22 @@ const caseFields = [
   'preConditions',
   'expectedResults',
   'folderId',
+  'position',
 ];
 const folderFields = ['id', 'name', 'detail', 'parentFolderId', 'projectId'];
 const tagFields = ['id', 'name', 'projectId'];
 const runFields = ['id', 'name', 'description', 'state', 'projectId'];
-const caseMetadataFields = ['id', 'title', 'state', 'priority', 'type', 'automationStatus', 'template', 'folderId'];
+const caseMetadataFields = [
+  'id',
+  'title',
+  'state',
+  'priority',
+  'type',
+  'automationStatus',
+  'template',
+  'folderId',
+  'position',
+];
 const gherkinExamplesSchema = z
   .object({
     headers: z.array(z.string().trim().min(1).max(200)).min(1).max(100),
@@ -411,6 +482,11 @@ function normalizeCaseIds(value: unknown): number[] {
   return ids;
 }
 
+function normalizeOrderedCaseIds(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length > MAX_CASE_IDS) throw operationError('ordered_case_ids_invalid');
+  return value.map((id) => positiveId(id, 'ordered_case_ids_invalid'));
+}
+
 function hasOwn(value: Record<string, any>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -520,6 +596,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
   const Tag = defineTag(sequelize, DataTypes) as any;
   const CaseTag = defineCaseTag(sequelize, DataTypes) as any;
   const Run = defineRun(sequelize, DataTypes) as any;
+  const caseOrderService = createCaseOrderService({ sequelize, Case, Folder });
   const visible = async (projectId: number, userId: number) => {
     const project = await Project.findByPk(projectId);
     return Boolean(
@@ -907,7 +984,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
     'unittcms_list_test_cases',
     'read',
     {
-      description: 'List safe test-case metadata and same-project tag metadata',
+      description: `List safe test-case metadata and same-project tag metadata. ${CASE_POSITION_GUIDANCE}`,
       inputSchema: {
         projectId: z.number().int().positive(),
         limit: z.number().int().positive().max(MAX_LIST_LIMIT).optional(),
@@ -923,7 +1000,11 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
       const cases = await Case.findAll({
         where: { folderId: { [Op.in]: folderIds } },
         attributes: caseMetadataFields,
-        order: [['id', 'ASC']],
+        order: [
+          ['folderId', 'ASC'],
+          ['position', 'ASC'],
+          ['id', 'ASC'],
+        ],
         limit: listLimit(args.limit),
       });
       const records = Array.isArray(cases) ? cases : [];
@@ -942,7 +1023,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
     'unittcms_create_test_case',
     'write',
     {
-      description: `Create a test case with optional transactional steps, examples, and tags. ${GHERKIN_STEPS_GUIDANCE}`,
+      description: `Create a test case with optional transactional steps, examples, tags, and a one-based folder position. Omit position to append; an explicit position inserts and shifts neighboring cases. ${CASE_POSITION_GUIDANCE} ${GHERKIN_STEPS_GUIDANCE}`,
       inputSchema: {
         projectId: z.number().int().positive(),
         folderId: z.number().int().positive(),
@@ -956,6 +1037,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         preConditions: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         expectedResults: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         automationVersion: z.number().int().positive().optional(),
+        position: z.number().int().positive().optional().describe(CASE_POSITION_GUIDANCE),
         gherkinExamples: gherkinExamplesSchema,
         tagIds: z.array(z.number().int().positive()).max(5).optional(),
         steps: z.array(stepInputSchema).max(MAX_CASE_STEPS).optional().describe(GHERKIN_STEPS_GUIDANCE),
@@ -995,7 +1077,12 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         casePersistence = await loadCasePersistence();
       }
       const created = await inTransaction(sequelize, async (transaction) => {
-        const testcase = await Case.create(values, { transaction });
+        const testcase = await caseOrderService.createCase({
+          attributes: values,
+          folderId,
+          position: args.position,
+          transaction,
+        });
         if (casePersistence && suppliedSteps) {
           const normalized = await casePersistence.validateAndNormalizeCaseSteps({
             caseId: testcase.id,
@@ -1025,7 +1112,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
     'unittcms_update_test_case',
     'write',
     {
-      description: `Update test-case metadata and optionally replace validated steps, examples, and tags. ${GHERKIN_STEPS_GUIDANCE} When steps is supplied, it replaces and validates the supplied active step set; retry with the corrected steps array rather than relying on server-side repair.`,
+      description: `Update test-case metadata and optionally replace validated steps, examples, tags, and folder position. Omit position to preserve order; an explicit position moves the case within its current folder. ${CASE_POSITION_GUIDANCE} ${GHERKIN_STEPS_GUIDANCE} When steps is supplied, it replaces and validates the supplied active step set; retry with the corrected steps array rather than relying on server-side repair.`,
       inputSchema: {
         projectId: z.number().int().positive(),
         caseId: z.number().int().positive(),
@@ -1038,6 +1125,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
         description: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         preConditions: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
         expectedResults: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
+        position: z.number().int().positive().optional().describe(CASE_POSITION_GUIDANCE),
         gherkinExamples: gherkinExamplesSchema,
         tagIds: z.array(z.number().int().positive()).max(5).optional(),
         steps: z
@@ -1055,6 +1143,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
       await requireEditableProject(projectId, userId);
       const caseId = positiveId(args.caseId, 'case_not_found');
       const { testcase } = await caseForProject(caseId, projectId);
+      const hasPosition = hasOwn(args, 'position') && args.position !== undefined && args.position !== null;
       const template =
         args.template === undefined ? normalizeTemplate(testcase.template) : normalizeTemplate(args.template);
       const examples = hasOwn(args, 'gherkinExamples') ? args.gherkinExamples : testcase.gherkinExamples;
@@ -1113,6 +1202,9 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
           });
         }
         if (tagIds !== undefined) await replaceCaseTags(projectId, caseId, tagIds, transaction, validatedTags);
+        if (hasPosition) {
+          await caseOrderService.moveCase({ caseId, position: args.position, transaction });
+        }
       });
       return text(await caseResponse(projectId, caseId));
     }
@@ -1122,7 +1214,7 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
     'unittcms_move_test_case',
     'write',
     {
-      description: 'Move one or more test cases within the same editable project',
+      description: `Move one or more test cases within the same editable project. Cases append to targetFolderId in supplied caseIds order. ${CASE_POSITION_GUIDANCE}`,
       inputSchema: {
         projectId: z.number().int().positive(),
         caseIds: z.array(z.number().int().positive()).min(1).max(MAX_CASE_IDS),
@@ -1155,10 +1247,43 @@ export function registerMcpOperations(server: McpServer, sequelize: any): void {
       ) {
         throw operationError('case_project_mismatch');
       }
-      await inTransaction(sequelize, async (transaction) => {
-        for (const testcase of records) await testcase.update({ folderId: targetFolderId }, { transaction });
-      });
+      await caseOrderService.moveCasesToFolder({ caseIds, targetFolderId });
       return text({ movedCaseIds: caseIds, targetFolderId, projectId });
+    }
+  );
+
+  add(
+    'unittcms_reorder_test_cases',
+    'write',
+    {
+      description: `Reorder all test cases in one folder with a complete permutation. ${CASE_POSITION_GUIDANCE}`,
+      inputSchema: {
+        projectId: z.number().int().positive(),
+        folderId: z.number().int().positive(),
+        orderedCaseIds: z
+          .array(z.number().int().positive())
+          .max(MAX_CASE_IDS)
+          .describe(
+            'Complete folder permutation: include every case in folderId exactly once, in the desired one-based order.'
+          ),
+      },
+    },
+    async (args, extra) => {
+      const userId = caller(extra);
+      const projectId = positiveId(args.projectId);
+      await requireEditableProject(projectId, userId);
+      const folderId = positiveId(args.folderId, 'folder_project_mismatch');
+      await folderForProject(folderId, projectId);
+      const orderedCaseIds = normalizeOrderedCaseIds(args.orderedCaseIds);
+      const committedCases = await caseOrderService.reorderFolder({ folderId, orderedCaseIds });
+      return text({
+        folderId,
+        orderedCaseIds,
+        committed: committedCases.map((testcase: any) => ({
+          id: Number(plain(testcase)?.id),
+          position: Number(plain(testcase)?.position),
+        })),
+      });
     }
   );
 

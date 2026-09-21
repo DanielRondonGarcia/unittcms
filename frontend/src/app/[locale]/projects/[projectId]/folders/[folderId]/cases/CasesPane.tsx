@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useContext, useCallback } from 'react';
+import { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { addToast } from '@heroui/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import TestCaseTable from './TestCaseTable';
@@ -8,7 +8,7 @@ import CaseMoveDialog from './CaseMoveDialog';
 import CaseImportDialog from './CaseImportDialog';
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog';
 import { TokenContext } from '@/utils/TokenProvider';
-import { fetchCases, createCase, deleteCases, exportCases } from '@/utils/caseControl';
+import { fetchCases, createCase, deleteCases, exportCases, reorderCases } from '@/utils/caseControl';
 import { CaseType, CasesMessages } from '@/types/case';
 import { PriorityMessages } from '@/types/priority';
 import { TestTypeMessages } from '@/types/testType';
@@ -35,6 +35,7 @@ export default function CasesPane({
   locale,
 }: Props) {
   const [cases, setCases] = useState<CaseType[]>([]);
+  const serverConfirmedCasesRef = useRef<CaseType[]>([]);
   const [isCaseDialogOpen, setIsCaseDialogOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<number[]>([]);
@@ -78,8 +79,8 @@ export default function CasesPane({
     router.push(newUrl, { scroll: false });
   };
 
-  const refreshCases = useCallback(async () => {
-    if (!context.isSignedIn()) return;
+  const refreshCases = useCallback(async (): Promise<CaseType[] | undefined> => {
+    if (!context.isSignedIn()) return undefined;
 
     const searchParam = searchParams.get('search') || '';
     const priorityParam = parseQueryParam(searchParams.get('priority'));
@@ -100,9 +101,12 @@ export default function CasesPane({
         typeParam.length > 0 ? typeParam : undefined,
         tagParam.length > 0 ? tagParam : undefined
       );
+      serverConfirmedCasesRef.current = data;
       setCases(data);
+      return data;
     } catch (error: unknown) {
       logError('Error fetching cases:', error);
+      return undefined;
     }
   }, [context, folderId, searchParams]);
 
@@ -114,7 +118,9 @@ export default function CasesPane({
 
   const onSubmit = async (title: string, description: string, template: number, createMore: boolean) => {
     const newCase = await createCase(context.token.access_token, folderId, title, description, template);
-    setCases([...cases, newCase]);
+    const nextCases = [...cases, newCase];
+    serverConfirmedCasesRef.current = nextCases;
+    setCases(nextCases);
     if (!createMore) {
       closeDialog();
     }
@@ -138,7 +144,9 @@ export default function CasesPane({
   const onConfirm = async () => {
     if (deleteCaseIds.length > 0) {
       await deleteCases(context.token.access_token, deleteCaseIds, Number(projectId));
-      setCases(cases.filter((entry) => !deleteCaseIds.includes(entry.id)));
+      const nextCases = cases.filter((entry) => !deleteCaseIds.includes(entry.id));
+      serverConfirmedCasesRef.current = nextCases;
+      setCases(nextCases);
       closeDeleteConfirmDialog();
     }
   };
@@ -155,6 +163,80 @@ export default function CasesPane({
     updateUrlParams({ search: search, priority: priorities, type: types, tag: tag });
   };
 
+  const handleReorderCases = useCallback(
+    async (sourceFolderId: number, orderedCaseIds: number[]): Promise<boolean> => {
+      const currentFolderId = Number(folderId);
+      const confirmedCases = serverConfirmedCasesRef.current;
+      if (sourceFolderId !== currentFolderId) return false;
+
+      try {
+        const result = await reorderCases(context.token.access_token, sourceFolderId, orderedCaseIds);
+        if (!result.ok) {
+          setCases(confirmedCases.slice());
+          addToast({
+            title: messages.errorTitle,
+            color: 'danger',
+            description: 'Unable to save case order. The last server-confirmed order was restored.',
+          });
+          return false;
+        }
+
+        const committedPositions = new Map(result.data.committed.map((entry) => [entry.id, entry.position]));
+        const confirmedCasesById = new Map(confirmedCases.map((entry) => [entry.id, entry]));
+        const reconciledCases = result.data.orderedCaseIds
+          .map((caseId) => {
+            const confirmedCase = confirmedCasesById.get(caseId);
+            if (!confirmedCase) return undefined;
+            const position = committedPositions.get(caseId);
+            return position === undefined ? confirmedCase : { ...confirmedCase, position };
+          })
+          .filter((entry): entry is CaseType => entry !== undefined);
+        const hasCompleteResponse = reconciledCases.length === confirmedCases.length;
+        if (hasCompleteResponse) {
+          serverConfirmedCasesRef.current = reconciledCases;
+          setCases(reconciledCases);
+        }
+
+        const refreshedCases = await refreshCases();
+        if (refreshedCases === undefined) {
+          if (hasCompleteResponse) {
+            addToast({
+              title: messages.successTitle,
+              color: 'success',
+              description: 'Case order saved; the list was reconciled from the server response.',
+            });
+            return true;
+          }
+
+          setCases(confirmedCases.slice());
+          addToast({
+            title: messages.errorTitle,
+            color: 'danger',
+            description: 'Unable to refresh case order. The last server-confirmed order was restored.',
+          });
+          return false;
+        }
+
+        addToast({
+          title: messages.successTitle,
+          color: 'success',
+          description: 'Case order saved.',
+        });
+        return true;
+      } catch (error: unknown) {
+        logError('Error reordering cases:', error);
+        setCases(confirmedCases.slice());
+        addToast({
+          title: messages.errorTitle,
+          color: 'danger',
+          description: 'Unable to save case order. The last server-confirmed order was restored.',
+        });
+        return false;
+      }
+    },
+    [context, folderId, messages, refreshCases]
+  );
+
   // **************************************************************************
   // Move/Clone cases
   // **************************************************************************
@@ -168,7 +250,9 @@ export default function CasesPane({
   }, []);
 
   const handleMoved = () => {
-    setCases((prev) => prev.filter((c) => !selectedCaseIds.includes(c.id)));
+    const nextCases = serverConfirmedCasesRef.current.filter((c) => !selectedCaseIds.includes(c.id));
+    serverConfirmedCasesRef.current = nextCases;
+    setCases(nextCases);
   };
 
   useEffect(() => {
@@ -197,11 +281,13 @@ export default function CasesPane({
     <>
       <TestCaseTable
         projectId={projectId}
+        folderId={Number(folderId)}
         isDisabled={!context.isProjectDeveloper(Number(projectId))}
         cases={cases}
         onCreateCase={() => setIsCaseDialogOpen(true)}
         onDeleteCase={onDeleteCase}
         onDeleteCases={onDeleteCases}
+        onReorderCases={handleReorderCases}
         onShowImportDialog={() => setIsImportDialogOpen(true)}
         onExportCases={onExportCases}
         onFilterChange={handleFilterChange}

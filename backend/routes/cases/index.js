@@ -84,6 +84,10 @@ export default function (sequelize) {
       const cases = await Case.findAll({
         where: whereClause,
         include: [tagInclude],
+        order: [
+          ['position', 'ASC'],
+          ['id', 'ASC'],
+        ],
       });
       res.json(cases);
     } catch (error) {

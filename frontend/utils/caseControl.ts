@@ -57,6 +57,37 @@ export class CaseRequestError extends Error {
 type GherkinKeywordLabels = Partial<Record<GherkinKeyword, string>>;
 type CaseErrorPayload = { error?: unknown; code?: unknown; fields?: unknown };
 
+export type CaseCreatePayload = {
+  title: string;
+  state: number;
+  priority: number;
+  type: number;
+  automationStatus: number;
+  description: string;
+  template: number;
+  preConditions: string;
+  expectedResults: string;
+  gherkinExamples?: GherkinExamples | null;
+  Steps?: StepType[];
+  position?: number;
+};
+
+export type CaseUpdatePayload = Omit<CaseType, 'id' | 'folderId' | 'position'> & {
+  id: number;
+  position?: number;
+};
+
+export type CaseReorderCommit = {
+  id: number;
+  position: number;
+};
+
+export type CaseReorderResponse = {
+  folderId: number;
+  orderedCaseIds: number[];
+  committed: CaseReorderCommit[];
+};
+
 const canonicalKeywordLabels: Record<GherkinKeyword, string> = {
   given: 'Given',
   when: 'When',
@@ -507,6 +538,7 @@ function isCasePayload(value: unknown): value is CaseType {
     !isIntegerLikeInRange(value.automationStatus, 0, 3) ||
     !isIntegerLikeInRange(value.template, 0, 2) ||
     !isPositiveIntegerLike(value.folderId) ||
+    (value.position !== undefined && value.position !== null && !isPositiveIntegerLike(value.position)) ||
     typeof value.title !== 'string'
   ) {
     return false;
@@ -549,10 +581,37 @@ function isCasePayload(value: unknown): value is CaseType {
   return true;
 }
 
+function isCaseReorderResponse(value: unknown): value is CaseReorderResponse {
+  if (!isRecord(value) || !isPositiveIntegerLike(value.folderId)) return false;
+  if (!Array.isArray(value.orderedCaseIds) || !value.orderedCaseIds.length) return false;
+  if (!value.orderedCaseIds.every(isPositiveIntegerLike)) return false;
+  if (!Array.isArray(value.committed) || value.committed.length !== value.orderedCaseIds.length) return false;
+
+  const orderedIds = value.orderedCaseIds.map(Number);
+  const committedIds = value.committed.map((entry) => (isRecord(entry) ? entry.id : undefined));
+  const committedPositions = value.committed.map((entry) => (isRecord(entry) ? entry.position : undefined));
+
+  if (
+    !committedIds.every(isPositiveIntegerLike) ||
+    !committedPositions.every(isPositiveIntegerLike) ||
+    new Set(orderedIds).size !== orderedIds.length ||
+    new Set(committedIds.map(Number)).size !== committedIds.length
+  ) {
+    return false;
+  }
+
+  const orderedIdSet = new Set(orderedIds);
+  if (!committedIds.every((id) => orderedIdSet.has(Number(id)))) return false;
+
+  const positions = committedPositions.map(Number).sort((left, right) => left - right);
+  return positions.every((position, index) => position === index + 1);
+}
+
 function normalizeCasePayload(data: CaseType): CaseType {
   return {
     ...data,
     id: Number(data.id),
+    position: data.position == null ? undefined : Number(data.position),
     state: Number(data.state),
     priority: Number(data.priority),
     type: Number(data.type),
@@ -600,6 +659,63 @@ export async function fetchCase(jwt: string, caseId: number): Promise<ApiResult<
   );
 
   return result.ok ? { ok: true, data: normalizeCasePayload(result.data) } : result;
+}
+
+function normalizeCaseReorderResponse(data: CaseReorderResponse): CaseReorderResponse {
+  return {
+    folderId: Number(data.folderId),
+    orderedCaseIds: data.orderedCaseIds.map(Number),
+    committed: data.committed.map((entry) => ({ id: Number(entry.id), position: Number(entry.position) })),
+  };
+}
+
+function invalidCaseOrderInput<T>(code: string, message: string): ApiResult<T> {
+  return { ok: false, error: { status: 400, code, message } };
+}
+
+function isStrictPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+export function reorderCases(
+  jwt: string,
+  folderId: number,
+  orderedCaseIds: number[]
+): Promise<ApiResult<CaseReorderResponse>> {
+  if (!isStrictPositiveInteger(folderId)) {
+    return Promise.resolve(invalidCaseOrderInput('folder_id_invalid', 'folderId must be a positive integer'));
+  }
+
+  if (!Array.isArray(orderedCaseIds) || orderedCaseIds.length === 0) {
+    return Promise.resolve(
+      invalidCaseOrderInput('ordered_case_ids_invalid', 'orderedCaseIds must be a non-empty array')
+    );
+  }
+
+  if (!orderedCaseIds.every(isStrictPositiveInteger)) {
+    return Promise.resolve(
+      invalidCaseOrderInput('ordered_case_ids_invalid', 'orderedCaseIds must contain positive integers')
+    );
+  }
+
+  if (new Set(orderedCaseIds).size !== orderedCaseIds.length) {
+    return Promise.resolve(
+      invalidCaseOrderInput('ordered_case_ids_duplicate', 'orderedCaseIds must not contain duplicates')
+    );
+  }
+
+  return requestJson<CaseReorderResponse>(
+    `${apiServer}/cases/reorder`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ folderId, orderedCaseIds }),
+    },
+    isCaseReorderResponse
+  ).then((result) => (result.ok ? { ok: true, data: normalizeCaseReorderResponse(result.data) } : result));
 }
 
 async function fetchCases(
@@ -653,8 +769,22 @@ async function fetchCases(
   }
 }
 
-async function createCase(jwt: string, folderId: string, title: string, description: string, template = 0) {
-  const newCase = {
+async function createCase(
+  jwt: string,
+  folderId: string,
+  title: string,
+  description: string,
+  template = 0,
+  position?: number
+) {
+  const normalizedPosition = position == null ? undefined : Number(position);
+  if (position != null && !isStrictPositiveInteger(normalizedPosition)) {
+    throw new CaseRequestError(400, 'position_invalid', [
+      { field: 'position', code: 'positive_integer', message: 'position must be a positive integer' },
+    ]);
+  }
+
+  const newCase: CaseCreatePayload = {
     title: title,
     state: 0,
     priority: 2,
@@ -664,6 +794,7 @@ async function createCase(jwt: string, folderId: string, title: string, descript
     template,
     preConditions: '',
     expectedResults: '',
+    ...(normalizedPosition === undefined ? {} : { position: normalizedPosition }),
   };
 
   const fetchOptions = {
@@ -689,17 +820,34 @@ async function createCase(jwt: string, folderId: string, title: string, descript
   }
 }
 
-async function updateCase(jwt: string, updateCaseData: CaseType) {
+async function updateCase(jwt: string, updateCaseData: CaseUpdatePayload) {
+  const { id } = updateCaseData;
+  const editablePayload: Record<string, unknown> = { ...updateCaseData };
+  delete editablePayload.id;
+  delete editablePayload.folderId;
+  const requestedPosition = editablePayload.position;
+  delete editablePayload.position;
+  const normalizedPosition = requestedPosition == null ? undefined : Number(requestedPosition);
+  if (requestedPosition != null && !isStrictPositiveInteger(normalizedPosition)) {
+    throw new CaseRequestError(400, 'position_invalid', [
+      { field: 'position', code: 'positive_integer', message: 'position must be a positive integer' },
+    ]);
+  }
+
+  const updatePayload = {
+    ...editablePayload,
+    ...(normalizedPosition === undefined ? {} : { position: normalizedPosition }),
+  };
   const fetchOptions = {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${jwt}`,
     },
-    body: JSON.stringify(updateCaseData),
+    body: JSON.stringify(updatePayload),
   };
 
-  const url = `${apiServer}/cases/${updateCaseData.id}`;
+  const url = `${apiServer}/cases/${id}`;
   try {
     const response = await fetch(url, fetchOptions);
     const payload = (await response.json().catch(() => ({}))) as CaseErrorPayload;
