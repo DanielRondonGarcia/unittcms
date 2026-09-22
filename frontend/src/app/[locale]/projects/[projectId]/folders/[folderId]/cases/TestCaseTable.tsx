@@ -27,6 +27,7 @@ import {
   Filter,
   FileJson,
   FileSpreadsheet,
+  GripVertical,
 } from 'lucide-react';
 import { table } from '@heroui/theme';
 import TestCaseFilter from './TestCaseFilter';
@@ -95,68 +96,6 @@ export default function TestCaseTable({
     { name: messages.tags, uid: 'tags' },
     { name: messages.actions, uid: 'actions' },
   ];
-
-  const renderCell = useCallback(
-    (testCase: CaseType, columnKey: string): ReactNode => {
-      const cellValue = testCase[columnKey as keyof CaseType];
-
-      switch (columnKey) {
-        case 'id':
-          return <span>{cellValue as number}</span>;
-        case 'title':
-          return (
-            <Link
-              href={`/projects/${projectId}/folders/${testCase.folderId}/cases/${testCase.id}`}
-              locale={locale}
-              className={NextUiLinkClasses}
-              draggable="false"
-            >
-              {highlightSearchTerm({
-                text: cellValue as string,
-                searchTerm: activeSearchFilter,
-              })}
-            </Link>
-          );
-        case 'priority':
-          return <TestCasePriority priorityValue={cellValue as number} priorityMessages={priorityMessages} />;
-
-        case 'tags':
-          return (
-            <div className="space-x-2">
-              {testCase.Tags?.map((tag) => (
-                <Chip size="sm" key={tag.id}>
-                  {tag.name}
-                </Chip>
-              ))}
-            </div>
-          );
-        case 'actions':
-          return (
-            <Dropdown>
-              <DropdownTrigger>
-                <Button isIconOnly radius="full" size="sm" variant="light">
-                  <MoreVertical size={16} />
-                </Button>
-              </DropdownTrigger>
-              <DropdownMenu aria-label={messages.testCaseActions}>
-                <DropdownItem
-                  key="delete-case"
-                  className="text-danger"
-                  isDisabled={isDisabled}
-                  onPress={() => handleDeleteCase(testCase.id)}
-                >
-                  {messages.deleteCase}
-                </DropdownItem>
-              </DropdownMenu>
-            </Dropdown>
-          );
-        default:
-          return cellValue as string;
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeSearchFilter]
-  );
 
   // **************************************************************************
   // filter test case
@@ -240,9 +179,12 @@ export default function TestCaseTable({
     });
   };
 
-  const handleDeleteCase = (deleteCaseId: number) => {
-    onDeleteCase(deleteCaseId);
-  };
+  const handleDeleteCase = useCallback(
+    (deleteCaseId: number) => {
+      onDeleteCase(deleteCaseId);
+    },
+    [onDeleteCase]
+  );
 
   const handleDeleteCases = () => {
     let deleteCaseIds: number[];
@@ -273,6 +215,22 @@ export default function TestCaseTable({
     },
   });
   const canReorder = !isDisabled && !isReordering && isCanonicalView;
+
+  const submitReorder = useCallback(
+    async (orderedCaseIds: number[]) => {
+      setReorderError(false);
+      setIsReordering(true);
+      try {
+        const saved = await onReorderCases(folderId, orderedCaseIds);
+        if (!saved) setReorderError(true);
+      } catch {
+        setReorderError(true);
+      } finally {
+        setIsReordering(false);
+      }
+    },
+    [folderId, onReorderCases]
+  );
 
   const handleDragStart = (e: DragEvent<HTMLTableRowElement>, id: number) => {
     if (!canReorder) {
@@ -333,23 +291,172 @@ export default function TestCaseTable({
     handleDragEnd();
     if (!orderedCaseIds) return;
 
-    setReorderError(false);
-    setIsReordering(true);
-    try {
-      const saved = await onReorderCases(folderId, orderedCaseIds);
-      if (!saved) setReorderError(true);
-    } catch {
-      setReorderError(true);
-    } finally {
-      setIsReordering(false);
-    }
+    await submitReorder(orderedCaseIds);
   };
+
+  const handleMoveCase = useCallback(
+    async (caseId: number, direction: 'up' | 'down') => {
+      if (!canReorder) return;
+
+      const currentIndex = sortedItems.findIndex((item) => item.id === caseId);
+      const adjacentIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+      if (currentIndex < 0 || adjacentIndex < 0 || adjacentIndex >= sortedItems.length) return;
+
+      const adjacentCaseId = sortedItems[adjacentIndex].id;
+      const sourceCaseId = direction === 'up' ? caseId : adjacentCaseId;
+      const targetCaseId = direction === 'up' ? adjacentCaseId : caseId;
+      const orderedCaseIds = computeCaseDragPermutation(cases, sourceCaseId, targetCaseId, {
+        isFiltered,
+        sortDescriptor: {
+          column: String(sortDescriptor.column),
+          direction: String(sortDescriptor.direction),
+        },
+        selectedCaseIds: [sourceCaseId],
+      });
+
+      if (!orderedCaseIds) return;
+
+      await submitReorder(orderedCaseIds);
+    },
+    [canReorder, cases, isFiltered, sortDescriptor, sortedItems, submitReorder]
+  );
+
+  const renderCell = useCallback(
+    (testCase: CaseType, columnKey: string): ReactNode => {
+      const cellValue = testCase[columnKey as keyof CaseType];
+
+      switch (columnKey) {
+        case 'id':
+          return (
+            <div className="flex items-center gap-2">
+              {canReorder && (
+                <span className="cursor-grab text-default-500" aria-hidden="true">
+                  <GripVertical size={16} />
+                </span>
+              )}
+              <span>{cellValue as number}</span>
+            </div>
+          );
+        case 'title':
+          return (
+            <Link
+              href={`/projects/${projectId}/folders/${testCase.folderId}/cases/${testCase.id}`}
+              locale={locale}
+              className={NextUiLinkClasses}
+              draggable="false"
+            >
+              {highlightSearchTerm({
+                text: cellValue as string,
+                searchTerm: activeSearchFilter,
+              })}
+            </Link>
+          );
+        case 'priority':
+          return <TestCasePriority priorityValue={cellValue as number} priorityMessages={priorityMessages} />;
+
+        case 'tags':
+          return (
+            <div className="space-x-2">
+              {testCase.Tags?.map((tag) => (
+                <Chip size="sm" key={tag.id}>
+                  {tag.name}
+                </Chip>
+              ))}
+            </div>
+          );
+        case 'actions': {
+          const rowIndex = sortedItems.findIndex((item) => item.id === testCase.id);
+          const canMoveUp = canReorder && rowIndex > 0;
+          const canMoveDown = canReorder && rowIndex >= 0 && rowIndex < sortedItems.length - 1;
+
+          return (
+            <div className="flex items-center justify-end gap-1">
+              <Button
+                isIconOnly
+                radius="full"
+                size="sm"
+                variant="light"
+                isDisabled={!canMoveUp}
+                aria-label={`${messages.moveCaseUp}: ${testCase.title}`}
+                title={`${messages.moveCaseUp}: ${testCase.title}`}
+                onPress={() => void handleMoveCase(testCase.id, 'up')}
+              >
+                <ChevronUp size={16} aria-hidden="true" />
+              </Button>
+              <Button
+                isIconOnly
+                radius="full"
+                size="sm"
+                variant="light"
+                isDisabled={!canMoveDown}
+                aria-label={`${messages.moveCaseDown}: ${testCase.title}`}
+                title={`${messages.moveCaseDown}: ${testCase.title}`}
+                onPress={() => void handleMoveCase(testCase.id, 'down')}
+              >
+                <ChevronDown size={16} aria-hidden="true" />
+              </Button>
+              <Dropdown>
+                <DropdownTrigger>
+                  <Button
+                    isIconOnly
+                    radius="full"
+                    size="sm"
+                    variant="light"
+                    aria-label={messages.testCaseActions}
+                    title={messages.testCaseActions}
+                  >
+                    <MoreVertical size={16} aria-hidden="true" />
+                  </Button>
+                </DropdownTrigger>
+                <DropdownMenu aria-label={messages.testCaseActions}>
+                  <DropdownItem
+                    key="delete-case"
+                    className="text-danger"
+                    isDisabled={isDisabled}
+                    onPress={() => handleDeleteCase(testCase.id)}
+                  >
+                    {messages.deleteCase}
+                  </DropdownItem>
+                </DropdownMenu>
+              </Dropdown>
+            </div>
+          );
+        }
+        default:
+          return cellValue as string;
+      }
+    },
+    [
+      activeSearchFilter,
+      canReorder,
+      handleDeleteCase,
+      handleMoveCase,
+      isDisabled,
+      locale,
+      messages,
+      priorityMessages,
+      projectId,
+      sortedItems,
+    ]
+  );
 
   useEffect(() => {
     return onMoveEvent(() => {
       handleDragEnd();
     });
   }, [handleDragEnd]);
+
+  const reorderMessage = reorderError
+    ? messages.reorderSaveError
+    : isReordering
+      ? messages.reorderSaving
+      : isDisabled
+        ? messages.reorderDisabledPermission
+        : isFiltered
+          ? messages.reorderDisabledFiltered
+          : !isCanonicalView
+            ? messages.reorderDisabledSort
+            : messages.reorderGuidance;
 
   return (
     <>
@@ -359,7 +466,7 @@ export default function TestCaseTable({
           <div className="flex items-center">
             {((selectedKeys !== 'all' && selectedKeys.size > 0) || selectedKeys === 'all') && (
               <Button
-                startContent={<Trash size={16} />}
+                startContent={<Trash size={16} aria-hidden="true" />}
                 size="sm"
                 variant="bordered"
                 isDisabled={isDisabled}
@@ -380,8 +487,8 @@ export default function TestCaseTable({
               >
                 <PopoverTrigger>
                   <Button
-                    startContent={<Filter size={16} />}
-                    endContent={<ChevronDown size={16} />}
+                    startContent={<Filter size={16} aria-hidden="true" />}
+                    endContent={<ChevronDown size={16} aria-hidden="true" />}
                     size="sm"
                     variant="bordered"
                     className="me-2"
@@ -413,19 +520,23 @@ export default function TestCaseTable({
                   size="sm"
                   variant="bordered"
                   className="me-2"
-                  startContent={<FileDown size={16} />}
-                  endContent={<ChevronDown size={16} />}
+                  startContent={<FileDown size={16} aria-hidden="true" />}
+                  endContent={<ChevronDown size={16} aria-hidden="true" />}
                 >
                   {messages.export}
                 </Button>
               </DropdownTrigger>
               <DropdownMenu aria-label={messages.exportOptions}>
-                <DropdownItem key="json" startContent={<FileJson size={16} />} onPress={() => onExportCases('json')}>
+                <DropdownItem
+                  key="json"
+                  startContent={<FileJson size={16} aria-hidden="true" />}
+                  onPress={() => onExportCases('json')}
+                >
                   json
                 </DropdownItem>
                 <DropdownItem
                   key="csv"
-                  startContent={<FileSpreadsheet size={16} />}
+                  startContent={<FileSpreadsheet size={16} aria-hidden="true" />}
                   onPress={() => onExportCases('csv')}
                 >
                   csv
@@ -433,7 +544,7 @@ export default function TestCaseTable({
               </DropdownMenu>
             </Dropdown>
             <Button
-              startContent={<FileUp size={16} />}
+              startContent={<FileUp size={16} aria-hidden="true" />}
               size="sm"
               variant="bordered"
               className="me-2"
@@ -442,7 +553,7 @@ export default function TestCaseTable({
               {messages.import}
             </Button>
             <Button
-              startContent={<Plus size={16} />}
+              startContent={<Plus size={16} aria-hidden="true" />}
               size="sm"
               isDisabled={isDisabled}
               color="primary"
@@ -455,18 +566,15 @@ export default function TestCaseTable({
       </div>
 
       <div aria-busy={isReordering}>
-        {(isReordering || reorderError) && (
-          <div
-            className={`px-3 py-2 text-sm ${reorderError ? 'text-danger' : 'text-default-500'}`}
-            role={reorderError ? 'alert' : 'status'}
-            aria-live="polite"
-          >
-            {reorderError
-              ? 'Unable to save case order. The last server-confirmed order was restored.'
-              : 'Saving case order…'}
-          </div>
-        )}
-        <table className={heroUITableClasses.table()}>
+        <div
+          id="case-reorder-guidance"
+          className={`px-3 py-2 text-sm ${reorderError ? 'text-danger' : 'text-default-500'}`}
+          role={reorderError ? 'alert' : isReordering ? 'status' : undefined}
+          aria-live={reorderError || isReordering ? 'polite' : undefined}
+        >
+          {reorderMessage}
+        </div>
+        <table aria-describedby="case-reorder-guidance" className={heroUITableClasses.table()}>
           <thead className={heroUITableClasses.thead()}>
             <tr className={heroUITableClasses.tr()}>
               <th className={`${heroUITableClasses.th()} ${thClassNames}`}>
@@ -483,7 +591,11 @@ export default function TestCaseTable({
                     {column.name}
                     {column.sortable && sortDescriptor.column === column.uid && (
                       <>
-                        {sortDescriptor.direction === 'ascending' ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        {sortDescriptor.direction === 'ascending' ? (
+                          <ChevronUp size={14} aria-hidden="true" />
+                        ) : (
+                          <ChevronDown size={14} aria-hidden="true" />
+                        )}
                       </>
                     )}
                   </div>

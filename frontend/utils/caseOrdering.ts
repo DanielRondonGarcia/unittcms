@@ -118,9 +118,6 @@ function canonicalRows<T extends CaseOrderRow>(rows: readonly T[]): T[] | null {
   if (ids.some((id) => id === undefined) || positions.some((position) => position === undefined)) return null;
   if (new Set(ids).size !== ids.length || new Set(positions).size !== positions.length) return null;
 
-  const sortedPositions = positions.slice().sort((left, right) => (left as number) - (right as number));
-  if (!sortedPositions.every((position, index) => position === index + 1)) return null;
-
   return sortCasesByPosition(rows);
 }
 

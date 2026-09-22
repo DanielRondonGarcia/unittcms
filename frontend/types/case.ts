@@ -103,6 +103,14 @@ type CasesMessages = {
   type: string;
   selectTypes: string;
   casesSelected: string;
+  reorderGuidance: string;
+  reorderDisabledFiltered: string;
+  reorderDisabledSort: string;
+  reorderDisabledPermission: string;
+  reorderSaving: string;
+  reorderSaveError: string;
+  moveCaseUp: string;
+  moveCaseDown: string;
   selectAction: string;
   move: string;
   clone: string;

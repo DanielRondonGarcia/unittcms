@@ -49,6 +49,38 @@ describe('case ordering helpers', () => {
     expect(computeCaseDragPermutation(rows([1, 2, 3, 10, 4]), 10, 3, canonicalView)).toEqual([1, 2, 10, 3, 4]);
   });
 
+  it('accepts sparse positive positions and returns a complete permutation', () => {
+    expect(computeCaseDragPermutation(rows([1, 18], [1, 18]), 18, 1, canonicalView)).toEqual([18, 1]);
+  });
+
+  it('rejects duplicate positions', () => {
+    expect(
+      computeCaseDragPermutation(
+        [
+          { id: 1, position: 1 },
+          { id: 18, position: 1 },
+        ],
+        18,
+        1,
+        canonicalView
+      )
+    ).toBeNull();
+  });
+
+  it.each([Number.NaN, 0, -1])('rejects invalid or non-positive positions: %s', (position) => {
+    expect(
+      computeCaseDragPermutation(
+        [
+          { id: 1, position: 1 },
+          { id: 18, position },
+        ],
+        18,
+        1,
+        canonicalView
+      )
+    ).toBeNull();
+  });
+
   it('keeps multiple selected rows together in canonical order', () => {
     expect(
       computeCaseDragPermutation(rows([1, 2, 3, 4, 5, 6]), 4, 6, {
@@ -58,7 +90,7 @@ describe('case ordering helpers', () => {
     ).toEqual([1, 3, 5, 2, 4, 6]);
   });
 
-  it('refuses filtered, alternate-sort, and incomplete views', () => {
+  it('refuses filtered, alternate-sort, and missing-position views', () => {
     const completeRows = rows([1, 2, 3, 10]);
     expect(computeCaseDragPermutation(completeRows, 10, 2, { ...canonicalView, isFiltered: true })).toBeNull();
     expect(
@@ -66,7 +98,7 @@ describe('case ordering helpers', () => {
         sortDescriptor: { column: 'id', direction: 'ascending' },
       })
     ).toBeNull();
-    expect(computeCaseDragPermutation(rows([1, 3], [1, 3]), 3, 1, canonicalView)).toBeNull();
+    expect(computeCaseDragPermutation([{ id: 1, position: 1 }, { id: 3 }], 3, 1, canonicalView)).toBeNull();
   });
 
   it('returns no result for invalid ids, duplicate rows, or unchanged drops', () => {

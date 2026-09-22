@@ -17,12 +17,16 @@ vi.mock('@heroui/react', () => {
       children,
       onPress,
       isDisabled,
+      'aria-label': ariaLabel,
+      title,
     }: {
       children?: React.ReactNode;
       onPress?: () => void;
       isDisabled?: boolean;
+      'aria-label'?: string;
+      title?: string;
     }) => (
-      <button disabled={isDisabled} onClick={onPress}>
+      <button aria-label={ariaLabel} disabled={isDisabled} onClick={onPress} title={title}>
         {children}
       </button>
     ),
@@ -69,6 +73,7 @@ vi.mock('lucide-react', () => {
     Filter: Icon,
     FileJson: Icon,
     FileSpreadsheet: Icon,
+    GripVertical: Icon,
   };
 });
 
@@ -107,6 +112,14 @@ const messages = {
   type: 'Type',
   selectTypes: 'Select types',
   casesSelected: 'cases selected',
+  reorderGuidance: 'Drag the handle to reorder cases, or use the move buttons.',
+  reorderDisabledFiltered: 'Clear all filters to reorder cases.',
+  reorderDisabledSort: 'Sort by position to reorder cases.',
+  reorderDisabledPermission: 'You need edit permission to reorder cases.',
+  reorderSaving: 'Saving case order…',
+  reorderSaveError: 'Unable to save case order. The last server-confirmed order was restored.',
+  moveCaseUp: 'Move case up',
+  moveCaseDown: 'Move case down',
   selectAction: 'Select action',
   move: 'Move',
   clone: 'Clone',
@@ -157,7 +170,8 @@ function testCase(id: number, position: number, title = `Case ${id}`) {
 
 function renderTable(
   cases = [testCase(1, 1), testCase(2, 2), testCase(3, 3), testCase(4, 4)],
-  activeSearchFilter = ''
+  activeSearchFilter = '',
+  isDisabled = false
 ) {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -167,7 +181,7 @@ function renderTable(
       <TestCaseTable
         projectId="10"
         folderId={3}
-        isDisabled={false}
+        isDisabled={isDisabled}
         cases={cases}
         onCreateCase={vi.fn()}
         onDeleteCase={vi.fn()}
@@ -260,11 +274,87 @@ describe('TestCaseTable ordering', () => {
     expect(mocks.reorderCases).toHaveBeenCalledWith(3, [3, 2, 10, 4]);
   });
 
+  it('shows the reorder affordance and submits complete permutations from row actions', async () => {
+    const { container, root } = renderTable();
+    roots.push(root);
+    await act(async () => Promise.resolve());
+
+    expect(container.textContent).toContain(messages.reorderGuidance);
+    expect(dragRows(container)[0].querySelector('[aria-hidden="true"]')).not.toBeNull();
+
+    const moveUpCaseOne = container.querySelector<HTMLButtonElement>(
+      `button[aria-label="${messages.moveCaseUp}: Case 1"]`
+    );
+    const moveDownCaseTwo = container.querySelector<HTMLButtonElement>(
+      `button[aria-label="${messages.moveCaseDown}: Case 2"]`
+    );
+    const moveUpCaseThree = container.querySelector<HTMLButtonElement>(
+      `button[aria-label="${messages.moveCaseUp}: Case 3"]`
+    );
+    const moveDownCaseFour = container.querySelector<HTMLButtonElement>(
+      `button[aria-label="${messages.moveCaseDown}: Case 4"]`
+    );
+
+    expect(moveUpCaseOne?.disabled).toBe(true);
+    expect(moveDownCaseTwo?.disabled).toBe(false);
+    expect(moveUpCaseThree?.disabled).toBe(false);
+    expect(moveDownCaseFour?.disabled).toBe(true);
+
+    await act(async () => {
+      moveUpCaseThree?.click();
+      await Promise.resolve();
+    });
+
+    expect(mocks.reorderCases).toHaveBeenCalledWith(3, [1, 3, 2, 4]);
+    mocks.reorderCases.mockClear();
+
+    await act(async () => {
+      moveDownCaseTwo?.click();
+      await Promise.resolve();
+    });
+
+    expect(mocks.reorderCases).toHaveBeenCalledWith(3, [1, 3, 2, 4]);
+  });
+
+  it('explains the saving state and disables row actions while the order is pending', async () => {
+    let resolveReorder!: (saved: boolean) => void;
+    mocks.reorderCases.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveReorder = resolve;
+      })
+    );
+    const { container, root } = renderTable();
+    roots.push(root);
+    await act(async () => Promise.resolve());
+
+    const moveDownCaseTwo = container.querySelector<HTMLButtonElement>(
+      `button[aria-label="${messages.moveCaseDown}: Case 2"]`
+    );
+    await act(async () => {
+      moveDownCaseTwo?.click();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain(messages.reorderSaving);
+    expect(moveDownCaseTwo?.disabled).toBe(true);
+
+    await act(async () => {
+      resolveReorder(true);
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain(messages.reorderGuidance);
+  });
+
   it('refuses dragging in filtered and alternate-column views', async () => {
     const filtered = renderTable(undefined, 'login');
     roots.push(filtered.root);
     await act(async () => Promise.resolve());
     expect(dragRows(filtered.container)[0].getAttribute('draggable')).toBe('false');
+    expect(filtered.container.textContent).toContain(messages.reorderDisabledFiltered);
+    expect(
+      filtered.container.querySelector<HTMLButtonElement>(`button[aria-label="${messages.moveCaseDown}: Case 1"]`)
+        ?.disabled
+    ).toBe(true);
 
     await act(async () => filtered.root.unmount());
     roots.splice(roots.indexOf(filtered.root), 1);
@@ -278,7 +368,20 @@ describe('TestCaseTable ordering', () => {
     );
     await act(async () => idHeader?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(dragRows(alternate.container)[0].getAttribute('draggable')).toBe('false');
+    expect(alternate.container.textContent).toContain(messages.reorderDisabledSort);
     expect(mocks.reorderCases).not.toHaveBeenCalled();
+  });
+
+  it('explains unauthorized reorder state and keeps row actions disabled', async () => {
+    const { container, root } = renderTable(undefined, '', true);
+    roots.push(root);
+    await act(async () => Promise.resolve());
+
+    expect(container.textContent).toContain(messages.reorderDisabledPermission);
+    expect(dragRows(container)[0].getAttribute('draggable')).toBe('false');
+    expect(
+      container.querySelector<HTMLButtonElement>(`button[aria-label="${messages.moveCaseDown}: Case 1"]`)?.disabled
+    ).toBe(true);
   });
 
   it('keeps the server-confirmed order visible and exposes a rollback state after failure', async () => {
