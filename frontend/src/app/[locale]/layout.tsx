@@ -53,14 +53,14 @@ export default function RootLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <head />
-      <body className={clsx('min-h-[calc(100vh-64px)] bg-background font-sans antialiased', fontSans.variable)}>
+      <body className={clsx('min-h-screen bg-background font-sans antialiased', fontSans.variable)}>
         <Providers
           themeProps={{ attribute: 'class', defaultTheme: 'light' }}
           tokenProps={{ toastMessages: toastMessages, locale: locale }}
         >
           <div className="relative flex flex-col min-h-screen light:bg-neutral-50 dark:bg-background">
             <Header locale={locale} />
-            <main>{children}</main>
+            <main className="flex flex-1 min-h-0 flex-col">{children}</main>
           </div>
         </Providers>
       </body>
