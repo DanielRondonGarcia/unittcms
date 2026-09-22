@@ -21,6 +21,9 @@ type Props = {
   locale: string;
 };
 
+const MIN_TREE_HEIGHT = 192;
+const MIN_VALID_TREE_HEIGHT = 2;
+
 export default function FoldersPane({ projectId, messages, locale }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -32,14 +35,17 @@ export default function FoldersPane({ projectId, messages, locale }: Props) {
   const [editingFolder, setEditingFolder] = useState<FolderType | null>(null);
   const [parentFolderId, setParentFolderId] = useState<number | null>(null);
   const treeContainerRef = useRef<HTMLDivElement>(null);
-  const [treeSize, setTreeSize] = useState({ width: 0, height: 0 });
+  const [treeSize, setTreeSize] = useState({ width: 0, height: MIN_TREE_HEIGHT });
 
   useEffect(() => {
     const container = treeContainerRef.current;
     if (!container) return;
 
     const updateTreeSize = () => {
-      setTreeSize({ width: container.clientWidth, height: container.clientHeight });
+      const measuredHeight = container.clientHeight;
+      if (measuredHeight < MIN_VALID_TREE_HEIGHT) return;
+
+      setTreeSize({ width: container.clientWidth, height: measuredHeight });
     };
 
     updateTreeSize();
@@ -163,11 +169,11 @@ export default function FoldersPane({ projectId, messages, locale }: Props) {
         </Button>
 
         {treeData.length > 0 && (
-          <div ref={treeContainerRef} className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div ref={treeContainerRef} className="min-h-48 min-w-0 flex-1 overflow-hidden">
             <Tree
               data={treeData}
               className="h-full w-full"
-              height={Math.max(treeSize.height, 1)}
+              height={treeSize.height}
               width={treeSize.width || '100%'}
               indent={16}
               rowHeight={42}
