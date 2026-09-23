@@ -36,6 +36,7 @@ QA shows the cases list working while the folder column is blank or contains cli
 
 - [x] TREE-001 Make tree sizing resilient to zero/initial measurements.
 - [x] TREE-002 Run focused frontend checks, rebuild local Docker, and record the result.
+- [x] TREE-003 Re-measure after the flex layout settles so the tree uses the full available pane height.
 
 ## Acceptance criteria
 
@@ -62,6 +63,9 @@ QA shows the cases list working while the folder column is blank or contains cli
 - TREE-001 implemented in `frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx`: the tree now starts at the named `MIN_TREE_HEIGHT` fallback of 192px, ignores measurements below `MIN_VALID_TREE_HEIGHT` (2px), preserves positive `ResizeObserver` updates, and uses Tailwind `min-h-48` to keep the container from collapsing while the flex chain settles.
 - The requested focused checks passed; independent verification found no blocking source issue.
 - TREE-002 completed: the local image was rebuilt, Docker Compose recreated `unittcms` and Redis, both services are healthy, and the health endpoint returned HTTP 200.
+- QA follow-up shows the outer container at about 712px while the Tree still has inline height 192px; TREE-003 is the targeted correction so the fallback cannot remain a visible cap.
+- TREE-003 implemented in `frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx`: measurement now uses `ResizeObserverEntry.contentRect` with `getBoundingClientRect` fallback, runs in `useLayoutEffect`, remeasures on the next animation frame and after a bounded 100ms timer, and cleans up all observer/frame/timer resources.
+- Parent local validation completed after TREE-003: the image was rebuilt, `unittcms` was recreated, and the health endpoint returned HTTP 200.
 
 ## Verification evidence
 
@@ -75,7 +79,13 @@ QA shows the cases list working while the folder column is blank or contains cli
 - `docker compose build`: completed successfully; the bounded build reached image export before the client timeout, and the resulting image was confirmed and started.
 - `docker compose up -d`: completed; `unittcms` and `redis` are healthy.
 - `GET http://localhost:8000/api/health/`: HTTP 200 with `{"status":"ok"}`.
+- QA evidence addressed: the prior approximately 712px container height is now eligible to replace the 192px fallback after layout settlement; zero/near-zero geometry remains ignored.
+- TREE-003 checks: `npx tsc --noEmit -p frontend/tsconfig.json`: passed, exit code 0, no output.
+- TREE-003 checks: `npx eslint "frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx"`: passed, exit code 0, no output.
+- TREE-003 checks: `npx prettier --check "frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx"`: passed, output `All matched files use Prettier code style!`.
+- TREE-003 checks: `git diff --check`: passed, exit code 0; Git emitted the LF-to-CRLF normalization warning for the changed files.
+- TREE-003 local runtime: `docker compose build` completed, `docker compose up -d` recreated `unittcms`, both `unittcms` and Redis are healthy, and `GET http://localhost:8000/api/health/` returned HTTP 200 with `{"status":"ok"}`.
 
 ## Next step
 
-Work unit complete. Authenticated QA/browser confirmation remains pending; refresh the folder cases page to verify the tree rows are visible.
+Work unit complete. Refresh the authenticated QA page after deployment to verify the `role=tree` inline height follows the full available folder-pane height; browser/QA confirmation remains pending.

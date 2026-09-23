@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useContext, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useContext, useRef } from 'react';
 import { Button } from '@heroui/react';
 import { Plus } from 'lucide-react';
 import { Tree } from 'react-arborist';
@@ -37,23 +37,51 @@ export default function FoldersPane({ projectId, messages, locale }: Props) {
   const treeContainerRef = useRef<HTMLDivElement>(null);
   const [treeSize, setTreeSize] = useState({ width: 0, height: MIN_TREE_HEIGHT });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = treeContainerRef.current;
     if (!container) return;
 
-    const updateTreeSize = () => {
-      const measuredHeight = container.clientHeight;
+    let isActive = true;
+    let animationFrameId: number | null = null;
+    let remeasureTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const updateTreeSize = (entry?: ResizeObserverEntry) => {
+      if (!isActive) return;
+
+      const bounds = container.getBoundingClientRect();
+      const measuredRect = entry?.contentRect;
+      const measuredWidth = measuredRect && measuredRect.width > 0 ? measuredRect.width : bounds.width;
+      const measuredHeight =
+        measuredRect && measuredRect.height >= MIN_VALID_TREE_HEIGHT ? measuredRect.height : bounds.height;
       if (measuredHeight < MIN_VALID_TREE_HEIGHT) return;
 
-      setTreeSize({ width: container.clientWidth, height: measuredHeight });
+      setTreeSize({ width: measuredWidth, height: measuredHeight });
     };
 
     updateTreeSize();
-    if (typeof ResizeObserver === 'undefined') return;
 
-    const observer = new ResizeObserver(updateTreeSize);
-    observer.observe(container);
-    return () => observer.disconnect();
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(([entry]) => updateTreeSize(entry));
+    observer?.observe(container);
+
+    if (typeof requestAnimationFrame !== 'undefined') {
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = null;
+        updateTreeSize();
+      });
+    }
+
+    remeasureTimer = setTimeout(() => {
+      remeasureTimer = null;
+      updateTreeSize();
+    }, 100);
+
+    return () => {
+      isActive = false;
+      observer?.disconnect();
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+      if (remeasureTimer !== null) clearTimeout(remeasureTimer);
+    };
   }, [treeData.length]);
 
   useEffect(() => {
