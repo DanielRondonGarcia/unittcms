@@ -16,7 +16,7 @@ QA shows the cases list working while the folder column is blank or contains cli
 
 - Add a non-zero, conservative initial tree height and preserve later measured dimensions.
 - Ignore transient zero measurements instead of replacing a usable fallback with `1px`.
-- Keep the existing project layout, folder data contract, drag/drop move events, and folder CRUD behavior unchanged.
+- Keep the existing project routing, pane structure, folder data contract, drag/drop move events, and folder CRUD behavior unchanged; only extend the project workspace wrapper's flex participation when required to propagate available height.
 - Add focused pure coverage if the sizing fallback is extracted; otherwise run changed-file checks and local container validation.
 
 ## Constraints
@@ -29,6 +29,7 @@ QA shows the cases list working while the folder column is blank or contains cli
 ## Authorized scope
 
 - `frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx`
+- `frontend/src/app/[locale]/projects/[projectId]/layout.tsx` (only the workspace wrapper height propagation)
 - Focused folder-tree tests if needed.
 - `odd/tasks/folders-tree-visibility.md` and its Engram mirror.
 
@@ -37,13 +38,14 @@ QA shows the cases list working while the folder column is blank or contains cli
 - [x] TREE-001 Make tree sizing resilient to zero/initial measurements.
 - [x] TREE-002 Run focused frontend checks, rebuild local Docker, and record the result.
 - [x] TREE-003 Re-measure after the flex layout settles so the tree uses the full available pane height.
+- [x] TREE-004 Make the project workspace wrapper participate in the main flex height so the folder pane receives the full available height.
 
 ## Acceptance criteria
 
 - Existing folder rows render when the tree container is temporarily measured at zero.
 - A later positive `ResizeObserver` measurement updates the tree dimensions.
 - The tree is not intentionally rendered at `1px` as a fallback.
-- Cases, folder CRUD, move events, and project layout behavior remain unchanged.
+- Cases, folder CRUD, move events, and project routing/pane structure remain unchanged.
 - Local health and changed-file checks pass.
 
 ## Checks
@@ -66,15 +68,17 @@ QA shows the cases list working while the folder column is blank or contains cli
 - QA follow-up shows the outer container at about 712px while the Tree still has inline height 192px; TREE-003 is the targeted correction so the fallback cannot remain a visible cap.
 - TREE-003 implemented in `frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx`: measurement now uses `ResizeObserverEntry.contentRect` with `getBoundingClientRect` fallback, runs in `useLayoutEffect`, remeasures on the next animation frame and after a bounded 100ms timer, and cleans up all observer/frame/timer resources.
 - Parent local validation completed after TREE-003: the image was rebuilt, `unittcms` was recreated, and the health endpoint returned HTTP 200.
+- Local authenticated browser inspection at 1920x889 found `main` at 825px high but the project workspace wrapper at only 338px, with the folder tree still at the 192px fallback. The wrapper was not a flex-growing child of `main`; TREE-004 targets that parent-chain defect.
+- Browser DOM probing confirmed that adding `flex-1` to the project workspace root alone was insufficient: the nested row wrapper's `h-full` percentage height resolved to its 240px intrinsic content height. Removing that `h-full` lets the default flex cross-axis stretch provide 824px, after which the folder pane and tree expand to 776px.
 
 ## Verification evidence
 
-- Changed file: `frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx`
+- Changed files: `frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx`, `frontend/src/app/[locale]/projects/[projectId]/layout.tsx`
 - `npx tsc --noEmit -p frontend/tsconfig.json`: passed, exit code 0, no output.
 - `npx eslint "frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx"`: passed, exit code 0, no output.
 - `npx prettier --check "frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx"`: passed, output `All matched files use Prettier code style!`.
 - `git diff --check`: passed, exit code 0; Git emitted the line-ending warning that LF will be replaced by CRLF the next time it touches the file.
-- No Docker, browser, backend, MCP, API, CRUD, move-event, or case-reorder behavior was changed or exercised in this writer task.
+- The TREE-001/TREE-003 writer task did not change or exercise Docker, browser, backend, MCP, API, CRUD, move-event, or case-reorder behavior.
 - Independent read-only verification: pass; the responsive pane contract, folder API/CRUD/move behavior, and scope were preserved.
 - `docker compose build`: completed successfully; the bounded build reached image export before the client timeout, and the resulting image was confirmed and started.
 - `docker compose up -d`: completed; `unittcms` and `redis` are healthy.
@@ -85,7 +89,13 @@ QA shows the cases list working while the folder column is blank or contains cli
 - TREE-003 checks: `npx prettier --check "frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx"`: passed, output `All matched files use Prettier code style!`.
 - TREE-003 checks: `git diff --check`: passed, exit code 0; Git emitted the LF-to-CRLF normalization warning for the changed files.
 - TREE-003 local runtime: `docker compose build` completed, `docker compose up -d` recreated `unittcms`, both `unittcms` and Redis are healthy, and `GET http://localhost:8000/api/health/` returned HTTP 200 with `{"status":"ok"}`.
+- TREE-004 checks: `npx tsc --noEmit -p frontend/tsconfig.json` passed with exit code 0 and no output.
+- TREE-004 checks: `npx eslint "frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx" "frontend/src/app/[locale]/projects/[projectId]/layout.tsx"` passed with exit code 0 and no output.
+- TREE-004 checks: `npx prettier --check "frontend/src/app/[locale]/projects/[projectId]/folders/FoldersPane.tsx" "frontend/src/app/[locale]/projects/[projectId]/layout.tsx" "odd/tasks/folders-tree-visibility.md"` passed; all matched files use Prettier code style.
+- TREE-004 checks: `git diff --check` passed; Git reported only the existing LF-to-CRLF normalization warning.
+- TREE-004 local runtime: `docker compose build` completed successfully, `docker compose up -d` recreated `unittcms`, and `GET http://localhost:8000/api/health/` returned `{"status":"ok"}`.
+- TREE-004 browser verification: authenticated local page at 1920x889 measured `main` at 825px, the project workspace at 825px, the nested workspace wrapper at 824px, the resizable pane at 824px, and `[role="tree"]` at 776px instead of the previous 338px/240px/192px chain.
 
 ## Next step
 
-Work unit complete. Refresh the authenticated QA page after deployment to verify the `role=tree` inline height follows the full available folder-pane height; browser/QA confirmation remains pending.
+TREE-004 is complete locally. QA confirmation after deploying this uncommitted fix remains pending; do not generate a new release until the user requests it.
